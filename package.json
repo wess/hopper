@@ -1,6 +1,6 @@
 {
   "name": "hopper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "module": "src/host/index.ts",
   "type": "module",
   "private": true,
@@ -35,7 +35,9 @@
     "dev": "butter dev",
     "build": "butter compile",
     "bundle": "butter bundle",
+    "sign": "butter sign",
     "package": "butter package",
+    "release:local": "bun run build && bun run bundle && bun run sign && bun run package",
     "mcp": "bun src/mcp.ts",
     "check": "bunx biome check src",
     "tidy": "bunx biome check --write src",

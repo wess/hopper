@@ -5,6 +5,7 @@ window:
   minWidth: 920
   minHeight: 560
   material: none
+  icon: assets/icon.icns
 
 build:
   entry: src/app/index.html
@@ -13,3 +14,21 @@ build:
 bundle:
   identifier: io.wess.hopper
   category: public.app-category.developer-tools
+  minimumSystemVersion: "11.0"
+
+  # macOS code-signing + notarization. Values are resolved from environment
+  # variables when present (see {VAR} placeholders) — empty results mean
+  # "skip that step." Locally this stays unsigned/ad-hoc; CI fills these in
+  # from GitHub Actions secrets so the release artifact is fully notarized.
+  macos:
+    signingIdentity: "{APPLE_SIGNING_IDENTITY}"
+    appleId: "{APPLE_ID}"
+    teamId: "{APPLE_TEAM_ID}"
+    appleIdPassword: "{APPLE_APP_PASSWORD}"
+    notarize: true
+    # JIT entitlements are auto-generated when hardenedRuntime is on.
+    # Bun's JavaScriptCore needs them; without them a notarized build
+    # crashes the first time the JIT compiles a function.
+    allowJit: true
+    dmg:
+      volumeName: "Hopper"
