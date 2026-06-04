@@ -1,0 +1,12 @@
+{
+  "name": "@basket/dialog",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": { "import": "./index.ts" }
+  },
+  "peerDependencies": {
+    "butter": "*",
+    "typescript": "^5"
+  }
+}

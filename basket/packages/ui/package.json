@@ -1,0 +1,19 @@
+{
+  "name": "@basket/ui",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": { "import": "./index.ts" },
+    "./provider": { "import": "./provider/index.tsx" },
+    "./titlebar": { "import": "./titlebar/index.tsx" },
+    "./sidebar": { "import": "./sidebar/index.tsx" },
+    "./palette": { "import": "./palette/index.tsx" },
+    "./toast": { "import": "./toast/index.tsx" }
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "lucide-react": "^0.460.0",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "name": "hopper",
+  "version": "0.1.0",
+  "module": "src/host/index.ts",
+  "type": "module",
+  "private": true,
+  "workspaces": [
+    "basket/packages/*"
+  ],
+  "dependencies": {
+    "@basket/config": "workspace:*",
+    "@basket/dialog": "workspace:*",
+    "@basket/ipc": "workspace:*",
+    "@basket/mcp": "workspace:*",
+    "@basket/menu": "workspace:*",
+    "@basket/store": "workspace:*",
+    "@basket/tray": "workspace:*",
+    "@basket/ui": "workspace:*",
+    "@basket/window": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "butter": "file:./butter",
+    "lucide-react": "^0.460.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.10",
+    "@types/bun": "latest",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5"
+  },
+  "scripts": {
+    "dev": "butter dev",
+    "build": "butter compile",
+    "bundle": "butter bundle",
+    "package": "butter package",
+    "mcp": "bun src/mcp.ts",
+    "check": "bunx biome check src",
+    "tidy": "bunx biome check --write src",
+    "typecheck": "bunx tsc --noEmit"
+  }
+}

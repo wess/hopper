@@ -1,0 +1,13 @@
+{
+  "name": "@basket/db",
+  "version": "0.0.1",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./index.ts"
+    }
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

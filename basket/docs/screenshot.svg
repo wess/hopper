@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 720" width="1100" height="720" font-family="-apple-system, 'SF Pro Text', 'Segoe UI', sans-serif">
+  <defs>
+    <linearGradient id="winBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1a1c"/>
+      <stop offset="1" stop-color="#141416"/>
+    </linearGradient>
+    <linearGradient id="titlebarBg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2a2d"/>
+      <stop offset="1" stop-color="#222225"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#000" flood-opacity="0.4"/>
+    </filter>
+    <clipPath id="winClip">
+      <rect x="20" y="20" width="1060" height="680" rx="12"/>
+    </clipPath>
+  </defs>
+
+  <!-- Backdrop -->
+  <rect width="1100" height="720" fill="#0a0a0c"/>
+
+  <!-- Window -->
+  <g filter="url(#shadow)">
+    <rect x="20" y="20" width="1060" height="680" rx="12" fill="url(#winBg)" stroke="#3a3a3d" stroke-width="1"/>
+  </g>
+
+  <g clip-path="url(#winClip)">
+    <!-- Titlebar -->
+    <rect x="20" y="20" width="1060" height="40" fill="url(#titlebarBg)"/>
+    <line x1="20" y1="60" x2="1080" y2="60" stroke="#0a0a0c" stroke-width="1"/>
+
+    <!-- Traffic lights -->
+    <circle cx="44" cy="40" r="6.5" fill="#ff5f57" stroke="#e2443c" stroke-width="0.5"/>
+    <circle cx="64" cy="40" r="6.5" fill="#febc2e" stroke="#dfa122" stroke-width="0.5"/>
+    <circle cx="84" cy="40" r="6.5" fill="#28c840" stroke="#1faa33" stroke-width="0.5"/>
+
+    <!-- Window title -->
+    <text x="550" y="46" text-anchor="middle" fill="#e8e8e8" font-size="13" font-weight="600">Notes</text>
+
+    <!-- Sidebar -->
+    <rect x="20" y="60" width="280" height="640" fill="#16161a"/>
+    <line x1="300" y1="60" x2="300" y2="700" stroke="#0a0a0c" stroke-width="1"/>
+
+    <!-- Sidebar header -->
+    <text x="40" y="100" fill="#888" font-size="11" font-weight="700" letter-spacing="1">NOTES</text>
+
+    <!-- Plus button -->
+    <rect x="252" y="86" width="28" height="22" rx="6" fill="url(#accent)"/>
+    <text x="266" y="102" text-anchor="middle" fill="#fff" font-size="16" font-weight="500">+</text>
+
+    <line x1="20" y1="122" x2="300" y2="122" stroke="#222227"/>
+
+    <!-- Note list item 1 (selected) -->
+    <rect x="20" y="122" width="280" height="64" fill="#1d2538"/>
+    <rect x="20" y="122" width="3" height="64" fill="#3b82f6"/>
+    <text x="40" y="146" fill="#f0f0f0" font-size="14" font-weight="600">📌 Q4 roadmap draft</text>
+    <text x="40" y="167" fill="#9098a3" font-size="12">Cut scope to: editor parity, sync, share l…</text>
+    <line x1="20" y1="186" x2="300" y2="186" stroke="#222227"/>
+
+    <!-- Note 2 -->
+    <text x="40" y="210" fill="#e8e8e8" font-size="14" font-weight="600">Stand-up notes 5/11</text>
+    <text x="40" y="231" fill="#7c8290" font-size="12">Blockers: keychain on Linux still flaky on…</text>
+    <line x1="20" y1="250" x2="300" y2="250" stroke="#222227"/>
+
+    <!-- Note 3 -->
+    <text x="40" y="274" fill="#e8e8e8" font-size="14" font-weight="600">Bun.serve TLS quirks</text>
+    <text x="40" y="295" fill="#7c8290" font-size="12">For the loopback OAuth listener — calling…</text>
+    <line x1="20" y1="314" x2="300" y2="314" stroke="#222227"/>
+
+    <!-- Note 4 -->
+    <text x="40" y="338" fill="#e8e8e8" font-size="14" font-weight="600">basket vs electron</text>
+    <text x="40" y="359" fill="#7c8290" font-size="12">~3 MB bundle, native webview, no chromiu…</text>
+    <line x1="20" y1="378" x2="300" y2="378" stroke="#222227"/>
+
+    <!-- Note 5 -->
+    <text x="40" y="402" fill="#e8e8e8" font-size="14" font-weight="600">App icon revisions</text>
+    <text x="40" y="423" fill="#7c8290" font-size="12">Try a more rounded basket weave; the v3 is t…</text>
+    <line x1="20" y1="442" x2="300" y2="442" stroke="#222227"/>
+
+    <!-- Note 6 -->
+    <text x="40" y="466" fill="#e8e8e8" font-size="14" font-weight="600">Schema diff edge case</text>
+    <text x="40" y="487" fill="#7c8290" font-size="12">SQLite ALTER doesn't support DROP COLU…</text>
+    <line x1="20" y1="506" x2="300" y2="506" stroke="#222227"/>
+
+    <!-- Note 7 -->
+    <text x="40" y="530" fill="#e8e8e8" font-size="14" font-weight="600">Onboarding flow</text>
+    <text x="40" y="551" fill="#7c8290" font-size="12">First-launch should auto-create paths and …</text>
+    <line x1="20" y1="570" x2="300" y2="570" stroke="#222227"/>
+
+    <!-- Note 8 -->
+    <text x="40" y="594" fill="#e8e8e8" font-size="14" font-weight="600">Notes for the README</text>
+    <text x="40" y="615" fill="#7c8290" font-size="12">Lead with the philosophy: composable, fu…</text>
+
+    <!-- Editor area -->
+    <!-- Editor title -->
+    <text x="332" y="118" fill="#f4f4f6" font-size="26" font-weight="600">Q4 roadmap draft</text>
+
+    <!-- Editor body -->
+    <g fill="#d4d6dc" font-size="15">
+      <text x="332" y="172">Cut scope to: editor parity, sync, share links. Everything else moves to Q1.</text>
+      <text x="332" y="200">Editor parity:</text>
+    </g>
+
+    <g fill="#bdc1ca" font-size="14">
+      <text x="352" y="228">• Markdown rendering matches Bear (headings, lists, code, tables)</text>
+      <text x="352" y="252">• Per-note word count + reading time in the footer</text>
+      <text x="352" y="276">• Slash-command palette for inserting blocks</text>
+    </g>
+
+    <text x="332" y="312" fill="#d4d6dc" font-size="15">Sync:</text>
+    <g fill="#bdc1ca" font-size="14">
+      <text x="352" y="340">• CRDT (Yjs) over a small relay; offline-first</text>
+      <text x="352" y="364">• Conflict resolution surfaces in the UI, not silent merges</text>
+      <text x="352" y="388">• Test fixture: 3 devices typing in the same note</text>
+    </g>
+
+    <text x="332" y="424" fill="#d4d6dc" font-size="15">Share links:</text>
+    <g fill="#bdc1ca" font-size="14">
+      <text x="352" y="452">• Read-only public URLs with a passphrase option</text>
+      <text x="352" y="476">• `share://&lt;id&gt;` deep-link opens the note locally if installed</text>
+    </g>
+
+    <text x="332" y="514" fill="#9fa5b0" font-size="14">Drop from this cycle: collaborative cursors, AI summarisation, embeds.</text>
+
+    <!-- Status / footer -->
+    <line x1="320" y1="660" x2="1080" y2="660" stroke="#222227"/>
+    <text x="332" y="682" fill="#7a7e88" font-size="12">Created May 4, 2026 • Updated 14 minutes ago</text>
+    <g transform="translate(990, 670)">
+      <circle cx="0" cy="0" r="3.5" fill="#10b981"/>
+      <text x="10" y="4" fill="#7a7e88" font-size="12">synced</text>
+    </g>
+  </g>
+</svg>

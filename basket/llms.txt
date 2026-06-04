@@ -1,0 +1,91 @@
+# Basket
+
+> Composable, functional Bun/TypeScript building blocks for desktop apps. Built on [butter](https://github.com/wess/butter). Minimal external runtime deps (`@modelcontextprotocol/sdk` for `@basket/mcp`, React for `@basket/ui`). Each package snaps together via shallow imports — pick what you need.
+
+Basket is structured as a Bun workspace under `packages/<name>`. Every package ships an `AGENTS.md` (≤ 200 lines) that documents the canonical public API, types, and a working snippet. **Read the per-package AGENTS.md before reading source.**
+
+If you are an AI session new to this codebase, start with [SOUL.md](SOUL.md) — it bootstraps your identity (Bun, TypeScript, butter, basket expert), reading order, hard conventions, and explicit "do not" list in one file.
+
+## Reading order
+
+1. [SOUL.md](SOUL.md) — identity + conventions + idiomatic patterns (read first if fresh).
+2. `docs/api.md` — condensed cross-package API lookup (one screen).
+3. `packages/<name>/AGENTS.md` — per-package canonical reference. Only load the packages you need.
+4. `docs/cookbook.md` — patterns/recipes that don't justify a package.
+5. `docs/quickstart.md` — full app walkthrough.
+6. `docs/overview.md` — architecture deep-dive (skip unless explicitly needed).
+
+## Per-package canonical references
+
+### Core
+- [packages/config/AGENTS.md](packages/config/AGENTS.md): typed env vars (`defineConfig`, `env`) + platform paths (`paths`, `ensurePaths`)
+- [packages/store/AGENTS.md](packages/store/AGENTS.md): local JSON key-value store with atomic writes (`createStore`, `memoryStore`)
+- [packages/ipc/AGENTS.md](packages/ipc/AGENTS.md): typed IPC channels + pipelines + structured errors (`defineChannel`, `handle`, `pipeline`, `validate`, `notFound`, …)
+- [packages/window/AGENTS.md](packages/window/AGENTS.md): multi-window management with persistence (`mainWindow`, `openWindow`)
+
+### Native shell
+- [packages/menu/AGENTS.md](packages/menu/AGENTS.md): declarative menus (`applyMenu`, `section`, `item`, `separator`, `onMenu`)
+- [packages/tray/AGENTS.md](packages/tray/AGENTS.md): system tray / menubar items (`createTray`)
+- [packages/dialog/AGENTS.md](packages/dialog/AGENTS.md): file/folder/message dialogs (`openFile`, `saveFile`, `confirm`, `alert`)
+- [packages/notify/AGENTS.md](packages/notify/AGENTS.md): OS notifications (`notify`)
+- [packages/shortcut/AGENTS.md](packages/shortcut/AGENTS.md): global keyboard shortcuts (`registerShortcut`)
+- [packages/protocol/AGENTS.md](packages/protocol/AGENTS.md): custom URL scheme / deep links (`onProtocol`, `parseDeepLink`)
+- [packages/lifecycle/AGENTS.md](packages/lifecycle/AGENTS.md): app lifecycle hooks (`onBeforeQuit`, `onActivate`, …)
+- [packages/singleton/AGENTS.md](packages/singleton/AGENTS.md): single-instance enforcement (`onSecondInstance`, `isLeader`)
+- [packages/autolaunch/AGENTS.md](packages/autolaunch/AGENTS.md): register the app to launch at login (`enable`, `disable`, `isEnabled`)
+- [packages/power/AGENTS.md](packages/power/AGENTS.md): power/screen/lock/idle events + display enumeration (`onSleep`, `onLock`, `idleSeconds`, `listScreens`)
+- [packages/sidecar/AGENTS.md](packages/sidecar/AGENTS.md): spawn bundled external executables (`spawn`, `listSidecars`)
+- [packages/theme/AGENTS.md](packages/theme/AGENTS.md): system theme detection + app manager (`createThemeManager`)
+
+### Data
+- [packages/db/AGENTS.md](packages/db/AGENTS.md): SQLite query builder, schemas, basic migrations (`connect`, `defineTable`, `from`, `migrate`)
+- [packages/migrate/AGENTS.md](packages/migrate/AGENTS.md): schema-diff (`diff`, `sync`) + versioned migrations (`run`, `rollback`, `status`)
+- [packages/fs/AGENTS.md](packages/fs/AGENTS.md): sandboxed FS helpers (`createScope`) + recents (`createRecents`)
+- [packages/cache/AGENTS.md](packages/cache/AGENTS.md): TTL'd in-memory + disk cache with cache-aside (`memoryCache`, `diskCache`)
+- [packages/logger/AGENTS.md](packages/logger/AGENTS.md): file-rotating logger (`createLogger`)
+
+### Network / Auth / AI
+- [packages/request/AGENTS.md](packages/request/AGENTS.md): HTTP client with retries + interceptors (`createClient`)
+- [packages/secrets/AGENTS.md](packages/secrets/AGENTS.md): OS keychain access (`createVault`, `setSecret`, `getSecret`)
+- [packages/auth/AGENTS.md](packages/auth/AGENTS.md): Argon2id passwords + OAuth 2.1 client with PKCE + keychain sessions
+- [packages/update/AGENTS.md](packages/update/AGENTS.md): manifest check + SHA-256-verified download (`check`, `download`)
+- [packages/ai/AGENTS.md](packages/ai/AGENTS.md): OpenAI / Anthropic / Ollama providers — chat + streaming + embeddings
+- [packages/mcp/AGENTS.md](packages/mcp/AGENTS.md): expose app tools/resources to AI clients via Model Context Protocol
+
+### UI / CLI
+- [packages/ui/AGENTS.md](packages/ui/AGENTS.md): React desktop primitives — provider, titlebar, sidebar, command palette, toast
+- [packages/cli/AGENTS.md](packages/cli/AGENTS.md): the `basket` CLI: `init`, `dev`, `build`, `bundle`, `add`, `docs`, `doctor`
+
+## Conventions
+
+- All filenames lowercase. **No** dashes, underscores, or spaces. Hierarchy via subdirectories: `src/<feature>/index.ts`, never `src/<feature>-name.ts`.
+- Functional style only — no `class`. Immutable data; transforms return new objects.
+- Bun-only runtime: `bun:sqlite`, `Bun.file`, `Bun.spawn`, `Bun.password`, `Bun.$`. No Node alternatives.
+- Butter is the desktop runtime. Wrap its primitives (`on`, `send`, `setMenu`, `createWindow`) — don't reinvent.
+- Path aliases in `tsconfig.json` resolve `@basket/*` to source during local dev.
+- Tests live in `packages/<name>/test/`. Run with `bun test`. Lint/format with `bun run check` / `bun run tidy` (Biome only — no Prettier or ESLint).
+
+## How to ground generation
+
+When asked to write code against basket:
+
+1. Identify which packages are involved (`@basket/db`, `@basket/auth`, etc.).
+2. Open *only* those packages' `AGENTS.md` files.
+3. Use schema-derived types: `defineTable` + `RowOf` for typed rows, `defineChannel<I,O>` for typed IPC.
+4. Default to butter's `on`/`send`/`createWindow` underneath — basket wraps, doesn't replace.
+5. Don't import `node:*` when a `Bun.*` API exists.
+
+## Examples
+
+- `example/notes/` — a working notes app (db, store, window, ipc, menu). `bun run dev`.
+- `templates/` — `minimal`, `menubar`. Use via `basket init <name> --template <t>`.
+
+## Do not
+
+- Don't add classes.
+- Don't mutate input data; return new objects.
+- Don't reach for external packages when a `Bun.*` or Web API exists.
+- Don't reinvent window/IPC/menu primitives — wrap butter.
+- Don't use `_`, `-`, or space in filenames.
+- Don't deep-import internals; use the documented exports / subpath exports.
+- Don't add backwards-compat shims; basket isn't on npm.

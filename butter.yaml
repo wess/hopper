@@ -1,0 +1,15 @@
+window:
+  title: "Hopper"
+  width: 1380
+  height: 880
+  minWidth: 920
+  minHeight: 560
+  material: none
+
+build:
+  entry: src/app/index.html
+  host: src/host/index.ts
+
+bundle:
+  identifier: io.wess.hopper
+  category: public.app-category.developer-tools
