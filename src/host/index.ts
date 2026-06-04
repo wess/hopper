@@ -3,7 +3,8 @@ import { defineConfig } from "@basket/config";
 import { emit, handle } from "@basket/ipc";
 import { applyMenu, onMenu } from "@basket/menu";
 import { createStore } from "@basket/store";
-import { mainWindow } from "@basket/window";
+import { mainWindow, setWindow } from "@basket/window";
+import { version } from "../../package.json";
 import * as ch from "../shared/channels.ts";
 import type { DockerEvent } from "../shared/types.ts";
 import * as build from "./docker/build.ts";
@@ -29,6 +30,11 @@ const win = mainWindow({
   store: settings,
   storeKey: "window",
 });
+
+// Show the app version in the title bar, e.g. "Hopper v0.1.2". Overrides any
+// restored title so it always reflects the running build. version is inlined
+// from package.json at compile time.
+setWindow({ title: `${config.app.name} v${version}` });
 
 applyMenu(menu);
 

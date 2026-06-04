@@ -123,47 +123,110 @@ await import("${hostPath}");
 export { runtime };
 `)
 
+  // Frame format MUST match the native shim: [len:u32 LE][flags:u32 LE][payload].
+  // A logical message may span frames; only the final one sets FLAG_LAST, and
+  // the reader reassembles. The previous version used a stale length-only header
+  // (no flags), so every frame from the shim was misread, JSON.parse threw, and
+  // the message was silently dropped — compiled apps' invokes never resolved.
   const ipcPreamble = `
 const SHM_SIZE = 128 * 1024, HEADER = 64;
 const RING = (SHM_SIZE - HEADER) / 2;
+const TO_BUN = HEADER, TO_SHIM = HEADER + RING;
+const FRAME_HEADER = 8, FLAG_LAST = 1, MAX_CHUNK = 16 * 1024;
 
-const readU32 = (off) => buf[off] | (buf[off+1] << 8) | (buf[off+2] << 16) | (buf[off+3] << 24);
+const readU32 = (off) => (buf[off] | (buf[off+1] << 8) | (buf[off+2] << 16) | (buf[off+3] << 24)) >>> 0;
 const writeU32 = (off, v) => { buf[off]=v&0xff; buf[off+1]=(v>>8)&0xff; buf[off+2]=(v>>16)&0xff; buf[off+3]=(v>>24)&0xff; };
-const ringAvail = (w, r) => w >= r ? w - r : RING - r + w;
+const ringAvail = (w, r) => (w >= r ? w - r : RING - r + w);
+const ringFree = (w, r) => (r > w ? r - w - 1 : RING - (w - r) - 1);
+
+const ringWrite = (base, cursor, src, n) => {
+  const tail = RING - cursor;
+  if (n <= tail) { buf.set(src.subarray(0, n), base + cursor); }
+  else { buf.set(src.subarray(0, tail), base + cursor); buf.set(src.subarray(tail, n), base); }
+};
+const ringReadBytes = (base, cursor, n) => {
+  const tail = RING - cursor;
+  if (n <= tail) return buf.slice(base + cursor, base + cursor + n);
+  const out = new Uint8Array(n);
+  out.set(buf.subarray(base + cursor, base + RING), 0);
+  out.set(buf.subarray(base, base + n - tail), tail);
+  return out;
+};
+
+const buildFrame = (payload, flags) => {
+  const frame = new Uint8Array(FRAME_HEADER + payload.length);
+  const view = new DataView(frame.buffer);
+  view.setUint32(0, payload.length, true);
+  view.setUint32(4, flags, true);
+  frame.set(payload, FRAME_HEADER);
+  return frame;
+};
+
+const _pending = [];
+let _reasm = [], _reasmLen = 0;
+
+const enqueueOutgoing = (msg) => {
+  const payload = new TextEncoder().encode(JSON.stringify(msg));
+  if (payload.length === 0) { _pending.push({ bytes: buildFrame(payload, FLAG_LAST), offset: 0 }); return; }
+  let off = 0;
+  while (off < payload.length) {
+    const n = Math.min(payload.length - off, MAX_CHUNK);
+    const last = off + n >= payload.length;
+    _pending.push({ bytes: buildFrame(payload.subarray(off, off + n), last ? FLAG_LAST : 0), offset: 0 });
+    off += n;
+  }
+};
+
+const flushToShim = () => {
+  let any = false;
+  while (_pending.length > 0) {
+    const item = _pending[0];
+    const remaining = item.bytes.length - item.offset;
+    if (remaining <= 0) { _pending.shift(); continue; }
+    const w = readU32(8), r = readU32(12);
+    const space = ringFree(w, r);
+    if (space === 0) break;
+    const toWrite = Math.min(remaining, space);
+    ringWrite(TO_SHIM, w, item.bytes.subarray(item.offset), toWrite);
+    writeU32(8, (w + toWrite) % RING);
+    item.offset += toWrite;
+    any = true;
+    if (item.offset >= item.bytes.length) _pending.shift();
+    else break;
+  }
+  return any;
+};
+
+const writeToShim = (msg) => { enqueueOutgoing(msg); return flushToShim(); };
+
+const mergeReasm = () => {
+  if (_reasm.length === 1) { const out = _reasm[0]; _reasm = []; _reasmLen = 0; return out; }
+  const merged = new Uint8Array(_reasmLen);
+  let p = 0; for (const c of _reasm) { merged.set(c, p); p += c.length; }
+  _reasm = []; _reasmLen = 0; return merged;
+};
 
 const readFromShim = () => {
   const msgs = [];
-  let w = readU32(0), r = readU32(4);
-  while (ringAvail(w, r) >= 4) {
-    const base = HEADER;
-    const len = buf[base+r%RING] | (buf[base+(r+1)%RING]<<8) | (buf[base+(r+2)%RING]<<16) | (buf[base+(r+3)%RING]<<24);
-    let c = (r+4) % RING;
-    if (ringAvail(w, c) < len) break;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) { bytes[i] = buf[base+c%RING]; c = (c+1)%RING; }
-    r = c; writeU32(4, r);
-    try { msgs.push(JSON.parse(new TextDecoder().decode(bytes))); } catch {}
-    w = readU32(0);
+  while (true) {
+    const w = readU32(0), r = readU32(4);
+    const used = ringAvail(w, r);
+    if (used < FRAME_HEADER) break;
+    const hdr = ringReadBytes(TO_BUN, r, FRAME_HEADER);
+    const hv = new DataView(hdr.buffer, hdr.byteOffset, hdr.byteLength);
+    const len = hv.getUint32(0, true);
+    const flags = hv.getUint32(4, true);
+    if (used < FRAME_HEADER + len) break;
+    const payloadStart = (r + FRAME_HEADER) % RING;
+    const payload = ringReadBytes(TO_BUN, payloadStart, len);
+    writeU32(4, (r + FRAME_HEADER + len) % RING);
+    if (len > 0) { _reasm.push(payload); _reasmLen += payload.length; }
+    if (flags & FLAG_LAST) {
+      const merged = mergeReasm();
+      try { msgs.push(JSON.parse(new TextDecoder().decode(merged))); } catch {}
+    }
   }
   return msgs;
-};
-
-const writeToShim = (msg) => {
-  const json = JSON.stringify(msg);
-  const payload = new TextEncoder().encode(json);
-  const needed = 4 + payload.length;
-  const w = readU32(8), r = readU32(12);
-  const free = r > w ? r - w - 1 : RING - (w - r) - 1;
-  if (free < needed) return false;
-  const base = HEADER + RING;
-  let c = w;
-  buf[base+c%RING] = payload.length & 0xff; c=(c+1)%RING;
-  buf[base+c%RING] = (payload.length>>8) & 0xff; c=(c+1)%RING;
-  buf[base+c%RING] = (payload.length>>16) & 0xff; c=(c+1)%RING;
-  buf[base+c%RING] = (payload.length>>24) & 0xff; c=(c+1)%RING;
-  for (let i = 0; i < payload.length; i++) { buf[base+c%RING] = payload[i]; c=(c+1)%RING; }
-  writeU32(8, c);
-  return true;
 };
 `
 
@@ -176,7 +239,8 @@ const poll = () => {
       const sendResponse = (result, error) => {
         const resp = { id: msg.id, type: "response", action: msg.action, data: result };
         if (error) resp.error = error;
-        if (writeToShim(resp)) signal();
+        enqueueOutgoing(resp);
+        if (flushToShim()) signal();
       };
       try {
         const result = runtime.dispatch(msg.action, msg.data);
@@ -194,10 +258,8 @@ const poll = () => {
       running = false; return;
     }
   }
-  const out = runtime.drainOutgoing();
-  let wrote = false;
-  for (const m of out) { if (writeToShim(m)) wrote = true; }
-  if (wrote) signal();
+  for (const m of runtime.drainOutgoing()) enqueueOutgoing(m);
+  if (flushToShim()) signal();
   setTimeout(poll, 16);
 };
 poll();
