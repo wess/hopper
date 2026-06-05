@@ -3,6 +3,7 @@
 
 import { toast } from "@basket/ui/toast";
 import { useEffect, useMemo, useState } from "react";
+import { version } from "../../../package.json";
 import * as ch from "../../shared/channels.ts";
 import type { Workspace } from "../../shared/types.ts";
 import { bytes } from "../lib/format.ts";
@@ -17,8 +18,6 @@ import {
 } from "../state/store.ts";
 import { MigrationPanel } from "./migrate.tsx";
 import { Button, Field, Input, Modal, ViewHeader } from "./ui.tsx";
-
-const APP_VERSION = "0.1.0";
 
 type EngineBusy = "" | "testing" | "starting" | "stopping" | "reclaiming";
 
@@ -382,7 +381,7 @@ const AboutPanel = () => {
       </div>
       <dl className="kv">
         <dt>App version</dt>
-        <dd>{APP_VERSION}</dd>
+        <dd>{version}</dd>
         <dt>Engine version</dt>
         <dd>{loading ? "…" : (data?.version ?? "—")}</dd>
         <dt>API version</dt>
