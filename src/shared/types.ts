@@ -303,6 +303,63 @@ export type ReclaimResult = {
   readonly detail: string;
 };
 
+// --- migration (another engine, e.g. Docker Desktop -> Hopper) -------------
+
+// A serializable Docker connection target — mirrors host/docker/endpoint.ts's
+// Endpoint exactly so it round-trips through IPC. The scan resolves the source
+// engine and the plan pins it, so a daemon coming up/down between scan and run
+// can't silently redirect the migration to a different engine.
+export type MigrationEndpoint =
+  | { readonly transport: "unix"; readonly path: string }
+  | { readonly transport: "npipe"; readonly path: string }
+  | {
+      readonly transport: "tcp";
+      readonly host: string;
+      readonly port: number;
+      readonly tls: boolean;
+    };
+
+// One migratable object discovered on the source engine.
+export type MigrationItem = {
+  readonly kind: "image" | "volume" | "network" | "container";
+  readonly id: string; // image id / volume name / network id / container id
+  readonly name: string; // repo:tag / volume name / network name / container name
+  readonly detail?: string; // size, status, or backing image
+};
+
+// What the source engine holds, surfaced for selection.
+export type MigrationScan = {
+  readonly available: boolean; // a migratable source engine was found
+  readonly source?: string; // human description of the source endpoint
+  readonly sourceEndpoint?: MigrationEndpoint; // the resolved source, pinned into the plan
+  readonly containers: readonly MigrationItem[];
+  readonly images: readonly MigrationItem[];
+  readonly volumes: readonly MigrationItem[];
+  readonly networks: readonly MigrationItem[];
+  readonly message?: string;
+};
+
+// The user's selection of what to migrate (ids per kind) + the pinned source.
+export type MigrationPlan = {
+  readonly source?: MigrationEndpoint; // the exact engine the selection came from
+  readonly containers: readonly string[];
+  readonly images: readonly string[];
+  readonly volumes: readonly string[];
+  readonly networks: readonly string[];
+};
+
+// Streamed migration progress.
+export type MigrationProgress = {
+  readonly phase: "networks" | "volumes" | "images" | "containers" | "done" | "error";
+  readonly item: string; // current object's name ("" between items)
+  readonly done: number; // items completed in this phase
+  readonly total: number; // items in this phase
+  readonly message: string;
+  readonly error?: string; // non-fatal per-item error (migration continues)
+  readonly warning?: string; // non-fatal advisory (e.g. host-path bind, arch mismatch)
+  readonly finished?: boolean; // the whole migration is complete
+};
+
 // A pruned-resource report (containers/images/volumes/networks/buildcache).
 export type PruneReport = {
   readonly kind: string;

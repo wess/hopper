@@ -27,6 +27,7 @@ import {
 } from "./engine/registry.ts";
 import { getResources, setResources } from "./engine/resources.ts";
 import menu from "./menu.ts";
+import * as migrate from "./migrate/index.ts";
 import { registerRegistryHandlers } from "./registry/index.ts";
 import { startTray } from "./tray.ts";
 
@@ -122,6 +123,11 @@ handle(ch.engineReclaim, () => reclaimEngine());
 handle(ch.engineStats, () => engineStatsNow());
 handle(ch.engineResources, () => getResources());
 handle(ch.engineSetResources, (r) => setResources(r));
+// Migration (Docker Desktop -> Hopper): scan the source, then run a selected
+// migration, streaming per-item progress back to the webview.
+handle(ch.migrationScan, () => migrate.scan());
+handle(ch.migrationRun, (plan) => migrate.migrate(plan, (p) => emit(ch.migrationProgress, p)));
+
 handle(ch.systemVersion, () => system.version());
 handle(ch.systemInfo, () => system.info());
 handle(ch.systemDf, () => system.df());
