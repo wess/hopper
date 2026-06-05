@@ -20,12 +20,12 @@ bundle:
   # manager that lets Hopper provide its own Docker engine (see
   # native/hopperd). Built by scripts/buildhopperd before bundling; copied into
   # Contents/MacOS/sidecars/ and resolved at runtime by the vz provider.
+  # Mach-O helpers only — they're signed and live in Contents/MacOS/sidecars/.
+  # The guest kernel/initrd are DATA and must go in Contents/Resources/ instead
+  # (codesign rejects unsigned "code" under MacOS/); the release workflow copies
+  # them there after bundling, and hopperd resolves them from Resources/.
   sidecars:
     - native/hopperd/.build/release/hopperd
-    # Guest assets, produced by scripts/build/guest.sh and shipped alongside
-    # hopperd in sidecars/. Signing skips these (not Mach-O).
-    - native/hopperd/.build/guest/vmlinuz
-    - native/hopperd/.build/guest/initrd
     # Standalone Compose v2 (host binary, scripts/build/compose.sh) so Compose
     # works with no user-installed docker CLI.
     - native/hopperd/.build/compose/compose

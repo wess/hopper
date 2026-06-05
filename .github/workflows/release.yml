@@ -196,8 +196,17 @@ jobs:
       - name: Compile
         run: bun run build
 
-      - name: Bundle (.app — embeds hopperd + vmlinuz + initrd + compose)
+      - name: Bundle (.app — embeds hopperd + compose in MacOS/sidecars)
         run: bun run bundle
+
+      # The guest kernel + initrd are DATA: they go in Contents/Resources/, not
+      # under MacOS/ (codesign rejects unsigned "code" there). Copy them in
+      # before signing so the outer signature seals them as resources.
+      - name: Stage guest assets into Resources
+        run: |
+          res="dist/Hopper.app/Contents/Resources"
+          mkdir -p "$res"
+          cp native/hopperd/.build/guest/vmlinuz native/hopperd/.build/guest/initrd "$res/"
 
       # Reads bundle.macos from butter.yaml. With creds, signs inside-out
       # (hopperd gets com.apple.security.virtualization) + hardened runtime +
@@ -212,12 +221,12 @@ jobs:
         run: |
           set -euo pipefail
           codesign --verify --deep --strict --verbose=2 dist/Hopper.app
-          sidecars="dist/Hopper.app/Contents/MacOS/sidecars"
-          helper="$sidecars/hopperd"
+          app="dist/Hopper.app/Contents"
+          helper="$app/MacOS/sidecars/hopperd"
           test -x "$helper" || { echo "FATAL: hopperd helper missing from the bundle"; exit 1; }
-          test -f "$sidecars/vmlinuz" || { echo "FATAL: guest kernel (vmlinuz) not bundled"; exit 1; }
-          test -f "$sidecars/initrd" || { echo "FATAL: guest initrd not bundled"; exit 1; }
-          if file "$sidecars/vmlinuz" | grep -qi gzip; then
+          test -f "$app/Resources/vmlinuz" || { echo "FATAL: guest kernel (vmlinuz) not in Resources"; exit 1; }
+          test -f "$app/Resources/initrd" || { echo "FATAL: guest initrd not in Resources"; exit 1; }
+          if file "$app/Resources/vmlinuz" | grep -qi gzip; then
             echo "FATAL: vmlinuz is gzip-compressed; VZ needs a raw arm64 Image"; exit 1
           fi
           if codesign -d --entitlements - "$helper" 2>/dev/null | grep -q virtualization; then

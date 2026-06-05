@@ -30,10 +30,20 @@ struct VMConfig {
       fileURLWithPath: env["HOPPER_HOME"]
         ?? (fm.homeDirectoryForCurrentUser.appendingPathComponent(".hopper").path)
     )
-    // Assets (kernel + initrd) ship next to the executable, i.e. in the
-    // bundle's sidecars/ dir alongside this helper.
+    // Kernel + initrd are data: in dev they sit next to the executable
+    // (.build/release/), but in a bundled .app they live in Contents/Resources/
+    // — data files can't live under Contents/MacOS/ (codesign rejects unsigned
+    // "code" there). Prefer next-to-exe, else the bundle's Resources dir.
     let exe = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
-    let assets = exe.deletingLastPathComponent()
+    let exeDir = exe.deletingLastPathComponent()
+    let resources =
+      exeDir
+      .deletingLastPathComponent()  // .../Contents/MacOS
+      .deletingLastPathComponent()  // .../Contents
+      .appendingPathComponent("Resources")
+    let assets =
+      fm.fileExists(atPath: exeDir.appendingPathComponent("vmlinuz").path)
+      ? exeDir : resources
     let run = home.appendingPathComponent("run", isDirectory: true)
     try? fm.createDirectory(at: run, withIntermediateDirectories: true)
 

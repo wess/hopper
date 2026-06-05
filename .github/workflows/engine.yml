@@ -152,11 +152,19 @@ jobs:
       - name: Compile
         run: bun run build
 
-      - name: Bundle (.app — embeds hopperd + vmlinuz + initrd + compose)
+      - name: Bundle (.app — embeds hopperd + compose in MacOS/sidecars)
         run: bun run bundle
 
+      # Guest kernel + initrd are DATA → Contents/Resources/ (codesign rejects
+      # unsigned "code" under MacOS/). Copy before signing so they're sealed.
+      - name: Stage guest assets into Resources
+        run: |
+          res="dist/Hopper.app/Contents/Resources"
+          mkdir -p "$res"
+          cp native/hopperd/.build/guest/vmlinuz native/hopperd/.build/guest/initrd "$res/"
+
       # Inside-out signing: hopperd gets com.apple.security.virtualization from
-      # butter.yaml's sidecarEntitlements; kernel/initrd are skipped (not Mach-O).
+      # butter.yaml's sidecarEntitlements.
       - name: Sign + notarize
         run: bun run sign
 
@@ -171,15 +179,15 @@ jobs:
         run: |
           set -euo pipefail
           codesign --verify --deep --strict --verbose=2 dist/Hopper.app
-          sidecars="dist/Hopper.app/Contents/MacOS/sidecars"
-          helper="$sidecars/hopperd"
+          app="dist/Hopper.app/Contents"
+          helper="$app/MacOS/sidecars/hopperd"
 
           test -x "$helper" || { echo "FATAL: hopperd helper missing from the bundle"; exit 1; }
-          test -f "$sidecars/vmlinuz" || { echo "FATAL: guest kernel (vmlinuz) not bundled"; exit 1; }
-          test -f "$sidecars/initrd" || { echo "FATAL: guest initrd not bundled"; exit 1; }
+          test -f "$app/Resources/vmlinuz" || { echo "FATAL: guest kernel (vmlinuz) not in Resources"; exit 1; }
+          test -f "$app/Resources/initrd" || { echo "FATAL: guest initrd not in Resources"; exit 1; }
 
           # VZLinuxBootLoader needs a raw Image, not a gzipped vmlinuz.
-          if file "$sidecars/vmlinuz" | grep -qi gzip; then
+          if file "$app/Resources/vmlinuz" | grep -qi gzip; then
             echo "FATAL: vmlinuz is gzip-compressed; VZ needs a raw arm64 Image"; exit 1
           fi
 
