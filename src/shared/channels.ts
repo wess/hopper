@@ -7,6 +7,7 @@ import type {
   ContainerStats,
   DiskUsage,
   DockerEvent,
+  EngineResources,
   EngineStats,
   EngineStatus,
   ExecChunk,
@@ -42,6 +43,12 @@ export const engineStop = defineChannel<void, EngineStatus>("engine:stop");
 // resolve to null/no-op for unmanaged providers.
 export const engineReclaim = defineChannel<void, ReclaimResult>("engine:reclaim");
 export const engineStats = defineChannel<void, EngineStats | null>("engine:stats");
+// Configurable VM resources (cpu/memory/disk). Set returns the normalized
+// (clamped) values; changes take effect when the engine next starts.
+export const engineResources = defineChannel<void, EngineResources>("engine:resources");
+export const engineSetResources = defineChannel<EngineResources, EngineResources>(
+  "engine:setResources",
+);
 export const systemVersion = defineChannel<void, SystemVersion>("system:version");
 export const systemInfo = defineChannel<void, SystemInfo>("system:info");
 export const systemDf = defineChannel<void, DiskUsage>("system:df");

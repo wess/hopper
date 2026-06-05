@@ -25,6 +25,7 @@ import {
   startEngine,
   stopEngine,
 } from "./engine/registry.ts";
+import { getResources, setResources } from "./engine/resources.ts";
 import menu from "./menu.ts";
 import { registerRegistryHandlers } from "./registry/index.ts";
 import { startTray } from "./tray.ts";
@@ -119,6 +120,8 @@ handle(ch.engineStop, async () => {
 });
 handle(ch.engineReclaim, () => reclaimEngine());
 handle(ch.engineStats, () => engineStatsNow());
+handle(ch.engineResources, () => getResources());
+handle(ch.engineSetResources, (r) => setResources(r));
 handle(ch.systemVersion, () => system.version());
 handle(ch.systemInfo, () => system.info());
 handle(ch.systemDf, () => system.df());

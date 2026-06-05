@@ -1,6 +1,13 @@
 import Foundation
 import Virtualization
 
+// Guest memory stats (subset of the agent's `stats` reply) used for balloon
+// tuning.
+private struct GuestMem: Decodable {
+  let memTotalKb: UInt64
+  let memAvailKb: UInt64
+}
+
 // The Linux guest. The OO shape here (an NSObject delegate, a retained
 // VZVirtualMachine driven on a dedicated queue) is mandated by
 // Virtualization.framework — VM operations must happen on the queue the
@@ -14,6 +21,9 @@ final class GuestVM: NSObject, VZVirtualMachineDelegate {
   // Retained so the console-capture pipe + log handle stay alive for the VM.
   private var consolePipe: Pipe?
   private var consoleLog: FileHandle?
+  // Dynamic memory: periodically balloon idle guest RAM back to the host.
+  private var memoryTimer: DispatchSourceTimer?
+  private var effectiveMemory: UInt64 = 0
 
   init(config: VMConfig) {
     self.config = config
@@ -73,19 +83,31 @@ final class GuestVM: NSObject, VZVirtualMachineDelegate {
 
     let vz = VZVirtualMachineConfiguration()
 
+    // Host filesystem share (virtiofs): the user's home, mounted at its real
+    // path inside the guest so `docker run -v /Users/...:/x` bind mounts and
+    // compose/build contexts resolve to the same files.
+    let shareURL = FileManager.default.homeDirectoryForCurrentUser
+    // virtiofs cache mode for the host share. "auto" (default) balances speed
+    // with seeing host edits (hot-reload); "always" is faster but can miss
+    // host-side changes; "none" is strict but slow. Override via HOPPER_VFS_CACHE.
+    let vfsCache = ProcessInfo.processInfo.environment["HOPPER_VFS_CACHE"] ?? "auto"
+
     let boot = VZLinuxBootLoader(kernelURL: config.paths.kernel)
     boot.initialRamdiskURL = config.paths.initrd
     // The OS lives in the initramfs (shipped, read-only). /dev/vda is the
     // persistent data disk; the guest init formats it on first boot and mounts
     // it at /var/lib/docker. So no root= — the kernel runs /init from initrd.
     // (No `quiet` — we want boot output on hvc0 captured to console.log.)
-    boot.commandLine = "console=hvc0 loglevel=7"
+    // hopper.share tells the guest init where to mount the "home" virtiofs tag.
+    boot.commandLine =
+      "console=hvc0 loglevel=7 hopper.share=\(shareURL.path) hopper.vfscache=\(vfsCache)"
     vz.bootLoader = boot
 
     let cpuLo = VZVirtualMachineConfiguration.minimumAllowedCPUCount
     let cpuHi = VZVirtualMachineConfiguration.maximumAllowedCPUCount
     vz.cpuCount = min(max(config.cpuCount, cpuLo), cpuHi)
     vz.memorySize = clampMemory(config.memoryBytes)
+    effectiveMemory = vz.memorySize
 
     // Console -> capture guest output through a pipe and persist it to
     // console.log (a readability handler flushes each chunk), so the boot is
@@ -124,14 +146,22 @@ final class GuestVM: NSObject, VZVirtualMachineDelegate {
     vz.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]
     vz.socketDevices = [VZVirtioSocketDeviceConfiguration()]
 
-    // Rosetta lets amd64 images run on Apple Silicon without full emulation.
+    // Directory sharing (virtiofs): the host home share, plus Rosetta for
+    // running amd64 images on Apple Silicon without full emulation.
+    var shares: [VZDirectorySharingDeviceConfiguration] = []
+    let homeShare = VZVirtioFileSystemDeviceConfiguration(tag: "home")
+    homeShare.share = VZSingleDirectoryShare(
+      directory: VZSharedDirectory(url: shareURL, readOnly: false))
+    shares.append(homeShare)
+
     var rosettaEnabled = false
     if VZLinuxRosettaDirectoryShare.availability == .installed {
       let rosetta = VZVirtioFileSystemDeviceConfiguration(tag: "rosetta")
       rosetta.share = try VZLinuxRosettaDirectoryShare()
-      vz.directorySharingDevices = [rosetta]
+      shares.append(rosetta)
       rosettaEnabled = true
     }
+    vz.directorySharingDevices = shares
 
     Wire.log(
       "vm config: cpu=\(vz.cpuCount) mem=\(vz.memorySize) rosetta=\(rosettaEnabled) "
@@ -166,6 +196,7 @@ final class GuestVM: NSObject, VZVirtualMachineDelegate {
           switch result {
           case .success:
             self.startBridge()
+            self.startMemoryTuning()
             completion(true, "running")
           case .failure(let error):
             completion(false, GuestVM.describe(error))
@@ -192,8 +223,50 @@ final class GuestVM: NSObject, VZVirtualMachineDelegate {
     bridge.start()
   }
 
+  // Dynamic memory: every 30s, ask the guest how much RAM it's actually using
+  // and balloon the rest back to the host, keeping headroom for container
+  // growth. So the VM's host footprint tracks real usage instead of pinning
+  // its full size. Disable with HOPPER_BALLOON=0.
+  private func startMemoryTuning() {
+    if ProcessInfo.processInfo.environment["HOPPER_BALLOON"] == "0" { return }
+    let timer = DispatchSource.makeTimerSource(queue: queue)
+    timer.schedule(deadline: .now() + 30, repeating: 30)
+    timer.setEventHandler { [weak self] in self?.tuneMemory() }
+    timer.resume()
+    memoryTimer = timer
+  }
+
+  private func tuneMemory() {
+    let env = ProcessInfo.processInfo.environment
+    let headroom = (UInt64(env["HOPPER_MEMORY_HEADROOM_MB"] ?? "") ?? 1024) * 1024 * 1024
+    let floor: UInt64 = 1024 * 1024 * 1024  // never balloon below 1 GiB
+    agent("stats") { json in
+      guard
+        let json = json, let data = json.data(using: .utf8),
+        let mem = try? JSONDecoder().decode(GuestMem.self, from: data),
+        mem.memTotalKb > 0
+      else { return }
+      let usedBytes = (mem.memTotalKb - min(mem.memAvailKb, mem.memTotalKb)) * 1024
+      var target = usedBytes + headroom
+      target = max(target, floor)
+      target = min(target, self.effectiveMemory)
+      self.queue.async {
+        if let balloon = self.machine?.memoryBalloonDevices.first
+          as? VZVirtioTraditionalMemoryBalloonDevice
+        {
+          balloon.targetVirtualMachineMemorySize = target
+          Wire.log(
+            "memory: used=\(usedBytes / 1_048_576)MB target=\(target / 1_048_576)MB "
+              + "max=\(self.effectiveMemory / 1_048_576)MB")
+        }
+      }
+    }
+  }
+
   func stop(completion: @escaping (Bool, String) -> Void) {
     queue.async {
+      self.memoryTimer?.cancel()
+      self.memoryTimer = nil
       self.bridge?.stop()
       self.bridge = nil
       guard let vm = self.machine, vm.canStop else {
@@ -277,6 +350,8 @@ final class GuestVM: NSObject, VZVirtualMachineDelegate {
   // MARK: VZVirtualMachineDelegate
 
   func guestDidStop(_ virtualMachine: VZVirtualMachine) {
+    memoryTimer?.cancel()
+    memoryTimer = nil
     bridge?.stop()
     machine = nil
     onExit?("stopped")
@@ -284,6 +359,8 @@ final class GuestVM: NSObject, VZVirtualMachineDelegate {
 
   func virtualMachine(_ virtualMachine: VZVirtualMachine, didStopWithError error: Error) {
     Wire.log("guest stopped with error: \(GuestVM.describe(error))")
+    memoryTimer?.cancel()
+    memoryTimer = nil
     bridge?.stop()
     machine = nil
     onExit?("error")

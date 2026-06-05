@@ -14,6 +14,7 @@ import { type Endpoint, setEndpoint } from "../../../docker/endpoint.ts";
 import { backoffDelay, shouldRetry } from "../../backoff.ts";
 import { probe } from "../../diagnose.ts";
 import type { Provider, ProviderStatus } from "../../provider.ts";
+import { resourceEnv } from "../../resources.ts";
 import { resolveSidecar } from "../../sidecar.ts";
 import { type Control, type HopperdReply, spawnHopperd } from "./control.ts";
 
@@ -54,7 +55,7 @@ const ensureControl = (): Control | null => {
   if (control?.alive()) return control;
   const bin = resolveHelper();
   if (!bin) return null;
-  control = spawnHopperd(bin);
+  control = spawnHopperd(bin, resourceEnv());
   control.onExit(onHelperExit);
   return control;
 };
@@ -127,7 +128,7 @@ const vzStatus = async (): Promise<ProviderStatus> => {
   return toEngineState(await control.send("status", 4000));
 };
 
-const vzStart = async (): Promise<ProviderStatus | void> => {
+const vzStart = async (): Promise<ProviderStatus | undefined> => {
   userStopped = false;
   lastStartError = null;
   if (restartTimer) {

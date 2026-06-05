@@ -61,9 +61,11 @@ export const linuxProvider = (): Provider => ({
     return best ?? { state: "stopped", detail: "dockerd not running", endpoint: null };
   },
   // Try the rootless user daemon first (no privileges), then the system unit.
-  start: async (): Promise<void> => {
-    if (await run(["systemctl", "--user", "start", "docker"])) return;
+  // Returns undefined (no rich status); the caller falls back to status().
+  start: async (): Promise<undefined> => {
+    if (await run(["systemctl", "--user", "start", "docker"])) return undefined;
     await run(["systemctl", "start", "docker"]);
+    return undefined;
   },
   stop: async (): Promise<void> => {
     if (await run(["systemctl", "--user", "stop", "docker"])) return;

@@ -35,6 +35,17 @@ if mount -t virtiofs rosetta /mnt/rosetta 2>/dev/null; then
     > /proc/sys/fs/binfmt_misc/register 2>/dev/null || true
 fi
 
+# Host home share (virtiofs) mounted at its real path, so bind mounts like
+# `docker run -v /Users/you/proj:/app` resolve to the host's files.
+share=$(sed -n 's/.*hopper\.share=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$share" ]; then
+  mkdir -p "$share"
+  vfscache=$(sed -n 's/.*hopper\.vfscache=\([^ ]*\).*/\1/p' /proc/cmdline)
+  mount -t virtiofs home "$share" -o "cache=${vfscache:-auto}" 2>/dev/null \
+    || mount -t virtiofs home "$share" 2>/dev/null \
+    || echo "[guest] virtiofs home mount failed"
+fi
+
 # Persistent data disk -> /var/lib/docker. Format on first boot only.
 if ! blkid /dev/vda >/dev/null 2>&1; then
   echo "[guest] formatting data disk /dev/vda"

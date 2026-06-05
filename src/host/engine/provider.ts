@@ -27,7 +27,7 @@ export type Provider = {
   // Bring the engine up / tear it down — managed providers only. start may
   // return a ProviderStatus so a failed launch can report *why* (otherwise the
   // caller falls back to a fresh status()).
-  readonly start?: () => Promise<ProviderStatus | void>;
+  readonly start?: () => Promise<ProviderStatus | undefined>;
   readonly stop?: () => Promise<void>;
   // Maintenance for managed engines: reclaim disk space, live VM stats.
   readonly reclaim?: () => Promise<ReclaimResult>;

@@ -2,7 +2,7 @@
 // and about/version details.
 
 import { toast } from "@basket/ui/toast";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as ch from "../../shared/channels.ts";
 import type { Workspace } from "../../shared/types.ts";
 import { bytes } from "../lib/format.ts";
@@ -391,11 +391,97 @@ const AboutPanel = () => {
   );
 };
 
+// VM resources for a managed engine (the Hopper VM). CPU/memory apply on
+// engine restart; disk size applies to a freshly created data disk.
+const ResourcesPanel = () => {
+  const { engine } = useApp();
+  const { data: res, reload } = useLoad(ch.engineResources, undefined, []);
+  const [cpus, setCpus] = useState<number | null>(null);
+  const [mem, setMem] = useState<number | null>(null);
+  const [disk, setDisk] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (res) {
+      setCpus(res.cpus);
+      setMem(res.memoryGiB);
+      setDisk(res.diskGiB);
+    }
+  }, [res]);
+
+  // Only meaningful for a managed engine (our VM) — an external engine's
+  // resources aren't ours to set.
+  if (!engine.managed) return null;
+
+  const save = async () => {
+    if (saving || cpus === null || mem === null || disk === null) return;
+    setSaving(true);
+    try {
+      const saved = await invoke(ch.engineSetResources, {
+        cpus,
+        memoryGiB: mem,
+        diskGiB: disk,
+      });
+      setCpus(saved.cpus);
+      setMem(saved.memoryGiB);
+      setDisk(saved.diskGiB);
+      toast.success("Resources saved", {
+        description: "Restart the engine (Stop → Start) to apply CPU/memory changes.",
+      });
+      reload();
+    } catch (e) {
+      toast.error("Couldn't save resources", { description: errorMessage(e) });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-title">
+        Resources
+        <Button size="sm" variant="primary" onClick={save} disabled={saving || cpus === null}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </div>
+      <Field label="CPUs">
+        <Input
+          type="number"
+          min={1}
+          value={cpus ?? ""}
+          onChange={(e) => setCpus(Number(e.target.value))}
+        />
+      </Field>
+      <Field label="Memory (GiB)">
+        <Input
+          type="number"
+          min={1}
+          value={mem ?? ""}
+          onChange={(e) => setMem(Number(e.target.value))}
+        />
+      </Field>
+      <Field label="Disk (GiB)" hint="applies to a freshly created data disk">
+        <Input
+          type="number"
+          min={8}
+          value={disk ?? ""}
+          onChange={(e) => setDisk(Number(e.target.value))}
+        />
+      </Field>
+      <div className="stat-sub" style={{ marginTop: 8 }}>
+        CPU and memory changes take effect when you stop and start the engine. Idle memory is
+        returned to the host automatically.
+      </div>
+    </div>
+  );
+};
+
 export const SettingsView = () => (
   <div className="scroll-body" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
     <ViewHeader title="Settings" />
     <div style={{ padding: "0 22px", display: "flex", flexDirection: "column", gap: 14 }}>
       <EnginePanel />
+      <ResourcesPanel />
       <ThemePanel />
       <WorkspacesPanel />
       <McpPanel />

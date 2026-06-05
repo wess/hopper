@@ -280,6 +280,14 @@ export type EngineStatus = {
   readonly endpoint?: string; // human description of where we're talking
 };
 
+// Configurable VM resources for a managed engine. CPU + memory apply when the
+// engine (re)starts; disk size applies to a freshly-created data disk.
+export type EngineResources = {
+  readonly cpus: number;
+  readonly memoryGiB: number;
+  readonly diskGiB: number;
+};
+
 // Live stats from a managed engine's VM (from the in-guest agent).
 export type EngineStats = {
   readonly memTotalKb: number;
