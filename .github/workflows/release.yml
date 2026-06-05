@@ -68,12 +68,21 @@ jobs:
         with:
           ref: "v${{ needs.check-version.outputs.version }}"
 
+      - name: Cache guest kernel
+        id: kcache
+        uses: actions/cache@v4
+        with:
+          path: native/hopperd/.build/guest/vmlinuz
+          key: hopper-kernel-6.12.8-${{ hashFiles('native/guest/kernel.config') }}
+
       - name: Install kernel build deps
+        if: steps.kcache.outputs.cache-hit != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu bc bison flex libssl-dev libelf-dev cpio xz-utils
 
       - name: Build aarch64 kernel
+        if: steps.kcache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
           ver="6.12.8"

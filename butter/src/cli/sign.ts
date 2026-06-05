@@ -117,9 +117,13 @@ const codesign = async (
   if (hardenedRuntime) args.push("--options", "runtime")
   if (entitlements) args.push("--entitlements", entitlements)
   args.push(target)
-  const result = await Bun.$`codesign ${args}`.quiet()
+  // .nothrow() so a non-zero exit doesn't throw before we can surface
+  // codesign's own stderr (which says *why* it failed).
+  const result = await Bun.$`codesign ${args}`.quiet().nothrow()
   if (result.exitCode !== 0) {
-    throw new Error(`codesign failed for ${target}: ${result.stderr.toString()}`)
+    throw new Error(
+      `codesign failed for ${target} (exit ${result.exitCode}): ${result.stderr.toString().trim()} ${result.stdout.toString().trim()}`,
+    )
   }
 }
 
