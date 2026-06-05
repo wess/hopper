@@ -15,6 +15,7 @@ import {
   type ThemePref,
   useApp,
 } from "../state/store.ts";
+import { MigrationPanel } from "./migrate.tsx";
 import { Button, Field, Input, Modal, ViewHeader } from "./ui.tsx";
 
 const APP_VERSION = "0.1.0";
@@ -482,6 +483,7 @@ export const SettingsView = () => (
     <div style={{ padding: "0 22px", display: "flex", flexDirection: "column", gap: 14 }}>
       <EnginePanel />
       <ResourcesPanel />
+      <MigrationPanel />
       <ThemePanel />
       <WorkspacesPanel />
       <McpPanel />

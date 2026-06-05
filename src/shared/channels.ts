@@ -17,6 +17,9 @@ import type {
   InspectResult,
   LogLine,
   McpLaunch,
+  MigrationPlan,
+  MigrationProgress,
+  MigrationScan,
   Network,
   NetworkCreateInput,
   ProcessList,
@@ -49,6 +52,14 @@ export const engineResources = defineChannel<void, EngineResources>("engine:reso
 export const engineSetResources = defineChannel<EngineResources, EngineResources>(
   "engine:setResources",
 );
+
+// --- migration (Docker Desktop / another engine -> Hopper) ----------------
+// Scan the source engine, run a migration for a selection, and stream progress.
+export const migrationScan = defineChannel<void, MigrationScan>("migration:scan");
+export const migrationRun = defineChannel<MigrationPlan, { ok: boolean; error?: string }>(
+  "migration:run",
+);
+export const migrationProgress = defineEvent<MigrationProgress>("evt:migration");
 export const systemVersion = defineChannel<void, SystemVersion>("system:version");
 export const systemInfo = defineChannel<void, SystemInfo>("system:info");
 export const systemDf = defineChannel<void, DiskUsage>("system:df");
