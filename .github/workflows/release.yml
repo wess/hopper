@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "package.json"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -17,18 +18,19 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 2
 
-      - name: Check if version changed
+      # Release when the package.json version has no matching tag yet. This is
+      # idempotent and works for both push and manual workflow_dispatch (a
+      # HEAD~1 diff would miss dispatches and re-released versions).
+      - name: Decide whether to release
         id: diff
         run: |
-          OLD=$(git show HEAD~1:package.json | jq -r '.version' 2>/dev/null || echo "")
           NEW=$(jq -r '.version' package.json)
-          if [ "$OLD" != "$NEW" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
+          if git ls-remote --tags origin "refs/tags/v${NEW}" | grep -q .; then
+            echo "v${NEW} already released — skipping."
             echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Get version
