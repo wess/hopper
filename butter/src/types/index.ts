@@ -69,6 +69,11 @@ export type MacOsBundleOptions = {
   teamId?: string
   appleIdPassword?: string
   allowJit?: boolean
+  // Per-sidecar entitlements, keyed by the sidecar's basename. Nested helpers
+  // are signed inside-out with their own entitlements before the outer app
+  // (e.g. a VM helper needs com.apple.security.virtualization, which the app's
+  // JIT entitlements must not grant). Paths are project-relative.
+  sidecarEntitlements?: Record<string, string>
   dmg?: {
     volumeName?: string
     windowSize?: [number, number]

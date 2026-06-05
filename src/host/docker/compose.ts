@@ -1,10 +1,14 @@
-// Compose orchestration by shelling out to the `docker compose` CLI. Hopper
-// deliberately does not reimplement the compose spec (depends_on, healthchecks,
-// profiles, merge semantics …); it drives the official CLI and streams its
-// output. The feature is gated on `available()` so it stays hidden when the
-// CLI isn't installed.
+// Compose orchestration. Hopper deliberately does not reimplement the compose
+// spec (depends_on, healthchecks, profiles, merge semantics …); it drives the
+// official Compose v2 binary and streams its output. It prefers a bundled
+// standalone `compose` binary (so the feature works on a machine with no
+// docker CLI installed — the point of being a self-contained engine) and falls
+// back to the system `docker compose` plugin. Either way it targets the active
+// engine via DOCKER_HOST.
 
 import type { ComposeProgress } from "../../shared/types.ts";
+import { resolveSidecar } from "../engine/sidecar.ts";
+import { currentEndpoint, dockerHostValue } from "./endpoint.ts";
 
 export type ComposeOp = "up" | "down";
 
@@ -19,12 +23,30 @@ export const composeArgs = (op: ComposeOp, file: string, project?: string): stri
   return args;
 };
 
-// Whether the `docker compose` CLI is present on PATH.
+// Resolve the command vector to run. A bundled standalone compose v2 binary
+// takes the same args minus the leading "compose" subcommand; otherwise we
+// invoke the `docker compose` plugin.
+const composeCommand = (op: ComposeOp, file: string, project?: string): string[] => {
+  const args = composeArgs(op, file, project);
+  const bundled = resolveSidecar("compose");
+  return bundled ? [bundled, ...args.slice(1)] : ["docker", ...args];
+};
+
+// Child env: point compose at whatever engine the client is currently using.
+const childEnv = (): Record<string, string | undefined> => ({
+  ...process.env,
+  DOCKER_HOST: dockerHostValue(currentEndpoint()),
+});
+
+// Whether Compose can run: a bundled binary always counts; otherwise probe the
+// system `docker compose` plugin.
 export const available = async (): Promise<boolean> => {
+  if (resolveSidecar("compose")) return true;
   try {
     const proc = Bun.spawn(["docker", "compose", "version"], {
       stdout: "ignore",
       stderr: "ignore",
+      env: childEnv(),
     });
     await proc.exited;
     return proc.exitCode === 0;
@@ -69,9 +91,10 @@ export const runCompose = async (
   project: string | undefined,
   onProgress: (p: ComposeProgress) => void,
 ): Promise<{ ok: boolean; error?: string }> => {
-  const proc = Bun.spawn(["docker", ...composeArgs(op, file, project)], {
+  const proc = Bun.spawn(composeCommand(op, file, project), {
     stdout: "pipe",
     stderr: "pipe",
+    env: childEnv(),
   });
   await Promise.all([
     pumpLines(proc.stdout, (line) =>

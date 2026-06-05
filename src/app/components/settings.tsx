@@ -5,10 +5,12 @@ import { toast } from "@basket/ui/toast";
 import { useMemo, useState } from "react";
 import * as ch from "../../shared/channels.ts";
 import type { Workspace } from "../../shared/types.ts";
+import { bytes } from "../lib/format.ts";
 import { errorMessage, invoke, useLoad } from "../lib/ipc.ts";
 import {
   deleteWorkspace,
   saveWorkspace,
+  setState,
   setTheme,
   type ThemePref,
   useApp,
@@ -17,21 +19,69 @@ import { Button, Field, Input, Modal, ViewHeader } from "./ui.tsx";
 
 const APP_VERSION = "0.1.0";
 
+type EngineBusy = "" | "testing" | "starting" | "stopping" | "reclaiming";
+
 const EnginePanel = () => {
   const { engine } = useApp();
-  const [testing, setTesting] = useState(false);
+  const [busy, setBusy] = useState<EngineBusy>("");
+  // Live VM stats for managed engines; refetched when connectivity flips.
+  const { data: stats, reload: reloadStats } = useLoad(ch.engineStats, undefined, [
+    engine.connected,
+    engine.provider,
+  ]);
 
   const test = async () => {
-    if (testing) return;
-    setTesting(true);
+    if (busy) return;
+    setBusy("testing");
     try {
       const status = await invoke(ch.enginePing, undefined);
+      setState({ engine: status });
       if (status.connected) toast.success("Engine reachable", { description: status.message });
-      else toast.error("Engine unreachable", { description: status.message });
+      else toast.error("Engine unreachable", { description: status.detail ?? status.message });
     } catch (e) {
       toast.error("Connection test failed", { description: errorMessage(e) });
     } finally {
-      setTesting(false);
+      setBusy("");
+    }
+  };
+
+  // Managed providers (the Hopper VM, native dockerd) can be brought up/down
+  // from here. The host broadcasts the resulting status; we also apply the
+  // returned value immediately for responsiveness.
+  const lifecycle = (action: "starting" | "stopping") => async () => {
+    if (busy) return;
+    setBusy(action);
+    try {
+      const status = await invoke(
+        action === "starting" ? ch.engineStart : ch.engineStop,
+        undefined,
+      );
+      setState({ engine: status });
+    } catch (e) {
+      toast.error(`Couldn't ${action === "starting" ? "start" : "stop"} the engine`, {
+        description: errorMessage(e),
+      });
+    } finally {
+      setBusy("");
+    }
+  };
+
+  // Reclaim unused VM disk space (fstrim in the guest).
+  const reclaim = async () => {
+    if (busy) return;
+    setBusy("reclaiming");
+    try {
+      const result = await invoke(ch.engineReclaim, undefined);
+      if (result.ok) {
+        toast.success("Disk reclaimed", { description: result.detail });
+        reloadStats();
+      } else {
+        toast.error("Reclaim unavailable", { description: result.detail });
+      }
+    } catch (e) {
+      toast.error("Reclaim failed", { description: errorMessage(e) });
+    } finally {
+      setBusy("");
     }
   };
 
@@ -39,9 +89,36 @@ const EnginePanel = () => {
     <div className="panel">
       <div className="panel-title">
         Engine
-        <Button size="sm" onClick={test} disabled={testing}>
-          {testing ? "Testing…" : "Test connection"}
-        </Button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {engine.managed && !engine.connected ? (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={lifecycle("starting")}
+              disabled={busy !== ""}
+            >
+              {busy === "starting" ? "Starting…" : "Start engine"}
+            </Button>
+          ) : null}
+          {engine.managed && engine.connected ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={lifecycle("stopping")}
+              disabled={busy !== ""}
+            >
+              {busy === "stopping" ? "Stopping…" : "Stop engine"}
+            </Button>
+          ) : null}
+          {engine.managed && engine.connected ? (
+            <Button size="sm" onClick={reclaim} disabled={busy !== ""}>
+              {busy === "reclaiming" ? "Reclaiming…" : "Reclaim disk"}
+            </Button>
+          ) : null}
+          <Button size="sm" onClick={test} disabled={busy !== ""}>
+            {busy === "testing" ? "Testing…" : "Test connection"}
+          </Button>
+        </div>
       </div>
       <div
         className="engine-status"
@@ -51,12 +128,35 @@ const EnginePanel = () => {
         <span className="engine-dot" />
         <span>{engine.message}</span>
       </div>
+      {engine.detail ? (
+        <div className="stat-sub" style={{ marginBottom: 8 }}>
+          {engine.detail}
+        </div>
+      ) : null}
       <dl className="kv">
-        <dt>Docker socket</dt>
-        <dd>/var/run/docker.sock</dd>
+        <dt>Provider</dt>
+        <dd>{engine.provider || "—"}</dd>
+        <dt>Endpoint</dt>
+        <dd>{engine.endpoint ?? "—"}</dd>
+        {engine.managed && stats ? (
+          <>
+            <dt>VM memory</dt>
+            <dd>
+              {bytes((stats.memTotalKb - stats.memAvailKb) * 1024)} /{" "}
+              {bytes(stats.memTotalKb * 1024)}
+            </dd>
+            <dt>VM disk</dt>
+            <dd>
+              {bytes(stats.diskUsedKb * 1024)} / {bytes(stats.diskTotalKb * 1024)}
+            </dd>
+            <dt>Load</dt>
+            <dd>{stats.load1}</dd>
+          </>
+        ) : null}
       </dl>
       <div className="stat-sub" style={{ marginTop: 8 }}>
-        Override with the <code>DOCKER_SOCKET</code> environment variable.
+        Override the target with the <code>DOCKER_HOST</code> or <code>DOCKER_SOCKET</code>{" "}
+        environment variable.
       </div>
     </div>
   );

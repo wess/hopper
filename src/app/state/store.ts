@@ -49,7 +49,13 @@ const persisted = loadPersisted();
 
 let state: AppState = {
   view: "containers",
-  engine: { connected: false, message: "Connecting…" },
+  engine: {
+    state: "starting",
+    connected: false,
+    message: "Connecting…",
+    provider: "",
+    managed: false,
+  },
   ...persisted,
 };
 

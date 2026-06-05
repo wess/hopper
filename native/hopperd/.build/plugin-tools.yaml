@@ -1,0 +1,66 @@
+client:
+  name: basic
+  file-system: device-agnostic
+tools: {}
+targets:
+  "PackageStructure": ["<PackageStructure>"]
+  "hopperd-arm64-apple-macosx26.0-release.exe": ["<hopperd-arm64-apple-macosx26.0-release.exe>"]
+  "hopperd-arm64-apple-macosx26.0-release.module": ["<hopperd-arm64-apple-macosx26.0-release.module>"]
+  "main": ["<hopperd-arm64-apple-macosx26.0-release.exe>","<hopperd-arm64-apple-macosx26.0-release.module>"]
+  "test": ["<hopperd-arm64-apple-macosx26.0-release.exe>","<hopperd-arm64-apple-macosx26.0-release.module>"]
+default: "main"
+nodes:
+  "/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/":
+    is-directory-structure: true
+    content-exclusion-patterns: [".git",".build"]
+commands:
+  "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/sources":
+    tool: write-auxiliary-file
+    inputs: ["<sources-file-list>","/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/bridge.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/config.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/main.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/protocol.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/vm.swift"]
+    outputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/sources"]
+    description: "Write auxiliary file /Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/sources"
+
+  "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.product/Objects.LinkFileList":
+    tool: write-auxiliary-file
+    inputs: ["<link-file-list>","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/bridge.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/config.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/main.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/protocol.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/vm.swift.o"]
+    outputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.product/Objects.LinkFileList"]
+    description: "Write auxiliary file /Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.product/Objects.LinkFileList"
+
+  "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt":
+    tool: write-auxiliary-file
+    inputs: ["<swift-get-version>","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc"]
+    outputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt"]
+    always-out-of-date: "true"
+    description: "Write auxiliary file /Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt"
+
+  "<hopperd-arm64-apple-macosx26.0-release.exe>":
+    tool: phony
+    inputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd"]
+    outputs: ["<hopperd-arm64-apple-macosx26.0-release.exe>"]
+
+  "<hopperd-arm64-apple-macosx26.0-release.module>":
+    tool: phony
+    inputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/bridge.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/config.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/main.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/protocol.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/vm.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/Modules/hopperd.swiftmodule"]
+    outputs: ["<hopperd-arm64-apple-macosx26.0-release.module>"]
+
+  "C.hopperd-arm64-apple-macosx26.0-release.exe":
+    tool: shell
+    inputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/bridge.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/config.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/main.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/protocol.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/vm.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.product/Objects.LinkFileList"]
+    outputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd"]
+    description: "Linking ./.build/arm64-apple-macosx/release/hopperd"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-L","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release","-o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd","-module-name","hopperd","-Xlinker","-no_warn_duplicate_libraries","-emit-executable","-Xlinker","-dead_strip","-Xlinker","-alias","-Xlinker","_hopperd_main","-Xlinker","_main","-Xlinker","-rpath","-Xlinker","@loader_path","@/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.product/Objects.LinkFileList","-target","arm64-apple-macosx14.0","-framework","Virtualization","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.0.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g"]
+
+  "C.hopperd-arm64-apple-macosx26.0-release.module":
+    tool: shell
+    inputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/bridge.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/config.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/main.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/protocol.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/vm.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/swift-version--58304C5D6DBC2206.txt","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/sources"]
+    outputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/bridge.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/config.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/main.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/protocol.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/vm.swift.o","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/Modules/hopperd.swiftmodule"]
+    description: "Compiling Swift Module 'hopperd' (5 sources)"
+    args: ["/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc","-module-name","hopperd","-emit-dependencies","-emit-module","-emit-module-path","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/Modules/hopperd.swiftmodule","-output-file-map","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/output-file-map.json","-whole-module-optimization","-num-threads","10","-c","@/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/hopperd.build/sources","-I","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/Modules","-target","arm64-apple-macosx14.0","-whole-module-optimization","-num-threads","10","-serialize-diagnostics","-O","-j10","-DSWIFT_PACKAGE","-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE","-module-cache-path","/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/release/ModuleCache","-parseable-output","-Xfrontend","-entry-point-function-name","-Xfrontend","hopperd_main","-swift-version","5","-plugin-path","/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing","-sdk","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.0.sdk","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-F","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-I","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-L","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib","-g","-Xcc","-isysroot","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX26.0.sdk","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks","-Xcc","-F","-Xcc","/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks","-Xcc","-fPIC","-Xcc","-g","-package-name","hopperd"]
+
+  "PackageStructure":
+    tool: package-structure-tool
+    inputs: ["/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/","/Users/wess/Desktop/Dev/hopper/native/hopperd/Package.swift","/Users/wess/Desktop/Dev/hopper/native/hopperd/Package.resolved"]
+    outputs: ["<PackageStructure>"]
+    description: "Planning build"
+    allow-missing-inputs: true
+

@@ -1,0 +1,25 @@
+#!/bin/sh
+# Hopper guest agent. socat runs one instance per connection on a vsock port
+# (see init); we read one command line on stdin and reply with one JSON line on
+# stdout. Kept tiny and dependency-free (busybox awk/df/fstrim).
+
+read -r cmd
+
+case "$cmd" in
+  reclaim)
+    # Discard freed blocks so the host's sparse disk image shrinks.
+    fstrim /var/lib/docker >/dev/null 2>&1
+    printf '{"ok":true}\n'
+    ;;
+  stats)
+    memtotal=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+    memavail=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+    load1=$(awk '{print $1}' /proc/loadavg)
+    set -- $(df -kP /var/lib/docker | awk 'NR==2{print $2, $3}')
+    printf '{"memTotalKb":%s,"memAvailKb":%s,"diskTotalKb":%s,"diskUsedKb":%s,"load1":%s}\n' \
+      "${memtotal:-0}" "${memavail:-0}" "${1:-0}" "${2:-0}" "${load1:-0}"
+    ;;
+  *)
+    printf '{"ok":false,"error":"unknown command"}\n'
+    ;;
+esac

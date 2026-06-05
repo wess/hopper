@@ -83,6 +83,11 @@ export const parseConfig = (yaml: string, env: Record<string, string | undefined
                 appleIdPassword: emptyToUndef(raw.bundle.macos.appleIdPassword),
                 allowJit:
                   typeof raw.bundle.macos.allowJit === "boolean" ? raw.bundle.macos.allowJit : undefined,
+                sidecarEntitlements:
+                  raw.bundle.macos.sidecarEntitlements &&
+                  typeof raw.bundle.macos.sidecarEntitlements === "object"
+                    ? (raw.bundle.macos.sidecarEntitlements as Record<string, string>)
+                    : undefined,
                 dmg:
                   raw.bundle.macos.dmg && typeof raw.bundle.macos.dmg === "object"
                     ? {

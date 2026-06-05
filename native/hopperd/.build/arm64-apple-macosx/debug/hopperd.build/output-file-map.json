@@ -1,0 +1,40 @@
+{
+  "": {
+    "swift-dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/master.swiftdeps"
+  },
+  "/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/bridge.swift": {
+    "dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/bridge.d",
+    "object": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/bridge.swift.o",
+    "swiftmodule": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/bridge~partial.swiftmodule",
+    "swift-dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/bridge.swiftdeps",
+    "diagnostics": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/bridge.dia"
+  },
+  "/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/config.swift": {
+    "dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/config.d",
+    "object": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/config.swift.o",
+    "swiftmodule": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/config~partial.swiftmodule",
+    "swift-dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/config.swiftdeps",
+    "diagnostics": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/config.dia"
+  },
+  "/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/main.swift": {
+    "dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/main.d",
+    "object": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/main.swift.o",
+    "swiftmodule": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/main~partial.swiftmodule",
+    "swift-dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/main.swiftdeps",
+    "diagnostics": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/main.dia"
+  },
+  "/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/protocol.swift": {
+    "dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/protocol.d",
+    "object": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/protocol.swift.o",
+    "swiftmodule": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/protocol~partial.swiftmodule",
+    "swift-dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/protocol.swiftdeps",
+    "diagnostics": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/protocol.dia"
+  },
+  "/Users/wess/Desktop/Dev/hopper/native/hopperd/Sources/hopperd/vm.swift": {
+    "dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/vm.d",
+    "object": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/vm.swift.o",
+    "swiftmodule": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/vm~partial.swiftmodule",
+    "swift-dependencies": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/vm.swiftdeps",
+    "diagnostics": "/Users/wess/Desktop/Dev/hopper/native/hopperd/.build/arm64-apple-macosx/debug/hopperd.build/vm.dia"
+  }
+}

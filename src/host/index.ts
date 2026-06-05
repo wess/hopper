@@ -6,7 +6,7 @@ import { createStore } from "@basket/store";
 import { mainWindow, setWindow } from "@basket/window";
 import { version } from "../../package.json";
 import * as ch from "../shared/channels.ts";
-import type { DockerEvent } from "../shared/types.ts";
+import type { DockerEvent, EngineState, EngineStatus } from "../shared/types.ts";
 import * as build from "./docker/build.ts";
 import * as compose from "./docker/compose.ts";
 import * as containers from "./docker/containers.ts";
@@ -18,6 +18,13 @@ import * as networks from "./docker/networks.ts";
 import * as stats from "./docker/stats.ts";
 import * as system from "./docker/system.ts";
 import * as volumes from "./docker/volumes.ts";
+import {
+  engineStatsNow,
+  engineStatus,
+  reclaimEngine,
+  startEngine,
+  stopEngine,
+} from "./engine/registry.ts";
 import menu from "./menu.ts";
 import { registerRegistryHandlers } from "./registry/index.ts";
 import { startTray } from "./tray.ts";
@@ -39,11 +46,13 @@ setWindow({ title: `${config.app.name} v${version}` });
 applyMenu(menu);
 
 // --- engine connection + event firehose -----------------------------------
-// Poll the daemon; when reachability flips, tell the webview. While
-// connected, run the event stream — each event refreshes the relevant view
-// and feeds the activity log.
+// Ask the active provider for engine status; when it changes, tell the
+// webview. While connected, run the event stream — each event refreshes the
+// relevant view and feeds the activity log.
 
 let connected = false;
+let lastState: EngineState | "" = "";
+let lastDetail: string | undefined;
 let eventsAbort: AbortController | null = null;
 
 const startEvents = (): void => {
@@ -67,17 +76,29 @@ const startEvents = (): void => {
     });
 };
 
-const poll = async (): Promise<void> => {
-  const ok = await system.ping();
-  if (ok !== connected) {
-    connected = ok;
-    emit(ch.engineStatusChanged, {
-      connected,
-      message: connected ? "Connected to Docker Engine" : "Cannot reach Docker Engine",
-    });
-    if (connected) startEvents();
-    else eventsAbort?.abort();
+// Broadcast on any state transition (not just connected/disconnected) and
+// drive the event firehose as connectivity flips.
+const broadcast = (status: EngineStatus): void => {
+  // Include detail so a failure reason on an already-seen coarse state still
+  // reaches the webview (e.g. two "unreachable" states with different causes).
+  if (
+    status.state === lastState &&
+    status.connected === connected &&
+    status.detail === lastDetail
+  ) {
+    return;
   }
+  const wasConnected = connected;
+  lastState = status.state;
+  lastDetail = status.detail;
+  connected = status.connected;
+  emit(ch.engineStatusChanged, status);
+  if (connected && !wasConnected) startEvents();
+  if (!connected && wasConnected) eventsAbort?.abort();
+};
+
+const poll = async (): Promise<void> => {
+  broadcast(await engineStatus());
 };
 
 void poll();
@@ -85,13 +106,19 @@ setInterval(() => void poll(), 3000);
 
 // --- engine / system handlers ---------------------------------------------
 
-handle(ch.enginePing, async () => {
-  const ok = await system.ping();
-  return {
-    connected: ok,
-    message: ok ? "Connected to Docker Engine" : "Cannot reach Docker Engine",
-  };
+handle(ch.enginePing, () => engineStatus());
+handle(ch.engineStart, async () => {
+  const status = await startEngine();
+  broadcast(status);
+  return status;
 });
+handle(ch.engineStop, async () => {
+  const status = await stopEngine();
+  broadcast(status);
+  return status;
+});
+handle(ch.engineReclaim, () => reclaimEngine());
+handle(ch.engineStats, () => engineStatsNow());
 handle(ch.systemVersion, () => system.version());
 handle(ch.systemInfo, () => system.info());
 handle(ch.systemDf, () => system.df());

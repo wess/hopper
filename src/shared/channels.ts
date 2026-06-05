@@ -7,6 +7,7 @@ import type {
   ContainerStats,
   DiskUsage,
   DockerEvent,
+  EngineStats,
   EngineStatus,
   ExecChunk,
   Image,
@@ -21,6 +22,7 @@ import type {
   PruneReport,
   PullProgress,
   PushProgress,
+  ReclaimResult,
   RegistryResult,
   RegistrySource,
   RunInput,
@@ -32,6 +34,14 @@ import type {
 // --- engine / system ------------------------------------------------------
 
 export const enginePing = defineChannel<void, EngineStatus>("engine:ping");
+// Lifecycle for managed providers (our VM, native dockerd) — bring the engine
+// up / down from the UI. Both resolve to the post-action status.
+export const engineStart = defineChannel<void, EngineStatus>("engine:start");
+export const engineStop = defineChannel<void, EngineStatus>("engine:stop");
+// Managed-engine maintenance: reclaim disk (fstrim) and live VM stats. Both
+// resolve to null/no-op for unmanaged providers.
+export const engineReclaim = defineChannel<void, ReclaimResult>("engine:reclaim");
+export const engineStats = defineChannel<void, EngineStats | null>("engine:stats");
 export const systemVersion = defineChannel<void, SystemVersion>("system:version");
 export const systemInfo = defineChannel<void, SystemInfo>("system:info");
 export const systemDf = defineChannel<void, DiskUsage>("system:df");

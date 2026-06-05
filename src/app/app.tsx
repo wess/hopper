@@ -7,6 +7,7 @@ import { ContainersView } from "./components/containers.tsx";
 import { DashboardView } from "./components/dashboard.tsx";
 import { ImagesView } from "./components/images.tsx";
 import { NetworksView } from "./components/networks.tsx";
+import { OnboardingView } from "./components/onboarding.tsx";
 import { SettingsView } from "./components/settings.tsx";
 import { Sidebar } from "./components/sidebar.tsx";
 import { VolumesView } from "./components/volumes.tsx";
@@ -144,15 +145,7 @@ export const App = () => {
     <div className="app-shell" data-collapsed={sidebarCollapsed}>
       <Sidebar />
       <main className="app-main">
-        {!engine.connected ? (
-          <div className="engine-banner">
-            <span className="engine-banner-dot" />
-            {engine.message} — start Docker Desktop to continue.
-          </div>
-        ) : null}
-        <div className="app-content">
-          <Current />
-        </div>
+        <div className="app-content">{engine.connected ? <Current /> : <OnboardingView />}</div>
       </main>
       <Palette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
       <Toaster />

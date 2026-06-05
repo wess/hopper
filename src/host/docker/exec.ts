@@ -8,10 +8,9 @@
 
 import type { Socket } from "bun";
 import { json } from "./client.ts";
-import { connectOptions, hostHeader, resolveEndpoint } from "./endpoint.ts";
+import { connectOptions, currentEndpoint, hostHeader } from "./endpoint.ts";
 
 const API = "v1.43";
-const ENDPOINT = resolveEndpoint();
 
 export type ExecSession = {
   readonly id: string;
@@ -72,8 +71,10 @@ export const open = async (
     },
   };
 
+  // Resolve the endpoint at session open (it can change at runtime).
+  const endpoint = currentEndpoint();
   // Branch rather than spread so the unix/tcp option shapes stay discriminated.
-  const conn = connectOptions(ENDPOINT);
+  const conn = connectOptions(endpoint);
   const socket: Socket<undefined> =
     "unix" in conn
       ? await Bun.connect({ unix: conn.unix, socket: socketHandlers })
@@ -89,7 +90,7 @@ export const open = async (
   const body = JSON.stringify({ Detach: false, Tty: true });
   const request =
     `POST /${API}/exec/${execId}/start HTTP/1.1\r\n` +
-    `Host: ${hostHeader(ENDPOINT)}\r\n` +
+    `Host: ${hostHeader(endpoint)}\r\n` +
     `Content-Type: application/json\r\n` +
     `Connection: Upgrade\r\n` +
     `Upgrade: tcp\r\n` +

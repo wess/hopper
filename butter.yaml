@@ -16,6 +16,20 @@ bundle:
   category: public.app-category.developer-tools
   minimumSystemVersion: "11.0"
 
+  # Bundled native helpers. hopperd is the Apple Virtualization.framework VM
+  # manager that lets Hopper provide its own Docker engine (see
+  # native/hopperd). Built by scripts/buildhopperd before bundling; copied into
+  # Contents/MacOS/sidecars/ and resolved at runtime by the vz provider.
+  sidecars:
+    - native/hopperd/.build/release/hopperd
+    # Guest assets, produced by scripts/build/guest.sh and shipped alongside
+    # hopperd in sidecars/. Signing skips these (not Mach-O).
+    - native/hopperd/.build/guest/vmlinuz
+    - native/hopperd/.build/guest/initrd
+    # Standalone Compose v2 (host binary, scripts/build/compose.sh) so Compose
+    # works with no user-installed docker CLI.
+    - native/hopperd/.build/compose/compose
+
   # macOS code-signing + notarization. Values are resolved from environment
   # variables when present (see {VAR} placeholders) — empty results mean
   # "skip that step." Locally this stays unsigned/ad-hoc; CI fills these in
@@ -30,5 +44,10 @@ bundle:
     # Bun's JavaScriptCore needs them; without them a notarized build
     # crashes the first time the JIT compiles a function.
     allowJit: true
+    # hopperd is signed inside-out with its own entitlements (it needs
+    # com.apple.security.virtualization to create a VM — which the app's JIT
+    # entitlements must not carry) before the outer app is signed.
+    sidecarEntitlements:
+      hopperd: native/hopperd/hopperd.entitlements
     dmg:
       volumeName: "Hopper"

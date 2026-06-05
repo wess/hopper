@@ -315,6 +315,14 @@ for (let i = 0; i < HEADER; i++) buf[i] = 0;
 const evtToBun = k32.symbols.CreateEventA(null, 0, 0, cstr(shmName + "_tb"));
 const evtToShim = k32.symbols.CreateEventA(null, 0, 0, cstr(shmName + "_ts"));
 
+// Point the host's sidecar resolver at the bundled helpers, which live next to
+// the executable (<bundle>/sidecars/). The host runs from a temp extract dir,
+// so it can only find them via the real executable path. Without this a
+// compiled build copies sidecars in but cannot resolve them at runtime.
+if (!process.env.BUTTER_SIDECARS_DIR) {
+  process.env.BUTTER_SIDECARS_DIR = join(dirname(process.execPath), "sidecars");
+}
+
 const { runtime } = await import("${hostWrapperPath}");
 
 const htmlPath = join(extractDir, "index.html");
@@ -405,6 +413,14 @@ for (let i = 0; i < HEADER; i++) buf[i] = 0;
 
 const semToBun = hlp.symbols.sem_open_create(cstr(shmName + ".tb"), O_CREAT | O_RDWR, MODE, 0);
 const semToShim = hlp.symbols.sem_open_create(cstr(shmName + ".ts"), O_CREAT | O_RDWR, MODE, 0);
+
+// Point the host's sidecar resolver at the bundled helpers, which live next to
+// the executable (<bundle>/sidecars/). The host runs from a temp extract dir,
+// so it can only find them via the real executable path. Without this a
+// compiled build copies sidecars in but cannot resolve them at runtime.
+if (!process.env.BUTTER_SIDECARS_DIR) {
+  process.env.BUTTER_SIDECARS_DIR = join(dirname(process.execPath), "sidecars");
+}
 
 const { runtime } = await import("${hostWrapperPath}");
 

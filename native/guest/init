@@ -1,0 +1,71 @@
+#!/bin/sh
+# Hopper guest init — PID 1 inside the initramfs.
+#
+# The OS lives entirely in the (read-only) initramfs. /dev/vda is the
+# persistent data disk supplied by the host; we format it on first boot and
+# mount it at /var/lib/docker. Then start dockerd and forward its unix socket
+# onto a vsock port so the host-side bridge (hopperd) can reach it.
+set -e
+
+# PID 1 starts with no PATH; dockerd resolves containerd/runc/docker-proxy from
+# it, so set it before anything runs.
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+mount -t proc     proc     /proc
+mount -t sysfs    sysfs    /sys
+mount -t devtmpfs dev      /dev      2>/dev/null || true
+mount -t tmpfs    tmpfs    /run
+mount -t tmpfs    tmpfs    /tmp
+mount -t cgroup2  cgroup2  /sys/fs/cgroup 2>/dev/null || true
+
+# Bring up loopback (dockerd expects it).
+ip link set lo up 2>/dev/null || true
+
+# Bring up the NAT'd uplink so containers can reach the internet. VZ's NAT
+# provides DHCP + DNS; udhcpc configures eth0 and writes /etc/resolv.conf.
+ip link set eth0 up 2>/dev/null || true
+udhcpc -i eth0 -b -t 10 2>/dev/null || true
+
+# Rosetta: if the host attached the translator share (Apple Silicon), mount it
+# and register it as the amd64 interpreter so x86_64 images run without QEMU.
+mkdir -p /mnt/rosetta
+if mount -t virtiofs rosetta /mnt/rosetta 2>/dev/null; then
+  mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
+  printf ':rosetta:M::\\x7fELF\\x02\\x01\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x3e\\x00:\\xff\\xff\\xff\\xff\\xff\\xfe\\xfe\\x00\\x00\\x00\\x00\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xff\\xfe\\xff\\xff\\xff:/mnt/rosetta/rosetta:PCF' \
+    > /proc/sys/fs/binfmt_misc/register 2>/dev/null || true
+fi
+
+# Persistent data disk -> /var/lib/docker. Format on first boot only.
+if ! blkid /dev/vda >/dev/null 2>&1; then
+  echo "[guest] formatting data disk /dev/vda"
+  mkfs.ext4 -q -F /dev/vda
+fi
+mkdir -p /var/lib/docker
+mount -t ext4 /dev/vda /var/lib/docker
+
+echo "[guest] starting dockerd"
+# We run from an initramfs, where containers can't pivot_root. DOCKER_RAMDISK
+# tells the daemon to use MS_MOVE + chroot instead (the boot2docker approach).
+export DOCKER_RAMDISK=1
+# Route dockerd output to the console so it lands in the host console.log.
+dockerd \
+  --host=unix:///run/docker.sock \
+  --data-root=/var/lib/docker \
+  >/dev/console 2>&1 &
+
+# Wait for the daemon socket to appear.
+i=0
+while [ ! -S /run/docker.sock ] && [ "$i" -lt 200 ]; do
+  i=$((i + 1))
+  sleep 0.1
+done
+
+# Guest agent on a second vsock port — answers reclaim/stats requests from
+# hopperd (one socat instance per connection).
+echo "[guest] starting agent on vsock:2377"
+socat VSOCK-LISTEN:2377,reuseaddr,fork EXEC:/agent &
+
+echo "[guest] forwarding dockerd onto vsock:2375"
+# VSOCK-LISTEN needs socat >= 1.7.4 built with vsock support. CID is implicit
+# (the guest); the host dials this port via VZVirtioSocketDevice.
+exec socat VSOCK-LISTEN:2375,reuseaddr,fork UNIX-CONNECT:/run/docker.sock

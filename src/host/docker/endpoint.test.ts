@@ -2,10 +2,15 @@ import { describe, expect, test } from "bun:test";
 import {
   baseUrl,
   connectOptions,
+  currentEndpoint,
+  dockerHostValue,
+  type Endpoint,
   hostHeader,
   normalizePipe,
   parseDockerHost,
+  reresolve,
   resolveEndpoint,
+  setEndpoint,
   unixTarget,
 } from "./endpoint.ts";
 
@@ -160,5 +165,49 @@ describe("normalizePipe", () => {
   test("forward slashes become backslashes; idempotent on backslashes", () => {
     expect(normalizePipe("//./pipe/docker_engine")).toBe("\\\\.\\pipe\\docker_engine");
     expect(normalizePipe("\\\\.\\pipe\\docker_engine")).toBe("\\\\.\\pipe\\docker_engine");
+  });
+});
+
+// The active endpoint is mutable at runtime — this is what lets a provider
+// point the client at a socket it brings up itself. Guards against anyone
+// re-freezing it at import time.
+describe("active endpoint", () => {
+  test("setEndpoint redirects what currentEndpoint returns", () => {
+    const ep: Endpoint = { transport: "unix", path: "/tmp/hopper.sock" };
+    setEndpoint(ep);
+    expect(currentEndpoint()).toEqual(ep);
+    // restore from the environment so other tests see a clean default.
+    reresolve({});
+  });
+
+  test("reresolve re-reads the environment", () => {
+    expect(reresolve({ DOCKER_HOST: "tcp://x:1234" })).toEqual({
+      transport: "tcp",
+      host: "x",
+      port: 1234,
+      tls: false,
+    });
+    reresolve({});
+  });
+});
+
+describe("dockerHostValue", () => {
+  test("unix socket", () => {
+    expect(dockerHostValue({ transport: "unix", path: "/var/run/docker.sock" })).toBe(
+      "unix:///var/run/docker.sock",
+    );
+  });
+  test("tcp, with and without tls", () => {
+    expect(dockerHostValue({ transport: "tcp", host: "h", port: 2375, tls: false })).toBe(
+      "tcp://h:2375",
+    );
+    expect(dockerHostValue({ transport: "tcp", host: "h", port: 2376, tls: true })).toBe(
+      "https://h:2376",
+    );
+  });
+  test("npipe normalizes to forward slashes", () => {
+    expect(dockerHostValue({ transport: "npipe", path: "\\\\.\\pipe\\docker_engine" })).toBe(
+      "npipe:////./pipe/docker_engine",
+    );
   });
 });

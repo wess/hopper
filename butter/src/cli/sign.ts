@@ -1,5 +1,5 @@
 import { join, basename } from "path"
-import { existsSync, mkdirSync } from "fs"
+import { existsSync, mkdirSync, readdirSync } from "fs"
 import { platform } from "os"
 import { loadConfig } from "../config"
 import type { Config, MacOsBundleOptions } from "../types"
@@ -94,6 +94,35 @@ const ensureJitEntitlements = async (projectDir: string): Promise<string> => {
   return path
 }
 
+// A sidecars/ dir can hold data assets (a kernel image, a rootfs) next to the
+// executables. Only Mach-O files are signable, so skip the rest.
+const isMachO = async (path: string): Promise<boolean> => {
+  const head = new Uint8Array(await Bun.file(path).slice(0, 4).arrayBuffer())
+  if (head.length < 4) return false
+  const magic = ((head[0]! << 24) | (head[1]! << 16) | (head[2]! << 8) | head[3]!) >>> 0
+  // Mach-O 32/64 (both byte orders) and fat/universal.
+  return [0xfeedface, 0xfeedfacf, 0xcefaedfe, 0xcffaedfe, 0xcafebabe].includes(magic)
+}
+
+// Sign one target (a binary or a .app). Deliberately no `--deep`: Apple has
+// deprecated it for distribution, and nested helpers are signed separately so
+// each can carry its own entitlements.
+const codesign = async (
+  target: string,
+  identity: string,
+  entitlements: string | undefined,
+  hardenedRuntime: boolean,
+): Promise<void> => {
+  const args = ["--force", "--sign", identity, "--timestamp"]
+  if (hardenedRuntime) args.push("--options", "runtime")
+  if (entitlements) args.push("--entitlements", entitlements)
+  args.push(target)
+  const result = await Bun.$`codesign ${args}`.quiet()
+  if (result.exitCode !== 0) {
+    throw new Error(`codesign failed for ${target}: ${result.stderr.toString()}`)
+  }
+}
+
 const signMacOS = async (
   appPath: string,
   cliOpts: SignOptions,
@@ -108,30 +137,39 @@ const signMacOS = async (
   if (opts.hardenedRuntime) console.log("  Hardened Runtime: on")
   if (opts.notarize) console.log("  Will notarize after signing.")
 
-  const codesignArgs = ["--force", "--deep", "--sign", identity]
-
   // Auto-provide JIT entitlements when Hardened Runtime is on and no user
   // entitlements file was supplied — otherwise notarized Bun apps crash on
-  // launch the first time JSC compiles a function.
-  let entitlements = opts.entitlements
-  if (opts.hardenedRuntime && !entitlements && allowJit) {
-    entitlements = await ensureJitEntitlements(projectDir)
-    console.log(`  Generated JIT entitlements: ${entitlements}`)
-  }
-  if (entitlements) {
-    codesignArgs.push("--entitlements", entitlements)
+  // launch the first time JSC compiles a function. These apply to the MAIN
+  // app only; nested helpers get their own (below).
+  let appEntitlements = opts.entitlements
+  if (opts.hardenedRuntime && !appEntitlements && allowJit) {
+    appEntitlements = await ensureJitEntitlements(projectDir)
+    console.log(`  Generated JIT entitlements: ${appEntitlements}`)
   }
 
-  if (opts.hardenedRuntime) {
-    codesignArgs.push("--options", "runtime")
+  // Inside-out signing: sign nested sidecars first, each with its own
+  // entitlements (e.g. the VM helper's com.apple.security.virtualization),
+  // then the outer app. A single `--deep` pass can't grant per-binary
+  // entitlements and is unsuitable for notarized distribution.
+  if (appPath.endsWith(".app")) {
+    const sidecarsDir = join(appPath, "Contents", "MacOS", "sidecars")
+    if (existsSync(sidecarsDir)) {
+      const entMap = config.bundle?.macos?.sidecarEntitlements ?? {}
+      for (const name of readdirSync(sidecarsDir)) {
+        const target = join(sidecarsDir, name)
+        if (!(await isMachO(target))) {
+          console.log(`  Skipping non-executable sidecar asset ${name}`)
+          continue
+        }
+        const rel = entMap[name]
+        const ents = rel ? join(projectDir, rel) : undefined
+        console.log(`  Signing sidecar ${name}${ents ? ` (entitlements: ${rel})` : ""}`)
+        await codesign(target, identity, ents, opts.hardenedRuntime)
+      }
+    }
   }
-  codesignArgs.push("--timestamp")
-  codesignArgs.push(appPath)
 
-  const result = await Bun.$`codesign ${codesignArgs}`.quiet()
-  if (result.exitCode !== 0) {
-    throw new Error(`codesign failed: ${result.stderr.toString()}`)
-  }
+  await codesign(appPath, identity, appEntitlements, opts.hardenedRuntime)
   console.log("  Signed successfully.")
 
   const verify = await Bun.$`codesign --verify --deep --strict ${appPath}`.quiet()

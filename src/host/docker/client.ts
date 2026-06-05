@@ -3,14 +3,18 @@
 // named pipe, or TCP (remote / Windows "expose on tcp://"). Every higher-level
 // module (containers, images, …) is built on `req` / `json` / `stream` here.
 
-import { baseUrl, resolveEndpoint, unixTarget } from "./endpoint.ts";
+import { baseUrl, currentEndpoint, unixTarget } from "./endpoint.ts";
 
 // Pinned to a version inside the daemon's supported window [1.40, 1.54].
 const API = "v1.43";
-const ENDPOINT = resolveEndpoint();
-const BASE = baseUrl(ENDPOINT, API);
-// Socket/pipe path for `fetch`'s `unix` option; undefined when using TCP.
-const UNIX = unixTarget(ENDPOINT);
+
+// Resolve the request target fresh each call. The active endpoint can change
+// at runtime (a provider bringing up its own socket), so it must not be frozen
+// at import time — see `endpoint.ts#currentEndpoint`.
+const target = (): { base: string; unix: string | undefined } => {
+  const ep = currentEndpoint();
+  return { base: baseUrl(ep, API), unix: unixTarget(ep) };
+};
 
 export type Query = Record<string, string | number | boolean | undefined | null>;
 
@@ -45,14 +49,15 @@ export const isRawBody = (b: unknown): b is BodyInit =>
 // Raw request — returns the Response so callers can read JSON, text, or a
 // streaming body. Throws a `DockerError` for non-2xx with the daemon message.
 export const req = async (path: string, opts: ReqOptions = {}): Promise<Response> => {
+  const { base, unix } = target();
   const headers: Record<string, string> = { ...(opts.headers ?? {}) };
   const init: RequestInit & { unix?: string; duplex?: "half" } = {
     method: opts.method ?? "GET",
     signal: opts.signal,
     headers,
   };
-  // TCP endpoints are addressed by the BASE url; socket/pipe ones need `unix`.
-  if (UNIX !== undefined) init.unix = UNIX;
+  // TCP endpoints are addressed by the base url; socket/pipe ones need `unix`.
+  if (unix !== undefined) init.unix = unix;
   if (opts.body !== undefined) {
     if (isRawBody(opts.body)) {
       init.body = opts.body;
@@ -63,7 +68,7 @@ export const req = async (path: string, opts: ReqOptions = {}): Promise<Response
       if (!headers["Content-Type"]) headers["Content-Type"] = "application/json";
     }
   }
-  const res = await fetch(`${BASE}${path}${qs(opts.query)}`, init);
+  const res = await fetch(`${base}${path}${qs(opts.query)}`, init);
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {

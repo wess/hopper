@@ -123,3 +123,40 @@ export const connectOptions = (
 // The HTTP `Host:` header for hand-rolled requests.
 export const hostHeader = (ep: Endpoint): string =>
   ep.transport === "tcp" ? `${ep.host}:${ep.port}` : "localhost";
+
+// A human-readable description for the UI / logs.
+export const describeEndpoint = (ep: Endpoint): string =>
+  ep.transport === "tcp"
+    ? `${ep.tls ? "https" : "http"}://${ep.host}:${ep.port}`
+    : `${ep.transport}:${ep.path}`;
+
+// A DOCKER_HOST value for child processes (the bundled compose binary, the
+// docker CLI) so they target the same engine the client is using.
+export const dockerHostValue = (ep: Endpoint): string =>
+  ep.transport === "tcp"
+    ? `${ep.tls ? "https" : "tcp"}://${ep.host}:${ep.port}`
+    : ep.transport === "npipe"
+      ? `npipe://${ep.path.replace(/\\/g, "/")}`
+      : `unix://${ep.path}`;
+
+// --- the active endpoint ---------------------------------------------------
+// Historically the endpoint was frozen into module consts at import time,
+// which assumed a daemon was already listening before Hopper started. The
+// engine layer needs to point the client at a socket it brings up itself
+// (e.g. our VM's forwarded dockerd socket), so the active endpoint is now
+// mutable and read per request via `currentEndpoint()`.
+
+let active: Endpoint = resolveEndpoint();
+
+export const currentEndpoint = (): Endpoint => active;
+
+// Override the active endpoint (a provider calls this once it owns a socket).
+export const setEndpoint = (ep: Endpoint): void => {
+  active = ep;
+};
+
+// Re-read the endpoint from the environment + platform. Returns the new value.
+export const reresolve = (env?: DockerEnv, os?: string): Endpoint => {
+  active = resolveEndpoint(env, os);
+  return active;
+};

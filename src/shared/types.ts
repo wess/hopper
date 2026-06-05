@@ -255,10 +255,44 @@ export type DockerEvent = {
   readonly message: string; // pre-formatted one-liner for the activity feed
 };
 
-// Whether the daemon is reachable — drives the connection banner.
+// The engine lifecycle as Hopper sees it. Richer than a reachable/not
+// boolean so the UI can act: a managed provider can be started, a stopped
+// daemon restarted, a permission problem explained — instead of just told
+// to "go open something else".
+export type EngineState =
+  | "connected" // reachable and answering /_ping
+  | "starting" // a managed provider is bringing the engine up (or first probe in flight)
+  | "stopped" // an engine is present/known but not currently listening
+  | "notInstalled" // no engine and no provider that can supply one here
+  | "unreachable" // the endpoint exists but errors/times out
+  | "needsPermission" // the socket is there but we're denied (e.g. docker group)
+  | "unsupported"; // the active provider can't run on this machine
+
+// Whether the daemon is reachable, and enough context to do something about
+// it. `connected` is kept as a derived convenience (=== state "connected").
 export type EngineStatus = {
+  readonly state: EngineState;
   readonly connected: boolean;
-  readonly message: string;
+  readonly message: string; // human one-liner (also feeds the activity banner)
+  readonly provider: string; // active provider id ("vz" | "linux" | "existing" | …)
+  readonly managed: boolean; // does Hopper own this engine's lifecycle?
+  readonly detail?: string; // extra diagnostic line for the UI
+  readonly endpoint?: string; // human description of where we're talking
+};
+
+// Live stats from a managed engine's VM (from the in-guest agent).
+export type EngineStats = {
+  readonly memTotalKb: number;
+  readonly memAvailKb: number;
+  readonly diskTotalKb: number;
+  readonly diskUsedKb: number;
+  readonly load1: number;
+};
+
+// Result of a disk-reclaim request against a managed engine.
+export type ReclaimResult = {
+  readonly ok: boolean;
+  readonly detail: string;
 };
 
 // A pruned-resource report (containers/images/volumes/networks/buildcache).
