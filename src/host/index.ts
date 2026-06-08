@@ -301,7 +301,7 @@ handle(ch.composeDown, ({ requestId, file, project }) =>
 
 handle(ch.mcpConfig, () => ({
   command: "bun",
-  args: [join(import.meta.dir, "..", "mcp.ts")],
+  args: [join(import.meta.dir, "..", "mcp", "index.ts")],
 }));
 
 // --- tray / status-bar app -------------------------------------------------
