@@ -5,6 +5,7 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { getAuth, getGithub } from "../auth/store.ts";
 
 export type DockerConfig = {
   auths?: Record<string, { auth?: string; identitytoken?: string }>;
@@ -21,10 +22,26 @@ export type RegistryAuth = {
 };
 
 // Docker Hub credentials live under this canonical key, not under "docker.io".
-const DOCKER_HUB_SERVER = "https://index.docker.io/v1/";
+export const DOCKER_HUB_SERVER = "https://index.docker.io/v1/";
 
 // Strip scheme + trailing slash so `https://host/` and `host` compare equal.
-const bare = (s: string): string => s.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+export const bare = (s: string): string => s.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+
+// Normalize a user-entered registry host to the key everything else uses: the
+// Hub aliases collapse to DOCKER_HUB_SERVER (matching `registryHost`), any other
+// host is kept bare. Blank means Docker Hub.
+const HUB_ALIASES = new Set([
+  "",
+  "docker.io",
+  "index.docker.io",
+  "index.docker.io/v1", // the docker config key, scheme/slash-stripped
+  "registry-1.docker.io",
+]);
+
+export const canonicalServer = (server?: string): string => {
+  const b = bare((server ?? "").trim());
+  return HUB_ALIASES.has(b) ? DOCKER_HUB_SERVER : b;
+};
 
 // Derive the registry server address from an image reference. Bare names and
 // `docker.io/...` map to Hub's canonical endpoint; otherwise the first path
@@ -110,6 +127,25 @@ const credHelperGet = async (helper: string, server: string): Promise<RegistryAu
 // no credentials are configured (anonymous).
 export const resolveAuth = async (ref: string): Promise<RegistryAuth | null> => {
   const server = registryHost(ref);
+
+  // 1. A credential the user signed in with from inside Hopper (OS keychain).
+  //    This is the path that makes push/pull work with no `docker login` CLI.
+  const stored = await getAuth(server);
+  if (stored) {
+    if (stored.kind === "token") return { identitytoken: stored.secret, serveraddress: server };
+    return { username: stored.username, password: stored.secret, serveraddress: server };
+  }
+
+  // 2. GHCR pulls authenticated by a connected GitHub account — the PAT doubles
+  //    as the registry password (any username works; we use the real login).
+  if (server === "ghcr.io") {
+    const gh = await getGithub();
+    if (gh?.token) {
+      return { username: gh.login ?? "x-access-token", password: gh.token, serveraddress: server };
+    }
+  }
+
+  // 3. Fall back to the user's existing docker config (helpers + auths).
   const cfg = await readConfig();
 
   const helpers = cfg.credHelpers ?? {};

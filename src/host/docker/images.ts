@@ -104,10 +104,16 @@ export const pull = async (
 ): Promise<{ ok: boolean; error?: string }> => {
   // Default to :latest when no tag/digest is given.
   const fromImage = ref.includes(":") || ref.includes("@") ? ref : `${ref}:latest`;
+  // Authenticate the pull when we have a credential for this registry — this is
+  // what raises Docker Hub's anonymous rate limit and unlocks private images
+  // (e.g. GHCR). No credential => anonymous pull, exactly as before.
+  const auth = await resolveAuth(ref);
+  const headers = auth ? { "X-Registry-Auth": encodeRegistryAuth(auth) } : undefined;
   let error: string | undefined;
   for await (const frame of ndjson<RawPull>("/images/create", {
     method: "POST",
     query: { fromImage },
+    headers,
   })) {
     if (frame.error) {
       error = frame.error;

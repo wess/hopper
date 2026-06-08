@@ -4,6 +4,7 @@
 // Unauthenticated search is rate-limited (~10/min); 403/429 yields [].
 
 import type { RegistryResult } from "../../shared/types.ts";
+import { githubToken } from "../auth/github.ts";
 
 type GitHubRepo = {
   full_name?: string;
@@ -24,13 +25,15 @@ export const searchGithub = async (
   const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(
     term,
   )}&sort=stars&order=desc&per_page=20`;
-  const res = await fetch(url, {
-    signal,
-    headers: {
-      "User-Agent": "Hopper",
-      Accept: "application/vnd.github+json",
-    },
-  });
+  const headers: Record<string, string> = {
+    "User-Agent": "Hopper",
+    Accept: "application/vnd.github+json",
+  };
+  // A connected account lifts the unauthenticated ~10/min search cap and lets
+  // private repos surface.
+  const token = await githubToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(url, { signal, headers });
   // Rate-limited or otherwise unavailable — degrade quietly.
   if (!res.ok) return [];
   const body = (await res.json()) as GitHubResponse;

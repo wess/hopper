@@ -400,6 +400,32 @@ export type RegistryResult = {
   readonly updated?: string; // ISO last-updated, when known
 };
 
+// --- accounts / credentials -----------------------------------------------
+// In-app registry sign-in (no `docker login` CLI needed). Credentials are kept
+// in the OS keychain via @basket/secrets and consulted by push/pull.
+export type RegistryLoginInput = {
+  readonly server?: string; // registry host; blank/"docker.io" => Docker Hub
+  readonly username: string;
+  readonly password: string; // password or access token / PAT
+};
+
+// One logged-in registry, for the Accounts panel. `source` says whether the
+// credential lives in Hopper's keychain or in the user's existing docker config
+// (the latter is read-only here — we surface it but don't own it).
+export type RegistryConnection = {
+  readonly server: string; // canonical server address
+  readonly label: string; // friendly name ("Docker Hub", host, …)
+  readonly username?: string; // known for keychain creds; absent for helpers
+  readonly source: "hopper" | "docker";
+};
+
+// GitHub connection: a stored PAT raises search rate limits, unlocks private
+// repo search, and authenticates GHCR pulls.
+export type GithubStatus = {
+  readonly connected: boolean;
+  readonly login?: string; // the authenticated account, when connected
+};
+
 // --- compose --------------------------------------------------------------
 // One line of output from a `docker compose up/down` run, streamed to the UI.
 // `done` marks the final frame; `error` is set when the run exited non-zero.

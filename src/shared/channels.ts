@@ -11,6 +11,7 @@ import type {
   EngineStats,
   EngineStatus,
   ExecChunk,
+  GithubStatus,
   Image,
   ImageHistoryEntry,
   ImageSearchResult,
@@ -27,6 +28,8 @@ import type {
   PullProgress,
   PushProgress,
   ReclaimResult,
+  RegistryConnection,
+  RegistryLoginInput,
   RegistryResult,
   RegistrySource,
   RunInput,
@@ -196,6 +199,28 @@ export const registrySearch = defineChannel<
 // Logged-in registry hosts (read from the user's docker config) — surfaced in
 // Settings. Returns hostnames only, never secrets.
 export const registryLogins = defineChannel<void, string[]>("registry:logins");
+
+// --- accounts / credentials -----------------------------------------------
+// In-app registry sign-in so push/pull work with no `docker login` CLI. Login
+// validates against the daemon's /auth and stores the credential in the OS
+// keychain; the list and logout manage Hopper-owned credentials.
+export const registryLogin = defineChannel<RegistryLoginInput, { ok: boolean; error?: string }>(
+  "registry:login",
+);
+export const registryLogout = defineChannel<{ server: string }, void>("registry:logout");
+export const registryConnections = defineChannel<void, RegistryConnection[]>(
+  "registry:connections",
+);
+
+// GitHub account: connect with a PAT (raises search limits, unlocks private
+// repo search + GHCR pulls), disconnect, and report status. Tokens never leave
+// the host; status returns the login only.
+export const githubConnect = defineChannel<
+  { token: string },
+  { ok: boolean; login?: string; error?: string }
+>("github:connect");
+export const githubDisconnect = defineChannel<void, void>("github:disconnect");
+export const githubStatus = defineChannel<void, GithubStatus>("github:status");
 
 // --- compose --------------------------------------------------------------
 // Bring a compose file up/down by shelling out to the `docker compose` CLI.

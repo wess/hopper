@@ -10,6 +10,7 @@
         "@basket/ipc": "workspace:*",
         "@basket/mcp": "workspace:*",
         "@basket/menu": "workspace:*",
+        "@basket/secrets": "workspace:*",
         "@basket/store": "workspace:*",
         "@basket/tray": "workspace:*",
         "@basket/ui": "workspace:*",

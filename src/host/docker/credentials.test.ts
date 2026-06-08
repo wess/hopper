@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  canonicalServer,
   decodeAuthEntry,
   encodeRegistryAuth,
   matchKey,
@@ -8,6 +9,34 @@ import {
 } from "./credentials.ts";
 
 const HUB = "https://index.docker.io/v1/";
+
+describe("canonicalServer", () => {
+  test("blank and Hub aliases collapse to the canonical Hub key", () => {
+    expect(canonicalServer()).toBe(HUB);
+    expect(canonicalServer("")).toBe(HUB);
+    expect(canonicalServer("  ")).toBe(HUB);
+    expect(canonicalServer("docker.io")).toBe(HUB);
+    expect(canonicalServer("index.docker.io")).toBe(HUB);
+    expect(canonicalServer("registry-1.docker.io")).toBe(HUB);
+  });
+
+  test("the docker config Hub key collapses to Hub (so logins dedupe)", () => {
+    expect(canonicalServer(HUB)).toBe(HUB);
+    expect(canonicalServer("https://index.docker.io/v1/")).toBe(HUB);
+  });
+
+  test("matches what registryHost resolves so store lookups line up", () => {
+    expect(canonicalServer("ghcr.io")).toBe(registryHost("ghcr.io/owner/app"));
+    expect(canonicalServer("quay.io")).toBe(registryHost("quay.io/org/img"));
+  });
+
+  test("other hosts are kept bare (scheme + trailing slash stripped)", () => {
+    expect(canonicalServer("ghcr.io")).toBe("ghcr.io");
+    expect(canonicalServer("https://ghcr.io/")).toBe("ghcr.io");
+    expect(canonicalServer("localhost:5000")).toBe("localhost:5000");
+    expect(canonicalServer("registry.example.com")).toBe("registry.example.com");
+  });
+});
 
 describe("registryHost", () => {
   test("bare names map to Docker Hub", () => {

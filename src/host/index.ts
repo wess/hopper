@@ -7,6 +7,7 @@ import { mainWindow, setWindow } from "@basket/window";
 import { version } from "../../package.json";
 import * as ch from "../shared/channels.ts";
 import type { DockerEvent, EngineState, EngineStatus } from "../shared/types.ts";
+import { registerAuthHandlers } from "./auth/index.ts";
 import * as build from "./docker/build.ts";
 import * as compose from "./docker/compose.ts";
 import * as containers from "./docker/containers.ts";
@@ -277,6 +278,12 @@ handle(ch.networkDisconnect, ({ id, container, force }) =>
 registerRegistryHandlers();
 
 handle(ch.registryLogins, () => credentials.listRegistries());
+
+// --- accounts (registry sign-in + GitHub connection) -----------------------
+// In-app credentials so push/pull work with no `docker login` CLI; stored in
+// the OS keychain and consulted by docker/credentials.ts#resolveAuth.
+
+registerAuthHandlers();
 
 // --- compose ---------------------------------------------------------------
 // Bring stacks up/down via the docker compose CLI; output streams by requestId.

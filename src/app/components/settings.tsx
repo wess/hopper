@@ -16,6 +16,7 @@ import {
   type ThemePref,
   useApp,
 } from "../state/store.ts";
+import { GithubAccountPanel, RegistryAccountsPanel } from "./accounts/index.tsx";
 import { MigrationPanel } from "./migrate.tsx";
 import { Button, Field, Input, Modal, ViewHeader } from "./ui.tsx";
 
@@ -482,6 +483,8 @@ export const SettingsView = () => (
     <div style={{ padding: "0 22px", display: "flex", flexDirection: "column", gap: 14 }}>
       <EnginePanel />
       <ResourcesPanel />
+      <RegistryAccountsPanel />
+      <GithubAccountPanel />
       <MigrationPanel />
       <ThemePanel />
       <WorkspacesPanel />
