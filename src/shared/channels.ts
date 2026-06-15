@@ -2,7 +2,13 @@ import { defineChannel, defineEvent } from "@basket/ipc";
 import type {
   BuildInput,
   BuildProgress,
+  ComposeAction,
+  ComposeConfigResult,
+  ComposeFileResult,
+  ComposeOptions,
   ComposeProgress,
+  ComposeProject,
+  ComposeTarget,
   Container,
   ContainerStats,
   DiskUsage,
@@ -223,18 +229,42 @@ export const githubDisconnect = defineChannel<void, void>("github:disconnect");
 export const githubStatus = defineChannel<void, GithubStatus>("github:status");
 
 // --- compose --------------------------------------------------------------
-// Bring a compose file up/down by shelling out to the `docker compose` CLI.
-// `composeAvailable` gates the feature when the CLI isn't installed. Output
-// streams via `composeProgress` events keyed by requestId.
+// First-class stack management by shelling out to the compose CLI (a bundled
+// binary, the `docker compose` v2 plugin, or legacy `docker-compose` v1).
+// `composeAvailable` gates the feature when none is found. Stack output streams
+// via `composeProgress` events keyed by requestId.
 export const composeAvailable = defineChannel<void, boolean>("compose:available");
-export const composeUp = defineChannel<
-  { requestId: string; file: string; project?: string },
+
+// List compose projects (stacks), reconstructed from container labels so it
+// works against any engine without a running compose CLI.
+export const composeList = defineChannel<void, ComposeProject[]>("compose:list");
+
+// Run a lifecycle action (up/down/start/stop/restart/remove) over a stack;
+// output streams via composeProgress keyed by requestId.
+export const composeAction = defineChannel<
+  {
+    requestId: string;
+    action: ComposeAction;
+    target: ComposeTarget;
+    options?: ComposeOptions;
+  },
   { ok: boolean; error?: string }
->("compose:up");
-export const composeDown = defineChannel<
-  { requestId: string; file: string; project?: string },
-  { ok: boolean; error?: string }
->("compose:down");
+>("compose:action");
+
+// Validate + normalize a compose file set (`docker compose config`).
+export const composeConfig = defineChannel<
+  { files: readonly string[]; project?: string },
+  ComposeConfigResult
+>("compose:config");
+
+// Read / write a compose file on the host filesystem (the in-app editor).
+export const composeReadFile = defineChannel<{ path: string }, ComposeFileResult>(
+  "compose:readfile",
+);
+export const composeWriteFile = defineChannel<{ path: string; content: string }, ComposeFileResult>(
+  "compose:writefile",
+);
+
 export const composeProgress = defineEvent<ComposeProgress>("evt:compose");
 
 // --- mcp ------------------------------------------------------------------

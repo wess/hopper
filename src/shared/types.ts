@@ -437,6 +437,70 @@ export type ComposeProgress = {
   readonly error?: string;
 };
 
+// Aggregate status of a compose stack.
+export type ComposeStackStatus = "running" | "partial" | "stopped";
+
+// One container instance belonging to a compose service (a service may have
+// several when scaled).
+export type ComposeService = {
+  readonly service: string; // compose service name
+  readonly containerId: string;
+  readonly containerName: string;
+  readonly state: ContainerState;
+  readonly status: string; // human "Up 3 hours"
+  readonly image: string;
+  readonly ports: readonly Port[];
+};
+
+// A compose project (stack), reconstructed from container labels so it works
+// against any engine without a running compose CLI.
+export type ComposeProject = {
+  readonly name: string;
+  readonly status: ComposeStackStatus;
+  readonly running: number;
+  readonly total: number;
+  readonly services: readonly ComposeService[];
+  readonly configFiles: readonly string[]; // com.docker.compose.project.config_files
+  readonly workingDir: string | null; // com.docker.compose.project.working_dir
+};
+
+// A lifecycle action over a whole stack. `remove` is a full teardown
+// (down + volumes + orphans).
+export type ComposeAction = "up" | "down" | "start" | "stop" | "restart" | "remove";
+
+// Which files / project / env the compose command targets. Lifecycle ops on an
+// existing stack (start/stop/restart/down) work label-driven with just a
+// project; `up` needs the file(s).
+export type ComposeTarget = {
+  readonly files?: readonly string[]; // -f (repeatable)
+  readonly project?: string; // -p
+  readonly envFile?: string; // --env-file
+};
+
+// Extra flags for up/down.
+export type ComposeOptions = {
+  readonly profiles?: readonly string[]; // --profile (repeatable)
+  readonly build?: boolean; // up --build
+  readonly forceRecreate?: boolean; // up --force-recreate
+  readonly removeOrphans?: boolean; // up/down --remove-orphans (up defaults true)
+  readonly volumes?: boolean; // down --volumes
+  readonly rmi?: "all" | "local"; // down --rmi
+};
+
+// Result of validating a compose file set (`docker compose config`).
+export type ComposeConfigResult = {
+  readonly ok: boolean;
+  readonly yaml?: string; // normalized, merged config on success
+  readonly error?: string; // validation error on failure
+};
+
+// Reading/writing a compose file on the host filesystem (the in-app editor).
+export type ComposeFileResult = {
+  readonly ok: boolean;
+  readonly content?: string;
+  readonly error?: string;
+};
+
 // --- MCP ------------------------------------------------------------------
 // The launch command for Hopper's standalone Docker MCP server, surfaced in
 // Settings so users can register it with an AI client.

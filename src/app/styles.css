@@ -1270,6 +1270,38 @@ th.right {
   font-size: 13px;
 }
 
+/* checkbox + label, used inline in option groups (e.g. the compose dialog) */
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  cursor: pointer;
+}
+
+/* monospace multi-line editor (compose file editor) */
+.code-editor {
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 2;
+}
+
+/* confirm dialog body text */
+.confirm-message {
+  margin: 0 0 4px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+/* emphasized primary cell text (stack name, etc.) */
+.cell-strong {
+  font-weight: 600;
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;

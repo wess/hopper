@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { buildQuery, dockerignoreExcludes, mapBuildFrame } from "./build.ts";
+import { buildQuery, dockerignoreExcludes, dockerignoreNegations, mapBuildFrame } from "./build.ts";
 
 describe("buildQuery", () => {
   test("defaults dockerfile and sets rm", () => {
@@ -46,6 +46,18 @@ describe("dockerignoreExcludes", () => {
 
   test("empty input yields no excludes", () => {
     expect(dockerignoreExcludes("")).toEqual([]);
+  });
+});
+
+describe("dockerignoreNegations", () => {
+  test("collects negation rules (which the classic builder can't apply)", () => {
+    const text = ["*.log", "!keep.me", "node_modules", "  !also.keep  ", "!"].join("\n");
+    // The bare "!" is not a real pattern and is excluded.
+    expect(dockerignoreNegations(text)).toEqual(["!keep.me", "!also.keep"]);
+  });
+
+  test("no negations yields an empty list", () => {
+    expect(dockerignoreNegations("node_modules\n*.log")).toEqual([]);
   });
 });
 

@@ -3,6 +3,7 @@
 
 import { Play, RotateCw, Square, Trash2 } from "lucide-react";
 import type { Container } from "../../../shared/types.ts";
+import { confirm } from "../../lib/confirm.tsx";
 import { ago, formatPorts } from "../../lib/format.ts";
 import { StatusDot } from "../ui.tsx";
 import * as act from "./actions.ts";
@@ -31,7 +32,14 @@ export const Row = ({
 
   const remove = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!window.confirm(`Remove container "${c.name}"?`)) return;
+    if (
+      !(await confirm({
+        title: `Remove container "${c.name}"?`,
+        confirmLabel: "Remove",
+        danger: true,
+      }))
+    )
+      return;
     if (await act.remove(c)) onRemoved();
   };
 

@@ -9,7 +9,7 @@ import * as ch from "../shared/channels.ts";
 import type { DockerEvent, EngineState, EngineStatus } from "../shared/types.ts";
 import { registerAuthHandlers } from "./auth/index.ts";
 import * as build from "./docker/build.ts";
-import * as compose from "./docker/compose.ts";
+import * as compose from "./docker/compose/index.ts";
 import * as containers from "./docker/containers.ts";
 import * as credentials from "./docker/credentials.ts";
 import * as exec from "./docker/exec.ts";
@@ -289,12 +289,13 @@ registerAuthHandlers();
 // Bring stacks up/down via the docker compose CLI; output streams by requestId.
 
 handle(ch.composeAvailable, () => compose.available());
-handle(ch.composeUp, ({ requestId, file, project }) =>
-  compose.runCompose(requestId, "up", file, project, (p) => emit(ch.composeProgress, p)),
+handle(ch.composeList, () => compose.listProjects());
+handle(ch.composeAction, ({ requestId, action, target, options }) =>
+  compose.runCompose(requestId, action, target, options, (p) => emit(ch.composeProgress, p)),
 );
-handle(ch.composeDown, ({ requestId, file, project }) =>
-  compose.runCompose(requestId, "down", file, project, (p) => emit(ch.composeProgress, p)),
-);
+handle(ch.composeConfig, ({ files, project }) => compose.validateConfig(files, project));
+handle(ch.composeReadFile, ({ path }) => compose.readComposeFile(path));
+handle(ch.composeWriteFile, ({ path, content }) => compose.writeComposeFile(path, content));
 
 // --- mcp -------------------------------------------------------------------
 // The standalone Docker MCP server lives next to this host entry point.

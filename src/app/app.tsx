@@ -5,12 +5,15 @@ import { useCallback, useEffect, useState } from "react";
 import * as ch from "../shared/channels.ts";
 import { ContainersView } from "./components/containers.tsx";
 import { DashboardView } from "./components/dashboard.tsx";
+import { ErrorBoundary } from "./components/errorboundary.tsx";
 import { ImagesView } from "./components/images.tsx";
 import { NetworksView } from "./components/networks.tsx";
 import { OnboardingView } from "./components/onboarding.tsx";
 import { SettingsView } from "./components/settings.tsx";
 import { Sidebar } from "./components/sidebar.tsx";
+import { StacksView } from "./components/stacks.tsx";
 import { VolumesView } from "./components/volumes.tsx";
+import { ConfirmHost } from "./lib/confirm.tsx";
 import { subscribe } from "./lib/ipc.ts";
 import { setState, setTheme, setView, type ThemePref, useApp, type ViewId } from "./state/store.ts";
 
@@ -35,6 +38,7 @@ const nextTheme = (pref: ThemePref): ThemePref =>
 const VIEWS: Record<ViewId, () => ReactElement> = {
   dashboard: DashboardView,
   containers: ContainersView,
+  stacks: StacksView,
   images: ImagesView,
   volumes: VolumesView,
   networks: NetworksView,
@@ -76,6 +80,7 @@ export const App = () => {
         if (
           v === "dashboard" ||
           v === "containers" ||
+          v === "stacks" ||
           v === "images" ||
           v === "volumes" ||
           v === "networks" ||
@@ -96,6 +101,7 @@ export const App = () => {
         else if (
           cmd === "dashboard" ||
           cmd === "containers" ||
+          cmd === "stacks" ||
           cmd === "images" ||
           cmd === "volumes" ||
           cmd === "networks" ||
@@ -116,6 +122,7 @@ export const App = () => {
   const commands: PaletteCommand[] = [
     { id: "dashboard", label: "Go to Dashboard", action: () => setView("dashboard") },
     { id: "containers", label: "Go to Containers", action: () => setView("containers") },
+    { id: "stacks", label: "Go to Stacks", action: () => setView("stacks") },
     { id: "images", label: "Go to Images", action: () => setView("images") },
     { id: "volumes", label: "Go to Volumes", action: () => setView("volumes") },
     { id: "networks", label: "Go to Networks", action: () => setView("networks") },
@@ -145,10 +152,19 @@ export const App = () => {
     <div className="app-shell" data-collapsed={sidebarCollapsed}>
       <Sidebar />
       <main className="app-main">
-        <div className="app-content">{engine.connected ? <Current /> : <OnboardingView />}</div>
+        <div className="app-content">
+          {engine.connected ? (
+            <ErrorBoundary key={view}>
+              <Current />
+            </ErrorBoundary>
+          ) : (
+            <OnboardingView />
+          )}
+        </div>
       </main>
       <Palette open={paletteOpen} onClose={() => setPaletteOpen(false)} commands={commands} />
       <Toaster />
+      <ConfirmHost />
     </div>
   );
 };

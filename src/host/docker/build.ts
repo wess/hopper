@@ -29,6 +29,16 @@ export const dockerignoreExcludes = (text: string): string[] =>
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith("#") && !l.startsWith("!"));
 
+// Negation rules (`!pattern`) found in a `.dockerignore`. The classic builder
+// packs the context with `tar --exclude`, which can't express "exclude X but
+// keep Y", so these are NOT applied. We surface them to the user (see
+// buildImage) rather than dropping them silently.
+export const dockerignoreNegations = (text: string): string[] =>
+  text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith("!") && l.length > 1);
+
 type RawBuildFrame = {
   stream?: string;
   status?: string;
@@ -47,10 +57,13 @@ export const mapBuildFrame = (requestId: string, f: RawBuildFrame): BuildProgres
   done: false,
 });
 
-const readDockerignore = async (dir: string): Promise<string[]> => {
+const readDockerignore = async (
+  dir: string,
+): Promise<{ excludes: string[]; negations: string[] }> => {
   const file = Bun.file(join(dir, ".dockerignore"));
-  if (!(await file.exists())) return [];
-  return dockerignoreExcludes(await file.text());
+  if (!(await file.exists())) return { excludes: [], negations: [] };
+  const text = await file.text();
+  return { excludes: dockerignoreExcludes(text), negations: dockerignoreNegations(text) };
 };
 
 // Stream the context dir as a tar archive. `tar` writes to stdout, which we
@@ -69,10 +82,19 @@ export const buildImage = async (
   input: BuildInput,
   onProgress: (p: BuildProgress) => void,
 ): Promise<{ ok: boolean; error?: string; imageId?: string }> => {
-  const excludes = await readDockerignore(input.contextDir);
+  const { excludes, negations } = await readDockerignore(input.contextDir);
   const proc = tarContext(input.contextDir, excludes);
   let error: string | undefined;
   let imageId: string | undefined;
+  // Surface unapplied negation rules so a kept-by-`!` file silently shipping
+  // in the context isn't a mystery (the classic builder's tar can't honor them).
+  if (negations.length > 0) {
+    onProgress({
+      requestId,
+      status: `Note: ${negations.length} .dockerignore negation rule(s) (e.g. "${negations[0]}") are not applied by the classic builder — those paths follow their broader ignore rule.`,
+      done: false,
+    });
+  }
   try {
     for await (const frame of ndjson<RawBuildFrame>("/build", {
       method: "POST",

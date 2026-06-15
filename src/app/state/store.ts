@@ -5,7 +5,14 @@
 import { useSyncExternalStore } from "react";
 import type { EngineStatus, Workspace } from "../../shared/types.ts";
 
-export type ViewId = "dashboard" | "containers" | "images" | "volumes" | "networks" | "settings";
+export type ViewId =
+  | "dashboard"
+  | "containers"
+  | "stacks"
+  | "images"
+  | "volumes"
+  | "networks"
+  | "settings";
 export type ThemePref = "light" | "dark" | "system";
 
 export type AppState = {

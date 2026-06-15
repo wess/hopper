@@ -4,6 +4,7 @@
 import { Pause, Play, RotateCw, Square, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import type { Container } from "../../../shared/types.ts";
+import { confirm } from "../../lib/confirm.tsx";
 import { ago, formatPorts, shortId } from "../../lib/format.ts";
 import { Badge, Button, StatusDot } from "../ui.tsx";
 import * as act from "./actions.ts";
@@ -46,7 +47,15 @@ export const Detail = ({
   const paused = c.state === "paused";
 
   const doRemove = async () => {
-    if (!window.confirm(`Remove container "${c.name}"? This cannot be undone.`)) return;
+    if (
+      !(await confirm({
+        title: `Remove container "${c.name}"?`,
+        message: "This cannot be undone.",
+        confirmLabel: "Remove",
+        danger: true,
+      }))
+    )
+      return;
     if (await act.remove(c)) onRemoved();
   };
 

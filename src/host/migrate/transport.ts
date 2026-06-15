@@ -64,6 +64,16 @@ export const jsonOn = async <T>(ep: Endpoint, path: string, opts: ReqOpts = {}):
   return (await res.json()) as T;
 };
 
+// Extract an in-band error message from one ndjson frame, if present. Docker
+// reports streaming failures as either a top-level {"error":"…"} or a nested
+// {"errorDetail":{"message":"…"}}; this normalizes both. Pure + exported so the
+// silent-data-loss guard below is unit-testable without a live daemon.
+export const frameError = (obj: Record<string, unknown>): string | undefined => {
+  if (typeof obj.error === "string") return obj.error;
+  const detail = obj.errorDetail as { message?: string } | undefined;
+  return typeof detail?.message === "string" ? detail.message : undefined;
+};
+
 // Drain an ndjson stream (e.g. /images/load, /images/create) to completion.
 //
 // CRITICAL: Docker's streaming endpoints commit HTTP 200 *before* the work runs
@@ -95,10 +105,7 @@ export const drainNdjson = async (
         if (line) {
           try {
             const obj = JSON.parse(line) as Record<string, unknown>;
-            const err =
-              typeof obj.error === "string"
-                ? obj.error
-                : (obj.errorDetail as { message?: string } | undefined)?.message;
+            const err = frameError(obj);
             if (err) streamError = err;
             onLine?.(obj);
           } catch {

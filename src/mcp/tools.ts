@@ -10,7 +10,7 @@
 import { z } from "zod";
 import { buildImage } from "../host/docker/build.ts";
 import { req } from "../host/docker/client.ts";
-import * as compose from "../host/docker/compose.ts";
+import * as compose from "../host/docker/compose/index.ts";
 import * as containers from "../host/docker/containers.ts";
 import * as images from "../host/docker/images.ts";
 import * as networks from "../host/docker/networks.ts";
@@ -31,9 +31,15 @@ const fail = (e: unknown): { error: string } => ({
 // the compose YAML inline OR a path already on the (sandbox) host.
 const composeUp = async (input: { file: string; project?: string }) => {
   const lines: string[] = [];
-  const res = await compose.runCompose("mcp", "up", input.file, input.project, (p) => {
-    if (p.line) lines.push(`[${p.stream}] ${p.line}`);
-  });
+  const res = await compose.runCompose(
+    "mcp",
+    "up",
+    { files: [input.file], project: input.project },
+    undefined,
+    (p) => {
+      if (p.line) lines.push(`[${p.stream}] ${p.line}`);
+    },
+  );
   return { ok: res.ok, error: res.error, output: lines.join("\n") };
 };
 

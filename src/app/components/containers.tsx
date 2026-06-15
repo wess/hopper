@@ -8,6 +8,7 @@ import { Fragment, useMemo, useState } from "react";
 import * as ch from "../../shared/channels.ts";
 import type { Container } from "../../shared/types.ts";
 import { stackState } from "../lib/compose.ts";
+import { confirm } from "../lib/confirm.tsx";
 import { bytes } from "../lib/format.ts";
 import { errorMessage, invoke, useEvent, useLoad } from "../lib/ipc.ts";
 import { matchesWorkspace } from "../lib/workspaces.ts";
@@ -94,14 +95,29 @@ export const ContainersView = () => {
 
   const bulk = async (op: "start" | "stop" | "restart" | "remove") => {
     const ids = [...selected];
-    if (op === "remove" && !window.confirm(`Remove ${ids.length} container(s)?`)) return;
+    if (
+      op === "remove" &&
+      !(await confirm({
+        title: `Remove ${ids.length} container(s)?`,
+        confirmLabel: "Remove",
+        danger: true,
+      }))
+    )
+      return;
     await act.batch(ids, op);
     setSelected(new Set());
   };
 
   // Apply a lifecycle op to every container in a compose stack.
   const stackAction = async (g: Group, op: "start" | "stop" | "restart" | "remove") => {
-    if (op === "remove" && !window.confirm(`Remove stack "${g.project}" (${g.items.length})?`)) {
+    if (
+      op === "remove" &&
+      !(await confirm({
+        title: `Remove stack "${g.project}" (${g.items.length})?`,
+        confirmLabel: "Remove",
+        danger: true,
+      }))
+    ) {
       return;
     }
     await act.batch(
@@ -111,7 +127,14 @@ export const ContainersView = () => {
   };
 
   const prune = async () => {
-    if (!window.confirm("Remove all stopped containers?")) return;
+    if (
+      !(await confirm({
+        title: "Remove all stopped containers?",
+        confirmLabel: "Prune",
+        danger: true,
+      }))
+    )
+      return;
     setPruning(true);
     try {
       const r = await invoke(ch.containerPrune, undefined);

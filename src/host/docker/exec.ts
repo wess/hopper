@@ -7,6 +7,7 @@
 // response headers, and treat the rest of the connection as the TTY.
 
 import type { Socket } from "bun";
+import { debug } from "../debug.ts";
 import { json } from "./client.ts";
 import { connectOptions, currentEndpoint, hostHeader } from "./endpoint.ts";
 
@@ -110,8 +111,8 @@ export const open = async (
     resize: async (cols: number, rows: number) => {
       try {
         await json<void>(`/exec/${execId}/resize`, { method: "POST", query: { h: rows, w: cols } });
-      } catch {
-        // resize is best-effort
+      } catch (e) {
+        debug("exec", `resize failed for ${execId}`, e);
       }
     },
     close: () => {

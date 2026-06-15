@@ -6,6 +6,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { getAuth, getGithub } from "../auth/store.ts";
+import { debug } from "../debug.ts";
 
 export type DockerConfig = {
   auths?: Record<string, { auth?: string; identitytoken?: string }>;
@@ -117,7 +118,8 @@ const credHelperGet = async (helper: string, server: string): Promise<RegistryAu
     // Helpers signal token auth by returning the sentinel username "<token>".
     if (c.Username === "<token>") return { identitytoken: c.Secret, serveraddress: server };
     return { username: c.Username, password: c.Secret, serveraddress: server };
-  } catch {
+  } catch (e) {
+    debug("credentials", `helper docker-credential-${helper} failed for ${server}`, e);
     return null;
   }
 };

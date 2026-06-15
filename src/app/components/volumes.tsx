@@ -6,6 +6,7 @@ import { HardDrive, Plus, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import * as ch from "../../shared/channels.ts";
 import type { Volume } from "../../shared/types.ts";
+import { confirm } from "../lib/confirm.tsx";
 import { bytes } from "../lib/format.ts";
 import { errorMessage, invoke, useEvent, useLoad } from "../lib/ipc.ts";
 import { Button, EmptyState, Spinner, Toolbar, ViewHeader } from "./ui.tsx";
@@ -32,7 +33,14 @@ export const VolumesView = () => {
   }, [volumes, query]);
 
   const remove = async (volume: Volume) => {
-    if (!window.confirm(`Delete volume ${volume.name}?`)) return;
+    if (
+      !(await confirm({
+        title: `Delete volume ${volume.name}?`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
     try {
       await invoke(ch.volumeRemove, { name: volume.name });
       toast.success(`Removed ${volume.name}`);
@@ -40,7 +48,14 @@ export const VolumesView = () => {
     } catch (e) {
       const msg = errorMessage(e);
       if (/in use|conflict|being used/i.test(msg)) {
-        if (window.confirm(`${volume.name} is in use. Force remove?`)) {
+        if (
+          await confirm({
+            title: `${volume.name} is in use.`,
+            message: "Force remove?",
+            confirmLabel: "Force remove",
+            danger: true,
+          })
+        ) {
           try {
             await invoke(ch.volumeRemove, { name: volume.name, force: true });
             toast.success(`Force-removed ${volume.name}`);
@@ -56,7 +71,15 @@ export const VolumesView = () => {
   };
 
   const prune = async () => {
-    if (!window.confirm("Remove all unused volumes? This cannot be undone.")) return;
+    if (
+      !(await confirm({
+        title: "Remove all unused volumes?",
+        message: "This cannot be undone.",
+        confirmLabel: "Prune",
+        danger: true,
+      }))
+    )
+      return;
     try {
       const report = await invoke(ch.volumePrune, undefined);
       toast.success(`Reclaimed ${bytes(report.reclaimed)}`, {

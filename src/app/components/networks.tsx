@@ -6,6 +6,7 @@ import { Network as NetworkIcon, Plus, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import * as ch from "../../shared/channels.ts";
 import type { Network } from "../../shared/types.ts";
+import { confirm } from "../lib/confirm.tsx";
 import { bytes } from "../lib/format.ts";
 import { errorMessage, invoke, useEvent, useLoad } from "../lib/ipc.ts";
 import { isBuiltin } from "./networks/builtin.ts";
@@ -34,7 +35,14 @@ export const NetworksView = () => {
 
   const remove = async (network: Network) => {
     if (isBuiltin(network.name)) return;
-    if (!window.confirm(`Delete network ${network.name}?`)) return;
+    if (
+      !(await confirm({
+        title: `Delete network ${network.name}?`,
+        confirmLabel: "Delete",
+        danger: true,
+      }))
+    )
+      return;
     try {
       await invoke(ch.networkRemove, { id: network.id });
       toast.success(`Removed ${network.name}`);
@@ -45,7 +53,15 @@ export const NetworksView = () => {
   };
 
   const prune = async () => {
-    if (!window.confirm("Remove all unused networks? This cannot be undone.")) return;
+    if (
+      !(await confirm({
+        title: "Remove all unused networks?",
+        message: "This cannot be undone.",
+        confirmLabel: "Prune",
+        danger: true,
+      }))
+    )
+      return;
     try {
       const report = await invoke(ch.networkPrune, undefined);
       toast.success(`Removed ${report.removed} network(s)`, {

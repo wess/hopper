@@ -7,6 +7,7 @@ import { toast } from "@basket/ui/toast";
 import { useEffect, useRef, useState } from "react";
 import * as ch from "../../../shared/channels.ts";
 import type { DiskUsage } from "../../../shared/types.ts";
+import { confirm } from "../../lib/confirm.tsx";
 import { bytes } from "../../lib/format.ts";
 import { errorMessage, invoke, useEvent, useLoad } from "../../lib/ipc.ts";
 import { Button, Spinner } from "../ui.tsx";
@@ -54,7 +55,15 @@ export const Disk = () => {
 
   const cleanUp = async () => {
     if (cleaning) return;
-    if (!window.confirm("Remove unused containers, networks, images and build cache?")) return;
+    if (
+      !(await confirm({
+        title: "Clean up disk?",
+        message: "Remove unused containers, networks, images and build cache?",
+        confirmLabel: "Clean up",
+        danger: true,
+      }))
+    )
+      return;
     setCleaning(true);
     try {
       const reports = await invoke(ch.systemPrune, undefined);

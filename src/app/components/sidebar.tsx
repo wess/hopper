@@ -14,6 +14,7 @@ import {
   PanelLeft,
   PanelLeftClose,
   Settings,
+  SquareStack,
 } from "lucide-react";
 import { type ComponentType, useEffect, useRef, useState } from "react";
 import { setActiveWorkspace, setView, toggleSidebar, useApp, type ViewId } from "../state/store.ts";
@@ -27,6 +28,7 @@ type NavItem = {
 const NAV: readonly NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "containers", label: "Containers", icon: Boxes },
+  { id: "stacks", label: "Stacks", icon: SquareStack },
   { id: "images", label: "Images", icon: Package },
   { id: "volumes", label: "Volumes", icon: HardDrive },
   { id: "networks", label: "Networks", icon: Network },

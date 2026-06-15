@@ -6,6 +6,7 @@ import { Download, Hammer, Play, Search, Tag, Trash2, Upload } from "lucide-reac
 import { useMemo, useState } from "react";
 import * as ch from "../../shared/channels.ts";
 import type { Image } from "../../shared/types.ts";
+import { confirm } from "../lib/confirm.tsx";
 import { ago, bytes, imageName, shortId } from "../lib/format.ts";
 import { errorMessage, invoke, useEvent, useLoad } from "../lib/ipc.ts";
 import { imageMatchesWorkspace } from "../lib/workspaces.ts";
@@ -133,7 +134,8 @@ export const ImagesView = () => {
 
   const remove = async (image: Image) => {
     const label = imageName(image.repoTags, image.id);
-    if (!window.confirm(`Delete image ${label}?`)) return;
+    if (!(await confirm({ title: `Delete image ${label}?`, confirmLabel: "Delete", danger: true })))
+      return;
     try {
       await invoke(ch.imageRemove, { id: image.id });
       toast.success(`Removed ${label}`);
@@ -141,7 +143,14 @@ export const ImagesView = () => {
     } catch (e) {
       const msg = errorMessage(e);
       if (/in use|conflict|cannot be forced|being used/i.test(msg)) {
-        if (window.confirm(`${label} is in use. Force remove?`)) {
+        if (
+          await confirm({
+            title: `${label} is in use.`,
+            message: "Force remove?",
+            confirmLabel: "Force remove",
+            danger: true,
+          })
+        ) {
           try {
             await invoke(ch.imageRemove, { id: image.id, force: true });
             toast.success(`Force-removed ${label}`);
@@ -157,9 +166,12 @@ export const ImagesView = () => {
   };
 
   const prune = async () => {
-    const all = window.confirm(
-      "Remove ALL unused images? OK = all unused, Cancel = dangling only.",
-    );
+    const all = await confirm({
+      title: "Remove ALL unused images?",
+      message: "Prune = all unused, Cancel = dangling only.",
+      confirmLabel: "Prune",
+      danger: true,
+    });
     try {
       const report = await invoke(ch.imagePrune, { all });
       toast.success(`Reclaimed ${bytes(report.reclaimed)}`, {
