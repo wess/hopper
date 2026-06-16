@@ -297,6 +297,22 @@ export type EngineStats = {
   readonly load1: number;
 };
 
+// Host Docker CLI compatibility. Hopper can make the user's `docker` command
+// target the active engine by creating a Docker context named `hopper`.
+export type DockerCliStatus = {
+  readonly available: boolean;
+  readonly configured: boolean;
+  readonly host: string;
+  readonly context?: string;
+  readonly detail: string;
+};
+
+export type DockerCliSetupResult = {
+  readonly ok: boolean;
+  readonly detail: string;
+  readonly status: DockerCliStatus;
+};
+
 // Result of a disk-reclaim request against a managed engine.
 export type ReclaimResult = {
   readonly ok: boolean;

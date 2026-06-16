@@ -9,6 +9,7 @@ import * as ch from "../shared/channels.ts";
 import type { DockerEvent, EngineState, EngineStatus } from "../shared/types.ts";
 import { registerAuthHandlers } from "./auth/index.ts";
 import * as build from "./docker/build.ts";
+import * as dockercli from "./docker/cli.ts";
 import * as compose from "./docker/compose/index.ts";
 import * as containers from "./docker/containers.ts";
 import * as credentials from "./docker/credentials.ts";
@@ -124,6 +125,18 @@ handle(ch.engineReclaim, () => reclaimEngine());
 handle(ch.engineStats, () => engineStatsNow());
 handle(ch.engineResources, () => getResources());
 handle(ch.engineSetResources, (r) => setResources(r));
+handle(ch.dockerCliStatus, () => dockercli.status());
+handle(ch.dockerCliSetup, async () => {
+  const status = await engineStatus();
+  if (!status.connected) {
+    return {
+      ok: false,
+      detail: "Start the Hopper engine before configuring the Docker CLI.",
+      status: await dockercli.status(),
+    };
+  }
+  return dockercli.setup();
+});
 // Migration (Docker Desktop -> Hopper): scan the source, then run a selected
 // migration, streaming per-item progress back to the webview.
 handle(ch.migrationScan, () => migrate.scan());

@@ -24,6 +24,10 @@ Docker Engine API over the local unix socket.
 - **Compose** — bring stacks **up/down from a compose file** (file picker,
   optional project name, live streamed output). Backed by the `docker compose`
   CLI; the button only appears when the CLI is installed. See `docs/compose.md`.
+- **Docker CLI compatibility** — expose Hopper's engine to host shell tools via
+  `DOCKER_HOST` or a `hopper` Docker context, so `docker info` and
+  `docker compose` can target Hopper instead of Docker Desktop. See
+  `docs/cli.md`.
 - **Images** — list with in-use state, **pull with live layer progress**,
   **build from a Dockerfile** (context picker, build args, target, `.dockerignore`,
   live build log), **push to a registry** (credentials reused from your docker

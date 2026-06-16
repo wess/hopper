@@ -12,6 +12,8 @@ import type {
   Container,
   ContainerStats,
   DiskUsage,
+  DockerCliSetupResult,
+  DockerCliStatus,
   DockerEvent,
   EngineResources,
   EngineStats,
@@ -61,6 +63,9 @@ export const engineResources = defineChannel<void, EngineResources>("engine:reso
 export const engineSetResources = defineChannel<EngineResources, EngineResources>(
   "engine:setResources",
 );
+// Docker CLI compatibility for host shell tools (`docker info`, `docker compose`).
+export const dockerCliStatus = defineChannel<void, DockerCliStatus>("dockercli:status");
+export const dockerCliSetup = defineChannel<void, DockerCliSetupResult>("dockercli:setup");
 
 // --- migration (Docker Desktop / another engine -> Hopper) ----------------
 // Scan the source engine, run a migration for a selection, and stream progress.

@@ -163,6 +163,67 @@ const EnginePanel = () => {
   );
 };
 
+const DockerCliPanel = () => {
+  const { engine } = useApp();
+  const { data, reload } = useLoad(ch.dockerCliStatus, undefined, [engine.endpoint]);
+  const [busy, setBusy] = useState(false);
+  const shell = data ? `export DOCKER_HOST=${data.host}` : "";
+
+  const setup = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await invoke(ch.dockerCliSetup, undefined);
+      if (result.ok) toast.success("Docker CLI configured", { description: result.detail });
+      else toast.error("Docker CLI not configured", { description: result.detail });
+      reload();
+    } catch (e) {
+      toast.error("Docker CLI setup failed", { description: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(shell);
+      toast.success("Copied shell export");
+    } catch {
+      toast.error("Couldn't copy");
+    }
+  };
+
+  return (
+    <div className="panel">
+      <div className="panel-title">
+        Docker CLI
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button size="sm" onClick={copy} disabled={!shell}>
+            Copy env
+          </Button>
+          <Button size="sm" variant="primary" onClick={setup} disabled={busy || !engine.connected}>
+            {busy ? "Configuring…" : "Use Hopper"}
+          </Button>
+        </div>
+      </div>
+      <dl className="kv">
+        <dt>Command</dt>
+        <dd>{data?.available ? "docker" : "not found"}</dd>
+        <dt>Context</dt>
+        <dd>{data?.context ?? "—"}</dd>
+        <dt>Host</dt>
+        <dd>{data?.host ?? "—"}</dd>
+      </dl>
+      <div className="stat-sub" style={{ marginTop: 8 }}>
+        {data?.detail ?? "Checking Docker CLI status…"}
+      </div>
+      <pre className="code-block" style={{ marginTop: 10 }}>
+        {shell || "Start the engine to get a Docker host."}
+      </pre>
+    </div>
+  );
+};
+
 const THEMES: readonly ThemePref[] = ["light", "dark", "system"];
 
 const ThemePanel = () => {
@@ -482,6 +543,7 @@ export const SettingsView = () => (
     <ViewHeader title="Settings" />
     <div style={{ padding: "0 22px", display: "flex", flexDirection: "column", gap: 14 }}>
       <EnginePanel />
+      <DockerCliPanel />
       <ResourcesPanel />
       <RegistryAccountsPanel />
       <GithubAccountPanel />
