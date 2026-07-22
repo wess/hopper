@@ -112,3 +112,5 @@ arrive as host→webview events; interactive exec hijacks the socket for a raw
 TTY. Built with Butter's vendored framework + the `basket` workspace packages
 (`@basket/ipc`, `@basket/ui`, `@basket/window`, `@basket/menu`, `@basket/store`).
 ```
+
+♥ [Sponsor this project](https://github.com/sponsors/wess)
