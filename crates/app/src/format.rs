@@ -3,6 +3,16 @@
 //! Pure, so the rounding and pluralization rules that are easy to get subtly
 //! wrong are pinned by tests rather than eyeballed in the UI.
 
+/// A compact popularity count: 968 → "968", 21340 → "21.3k", 2_100_000 → "2.1M".
+pub fn count(n: i64) -> String {
+    match n {
+        n if n < 0 => "—".into(),
+        n if n < 1_000 => n.to_string(),
+        n if n < 1_000_000 => format!("{:.1}k", n as f64 / 1_000.0),
+        n => format!("{:.1}M", n as f64 / 1_000_000.0),
+    }
+}
+
 /// Human byte sizes, in the binary units Docker reports.
 pub fn bytes(n: i64) -> String {
     if n < 0 {
@@ -67,6 +77,15 @@ pub fn ports(ports: &[model::Port]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn counts_are_compact() {
+        assert_eq!(count(0), "0");
+        assert_eq!(count(968), "968");
+        assert_eq!(count(21_340), "21.3k");
+        assert_eq!(count(2_100_000), "2.1M");
+        assert_eq!(count(-1), "—");
+    }
 
     #[test]
     fn byte_sizes_use_binary_units() {

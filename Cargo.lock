@@ -2590,6 +2590,7 @@ dependencies = [
  "engine",
  "futures",
  "model",
+ "reqwest",
  "serde",
  "serde_json",
  "store",

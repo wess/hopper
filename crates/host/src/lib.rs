@@ -8,6 +8,7 @@
 pub mod compose;
 pub mod engine;
 pub mod facade;
+pub mod registry;
 pub mod status;
 
 pub use facade::Host;

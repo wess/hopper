@@ -33,6 +33,7 @@
       <a href="#firstrun">First run</a>
       <a href="#engine">The managed engine</a>
       <h5>Use</h5>
+      <a href="#registry">Find images</a>
       <a href="#detail">Detail pane</a>
       <a href="#cli">Docker CLI</a>
       <a href="#sharing">File sharing</a>
@@ -96,6 +97,15 @@
           by default. To have it manage your existing daemon instead, set the engine preference to
           <em>existing</em> in Settings, or launch with <code>HOPPER_ENGINE=existing</code>.</p>
       </div>
+
+      <h2 id="registry">Find images</h2>
+      <p>The <strong>Registry</strong> tab searches public registries for images to pull. Type a
+        term and switch between <strong>Docker Hub</strong> and <strong>GitHub</strong> — each hit
+        shows its stars, an <em>official</em> marker where it applies, and the exact reference
+        <code>Pull</code> will fetch (<code>nginx</code>, <code>ghcr.io/owner/app</code>). Search
+        talks to the registries directly, so it works before an engine is even up; the pull lands
+        the image on the <strong>Images</strong> tab. Private and rate-limited pulls use whatever
+        credentials you have stored.</p>
 
       <h2 id="detail">Detail pane</h2>
       <p>Selecting a container opens a pane beside the list with five tabs:</p>

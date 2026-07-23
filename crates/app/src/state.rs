@@ -13,6 +13,7 @@ pub enum Route {
     Dashboard,
     Containers,
     Images,
+    Registry,
     Volumes,
     Networks,
     Stacks,
@@ -25,6 +26,7 @@ impl Route {
             Route::Dashboard => "Dashboard",
             Route::Containers => "Containers",
             Route::Images => "Images",
+            Route::Registry => "Registry",
             Route::Volumes => "Volumes",
             Route::Networks => "Networks",
             Route::Stacks => "Stacks",
@@ -37,6 +39,7 @@ impl Route {
             Route::Dashboard => IconName::LayoutDashboard,
             Route::Containers => IconName::Box,
             Route::Images => IconName::Layers,
+            Route::Registry => IconName::PackageSearch,
             Route::Volumes => IconName::Database,
             Route::Networks => IconName::Network,
             Route::Stacks => IconName::Boxes,
@@ -51,11 +54,12 @@ impl Route {
     }
 
     /// Sidebar order.
-    pub fn all() -> [Route; 7] {
+    pub fn all() -> [Route; 8] {
         [
             Route::Dashboard,
             Route::Containers,
             Route::Images,
+            Route::Registry,
             Route::Volumes,
             Route::Networks,
             Route::Stacks,

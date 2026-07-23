@@ -25,6 +25,7 @@ pub struct Root {
     detail: Option<Entity<views::Detail>>,
     volumes: Entity<views::Volumes>,
     networks: Entity<views::Networks>,
+    registry: Entity<views::Registry>,
     engine_setup: Entity<views::EngineSetup>,
 }
 
@@ -43,6 +44,7 @@ impl Root {
         let settings = cx.new(views::Settings::new);
         let volumes = cx.new(views::Volumes::new);
         let networks = cx.new(views::Networks::new);
+        let registry = cx.new(views::Registry::new);
         let engine_setup = cx.new(views::EngineSetup::new);
 
         let root = Root {
@@ -54,6 +56,7 @@ impl Root {
             settings,
             volumes,
             networks,
+            registry,
             engine_setup,
             detail: None,
         };
@@ -170,9 +173,10 @@ impl Render for Root {
 
         // With no engine answering, stand in for the resource lists with the
         // first-run surface — what's happening and what to do — rather than a
-        // list that failed to load. Settings stays itself, since that is where
-        // the engine is configured and started.
-        if !engine.connected && route != Route::Settings {
+        // list that failed to load. Settings stays itself (the engine is
+        // configured there), and Registry stays reachable so you can browse and
+        // queue images to pull before the engine is even up.
+        if !engine.connected && route != Route::Settings && route != Route::Registry {
             return div()
                 .relative()
                 .size_full()
@@ -212,6 +216,7 @@ impl Render for Root {
                 split
             }
             Route::Images => div().size_full().child(self.images.clone()),
+            Route::Registry => div().size_full().child(self.registry.clone()),
             Route::Volumes => div().size_full().child(self.volumes.clone()),
             Route::Networks => div().size_full().child(self.networks.clone()),
             Route::Dashboard => div().size_full().child(self.dashboard.clone()),

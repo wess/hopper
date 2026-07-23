@@ -265,6 +265,16 @@ impl Host {
         images::search(&self.client, term).await
     }
 
+    /// Search a public registry (Docker Hub, GitHub) for images to pull. Talks
+    /// to the registry's web API, so it does not need the engine.
+    pub async fn registry_search(
+        &self,
+        source: RegistrySource,
+        query: &str,
+    ) -> anyhow::Result<Vec<RegistryResult>> {
+        crate::registry::search(source, query).await
+    }
+
     // --- volumes / networks ----------------------------------------------
 
     pub async fn volumes(&self) -> docker::Result<Vec<Volume>> {
