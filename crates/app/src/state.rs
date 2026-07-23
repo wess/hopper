@@ -32,26 +32,25 @@ impl Route {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn icon(&self) -> &'static str {
+    pub fn icon(&self) -> IconName {
         match self {
-            Route::Dashboard => "layout-dashboard",
-            Route::Containers => "box",
-            Route::Images => "layers",
-            Route::Volumes => "database",
-            Route::Networks => "network",
-            Route::Stacks => "boxes",
-            Route::Settings => "settings",
+            Route::Dashboard => IconName::LayoutDashboard,
+            Route::Containers => IconName::Box,
+            Route::Images => IconName::Layers,
+            Route::Volumes => IconName::Database,
+            Route::Networks => IconName::Network,
+            Route::Stacks => IconName::Boxes,
+            Route::Settings => IconName::Settings,
         }
     }
 
-    /// Sidebar order.
     /// Parse a route from its label, for the `HOPPER_ROUTE` dev override.
     pub fn from_env() -> Option<Route> {
         let want = std::env::var("HOPPER_ROUTE").ok()?;
         Route::all().into_iter().find(|r| r.label().eq_ignore_ascii_case(want.trim()))
     }
 
+    /// Sidebar order.
     pub fn all() -> [Route; 7] {
         [
             Route::Dashboard,
@@ -117,6 +116,8 @@ pub struct AppState {
     pub selection: Signal<BTreeSet<String>>,
     /// The container whose detail pane is open, if any.
     pub selected: Signal<Option<Container>>,
+    /// Whether the navigation rail is collapsed to icons only.
+    pub sidebar_collapsed: Signal<bool>,
 
     /// Bumped to ask the active view to refetch. The Docker event stream
     /// bumps this, which is how the UI stays live without polling every list.
@@ -143,6 +144,7 @@ impl AppState {
             search: Signal::new(cx, String::new()),
             selection: Signal::new(cx, BTreeSet::new()),
             selected: Signal::new(cx, None),
+            sidebar_collapsed: Signal::new(cx, std::env::var("HOPPER_SIDEBAR").as_deref() == Ok("collapsed")),
             epoch: Signal::new(cx, 0),
         }
     }
