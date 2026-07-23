@@ -75,6 +75,14 @@ impl Images {
         let palette = theme::palette(cx);
         let busy = self.busy.as_deref() == Some(img.id.as_str());
         let id = img.id.clone();
+        // What `docker run` should target: a real tag if there is one, else the
+        // image id (an untagged image can only be run by id).
+        let run_ref = img
+            .repo_tags
+            .iter()
+            .find(|t| *t != "<none>:<none>")
+            .cloned()
+            .unwrap_or_else(|| img.id.clone());
 
         let mut badges = Group::new().gap(Size::Xs);
         if img.dangling {
@@ -124,12 +132,26 @@ impl Images {
                     ),
             )
             .child(
-                Button::new(SharedString::from(format!("rm-{}", img.id)), "Remove")
-                    .size(Size::Xs)
-                    .variant(Variant::Subtle)
-                    .color(ColorName::Red)
-                    .disabled(busy)
-                    .on_click(cx.listener(move |this, _, _, cx| this.remove(id.clone(), cx))),
+                Group::new()
+                    .gap(Size::Xs)
+                    .child(
+                        Button::new(SharedString::from(format!("run-{}", img.id)), "Run")
+                            .size(Size::Xs)
+                            .variant(Variant::Light)
+                            .color(ColorName::Green)
+                            .disabled(busy)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.state.run_image(cx, run_ref.clone());
+                            })),
+                    )
+                    .child(
+                        Button::new(SharedString::from(format!("rm-{}", img.id)), "Remove")
+                            .size(Size::Xs)
+                            .variant(Variant::Subtle)
+                            .color(ColorName::Red)
+                            .disabled(busy)
+                            .on_click(cx.listener(move |this, _, _, cx| this.remove(id.clone(), cx))),
+                    ),
             )
     }
 }
@@ -161,11 +183,18 @@ impl Render for Images {
                     })
                     .collect();
                 if filtered.is_empty() {
-                    crate::views::message(if list.is_empty() {
-                        "No images yet. Pull one to get started."
+                    if list.is_empty() {
+                        crate::views::empty_cta(
+                            &self.state,
+                            "No images yet",
+                            "Search the Registry to find an image, then pull it here.",
+                            "Browse the Registry",
+                            crate::state::Route::Registry,
+                            cx,
+                        )
                     } else {
-                        "No images match your search."
-                    })
+                        crate::views::message("No images match your search.")
+                    }
                 } else {
                     let mut rows = div().flex().flex_col();
                     for img in filtered {

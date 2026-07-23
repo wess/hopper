@@ -27,6 +27,7 @@ pub struct Root {
     networks: Entity<views::Networks>,
     registry: Entity<views::Registry>,
     engine_setup: Entity<views::EngineSetup>,
+    run_dialog: Entity<views::RunDialog>,
 }
 
 impl Root {
@@ -46,6 +47,7 @@ impl Root {
         let networks = cx.new(views::Networks::new);
         let registry = cx.new(views::Registry::new);
         let engine_setup = cx.new(views::EngineSetup::new);
+        let run_dialog = cx.new(views::RunDialog::new);
 
         let root = Root {
             state,
@@ -58,6 +60,7 @@ impl Root {
             networks,
             registry,
             engine_setup,
+            run_dialog,
             detail: None,
         };
         root.bring_up_engine(cx);
@@ -176,19 +179,12 @@ impl Render for Root {
         // list that failed to load. Settings stays itself (the engine is
         // configured there), and Registry stays reachable so you can browse and
         // queue images to pull before the engine is even up.
-        if !engine.connected && route != Route::Settings && route != Route::Registry {
-            return div()
-                .relative()
-                .size_full()
-                .flex()
-                .bg(body)
-                .text_color(text)
-                .font_family(font)
-                .child(sidebar::render(&self.state, cx))
-                .child(div().size_full().child(self.engine_setup.clone()));
-        }
+        let show_setup = !engine.connected && route != Route::Settings && route != Route::Registry;
 
-        let content: gpui::Div = match route {
+        let content: gpui::Div = if show_setup {
+            div().size_full().child(self.engine_setup.clone())
+        } else {
+            match route {
             Route::Containers => {
                 // The detail pane sits beside the list, so a container's logs
                 // are visible without losing the list you came from.
@@ -215,13 +211,14 @@ impl Render for Root {
                 }
                 split
             }
-            Route::Images => div().size_full().child(self.images.clone()),
-            Route::Registry => div().size_full().child(self.registry.clone()),
-            Route::Volumes => div().size_full().child(self.volumes.clone()),
-            Route::Networks => div().size_full().child(self.networks.clone()),
-            Route::Dashboard => div().size_full().child(self.dashboard.clone()),
-            Route::Stacks => div().size_full().child(self.stacks.clone()),
-            Route::Settings => div().size_full().child(self.settings.clone()),
+                Route::Images => div().size_full().child(self.images.clone()),
+                Route::Registry => div().size_full().child(self.registry.clone()),
+                Route::Volumes => div().size_full().child(self.volumes.clone()),
+                Route::Networks => div().size_full().child(self.networks.clone()),
+                Route::Dashboard => div().size_full().child(self.dashboard.clone()),
+                Route::Stacks => div().size_full().child(self.stacks.clone()),
+                Route::Settings => div().size_full().child(self.settings.clone()),
+            }
         };
 
         div()
@@ -233,5 +230,9 @@ impl Render for Root {
             .font_family(font)
             .child(sidebar::render(&self.state, cx))
             .child(content)
+            // Overlays, above everything: the Run dialog (renders nothing when
+            // closed) and the app-wide toast stack (top-right).
+            .child(self.run_dialog.clone())
+            .child(self.state.toasts.clone())
     }
 }

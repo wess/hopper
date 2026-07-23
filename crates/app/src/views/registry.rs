@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{div, Context, Entity, SharedString, Window};
+use gpui::{div, px, Context, Entity, SharedString, Window};
 use guise::prelude::*;
-use model::{RegistryResult, RegistrySource};
+use model::{PullProgress, RegistryResult, RegistrySource};
 
 use crate::bridge;
 use crate::format;
@@ -20,9 +20,16 @@ use crate::theme;
 /// Per-result pull state, keyed by pullable reference.
 #[derive(Clone)]
 enum Pull {
-    Running,
+    Running { pct: u8, status: String },
     Done,
     Failed(String),
+}
+
+/// What the pull's streaming producer sends to the UI: progress frames, then a
+/// single terminal result.
+enum PullMsg {
+    Frame(PullProgress),
+    Done(Result<(), String>),
 }
 
 pub struct Registry {
@@ -32,6 +39,9 @@ pub struct Registry {
     /// `None` until the first search; then loading / results / failure.
     results: Option<Load<Vec<RegistryResult>>>,
     pulls: HashMap<String, Pull>,
+    /// Per-reference layer byte counts (`layer id -> (current, total)`), summed
+    /// into an overall percentage as download frames arrive.
+    layers: HashMap<String, HashMap<String, (u64, u64)>>,
 }
 
 impl Registry {
@@ -54,6 +64,7 @@ impl Registry {
             source: RegistrySource::DockerHub,
             results: None,
             pulls: HashMap::new(),
+            layers: HashMap::new(),
         }
     }
 
@@ -105,34 +116,90 @@ impl Registry {
     }
 
     fn pull(&mut self, reference: String, cx: &mut Context<Self>) {
-        self.pulls.insert(reference.clone(), Pull::Running);
+        self.pulls.insert(
+            reference.clone(),
+            Pull::Running {
+                pct: 0,
+                status: "Preparing…".into(),
+            },
+        );
+        self.layers.remove(&reference);
+        self.state.toast_titled(cx, "Pulling", reference.clone(), ColorName::Blue);
         cx.notify();
 
         let host = Arc::clone(&self.state.host);
         let state = self.state.clone();
         let this = cx.entity().downgrade();
         let id = reference.clone();
-        bridge::run(
+
+        // Stream the daemon's progress frames so the user sees layers download,
+        // then report the terminal result as one final message.
+        bridge::stream(
             cx,
-            // Progress frames are streamed by the daemon; for now we show a
-            // simple in-flight state and report the final outcome.
-            async move { host.pull(&id, &id, |_| {}).await.map_err(|e| e.message) },
-            move |result, cx| {
-                if let Some(this) = this.upgrade() {
-                    this.update(cx, |this, cx| {
-                        let outcome = match result {
-                            Ok(t) if t.ok && t.error.is_none() => Pull::Done,
-                            Ok(t) => Pull::Failed(t.error.unwrap_or_else(|| "pull failed".into())),
-                            Err(e) => Pull::Failed(e),
-                        };
-                        this.pulls.insert(reference.clone(), outcome);
+            move |tx| async move {
+                let frames = tx.clone();
+                let result = host
+                    .pull(&id, &id, move |p| {
+                        let _ = frames.unbounded_send(PullMsg::Frame(p));
+                    })
+                    .await;
+                let outcome = match result {
+                    Ok(t) if t.ok && t.error.is_none() => Ok(()),
+                    Ok(t) => Err(t.error.unwrap_or_else(|| "pull failed".into())),
+                    Err(e) => Err(e.message),
+                };
+                let _ = tx.unbounded_send(PullMsg::Done(outcome));
+            },
+            move |msg, cx| {
+                let Some(this) = this.upgrade() else { return };
+                this.update(cx, |this, cx| match msg {
+                    PullMsg::Frame(p) => this.pull_frame(&reference, p, cx),
+                    PullMsg::Done(Ok(())) => {
+                        this.pulls.insert(reference.clone(), Pull::Done);
+                        this.layers.remove(&reference);
+                        state.toast_titled(cx, "Pulled", reference.clone(), ColorName::Green);
+                        // The image now exists — refresh the Images tab.
+                        state.bump(cx);
                         cx.notify();
-                    });
-                }
-                // A freshly pulled image should show up on the Images tab.
-                state.bump(cx);
+                    }
+                    PullMsg::Done(Err(e)) => {
+                        this.pulls.insert(reference.clone(), Pull::Failed(e.clone()));
+                        this.layers.remove(&reference);
+                        state.toast_titled(cx, "Pull failed", e, ColorName::Red);
+                        cx.notify();
+                    }
+                });
+            },
+            |_| {},
+        );
+    }
+
+    /// Fold one progress frame into the running percentage. Docker reports
+    /// bytes per layer; summing the layers that carry a total gives a moving
+    /// bar — approximate, but honest that work is happening.
+    fn pull_frame(&mut self, reference: &str, p: PullProgress, cx: &mut Context<Self>) {
+        let layers = self.layers.entry(reference.to_string()).or_default();
+        if let (Some(id), Some(total)) = (p.id.as_ref(), p.total) {
+            if total > 0 {
+                layers.insert(id.clone(), (p.current.unwrap_or(0), total));
+            }
+        }
+        let (cur, tot) = layers
+            .values()
+            .fold((0u64, 0u64), |(a, b), (c, d)| (a + c, b + d));
+        let pct = cur
+            .saturating_mul(100)
+            .checked_div(tot)
+            .unwrap_or(0)
+            .min(100) as u8;
+        self.pulls.insert(
+            reference.to_string(),
+            Pull::Running {
+                pct,
+                status: p.status.clone(),
             },
         );
+        cx.notify();
     }
 
     fn source_button(&self, source: RegistrySource, cx: &mut Context<Self>) -> impl IntoElement {
@@ -172,23 +239,25 @@ impl Registry {
             );
         }
 
-        // The pull control reflects state: idle → Pull, in flight → Pulling…,
-        // done → a Pulled badge, failed → Retry.
+        // The control reflects pull state: idle → Pull, in flight → a spinner,
+        // done → Run (the whole point — go straight from pulled to running),
+        // failed → Retry.
         let action = match self.pulls.get(&hit.reference) {
-            Some(Pull::Running) => Button::new(
-                SharedString::from(format!("pull-{}", hit.reference)),
-                "Pulling…",
-            )
-            .size(Size::Xs)
-            .variant(Variant::Light)
-            .color(ColorName::Blue)
-            .disabled(true)
-            .into_any_element(),
-            Some(Pull::Done) => Badge::new("pulled")
-                .variant(Variant::Light)
-                .color(ColorName::Green)
+            Some(Pull::Running { .. }) => Loader::new()
                 .size(Size::Sm)
+                .color(ColorName::Blue)
                 .into_any_element(),
+            Some(Pull::Done) => {
+                let reference = hit.reference.clone();
+                Button::new(SharedString::from(format!("run-{}", hit.reference)), "Run")
+                    .size(Size::Xs)
+                    .variant(Variant::Light)
+                    .color(ColorName::Green)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.state.run_image(cx, reference.clone());
+                    }))
+                    .into_any_element()
+            }
             other => {
                 let failed = matches!(other, Some(Pull::Failed(_)));
                 let reference = hit.reference.clone();
@@ -216,8 +285,36 @@ impl Registry {
         }
         // The pullable reference, so it is clear what `Pull` will fetch.
         left = left.child(Text::new(hit.reference.clone()).size(Size::Xs).dimmed());
-        if let Some(Pull::Failed(e)) = self.pulls.get(&hit.reference) {
-            left = left.child(Text::new(e.clone()).size(Size::Xs).dimmed());
+        // Pull feedback, inline: status + a moving bar, or the outcome.
+        match self.pulls.get(&hit.reference) {
+            Some(Pull::Running { pct, status }) => {
+                left = left.child(
+                    Text::new(if *pct > 0 {
+                        format!("{status} · {pct}%")
+                    } else {
+                        format!("{status}…")
+                    })
+                    .size(Size::Xs)
+                    .dimmed(),
+                );
+                if *pct > 0 {
+                    left = left.child(
+                        div().max_w(px(280.0)).child(
+                            Progress::new(*pct as f32)
+                                .size(Size::Xs)
+                                .color(ColorName::Blue),
+                        ),
+                    );
+                }
+            }
+            Some(Pull::Done) => {
+                left = left
+                    .child(Text::new("Pulled — ready to run").size(Size::Xs).dimmed());
+            }
+            Some(Pull::Failed(e)) => {
+                left = left.child(Text::new(e.clone()).size(Size::Xs).dimmed());
+            }
+            None => {}
         }
 
         div()

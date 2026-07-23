@@ -3,7 +3,10 @@
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
+use std::time::Duration;
 
+use gpui::prelude::*;
+use gpui::{Entity, SharedString};
 use guise::prelude::*;
 use host::Host;
 use model::{Container, EngineStatus, Image, Network, Settings, Volume};
@@ -123,6 +126,15 @@ pub struct AppState {
     /// Whether the navigation rail is collapsed to icons only.
     pub sidebar_collapsed: Signal<bool>,
 
+    /// The image reference the Run dialog is open for, if any. Setting this
+    /// opens the dialog; the Images and Registry views both trigger it.
+    pub run_target: Signal<Option<String>>,
+
+    /// App-wide transient feedback, painted top-right over everything. Views
+    /// push to it through [`AppState::toast`] so an action always shows the
+    /// user that something happened.
+    pub toasts: Entity<ToastStack>,
+
     /// Bumped to ask the active view to refetch. The Docker event stream
     /// bumps this, which is how the UI stays live without polling every list.
     pub epoch: Signal<u64>,
@@ -149,12 +161,33 @@ impl AppState {
             selection: Signal::new(cx, BTreeSet::new()),
             selected: Signal::new(cx, None),
             sidebar_collapsed: Signal::new(cx, std::env::var("HOPPER_SIDEBAR").as_deref() == Ok("collapsed")),
+            run_target: Signal::new(cx, None),
+            toasts: cx.new(|_| ToastStack::new().duration(Some(Duration::from_secs(4)))),
             epoch: Signal::new(cx, 0),
         }
     }
 
     pub fn bump(&self, cx: &mut gpui::App) {
         self.epoch.update(cx, |n| *n += 1);
+    }
+
+    /// Show a titled, coloured toast — for successes and failures that deserve
+    /// more than a plain line.
+    pub fn toast_titled(
+        &self,
+        cx: &mut gpui::App,
+        title: impl Into<SharedString>,
+        message: impl Into<SharedString>,
+        color: ColorName,
+    ) {
+        self.toasts.update(cx, |ts, cx| {
+            ts.push_titled(title, message, color, cx);
+        });
+    }
+
+    /// Open the Run dialog for an image reference.
+    pub fn run_image(&self, cx: &mut gpui::App, reference: impl Into<String>) {
+        self.run_target.set(cx, Some(reference.into()));
     }
 }
 

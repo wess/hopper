@@ -231,14 +231,19 @@ impl Containers {
             Load::Ready(list) => {
                 let filtered = filter_containers(&list, &query);
                 if filtered.is_empty() {
-                    let message = if list.is_empty() {
-                        "No containers yet."
-                    } else {
-                        "No containers match your search."
-                    };
+                    if list.is_empty() {
+                        return crate::views::empty_cta(
+                            &self.state,
+                            "Nothing running yet",
+                            "Find an image in the Registry, pull it, then press Run.",
+                            "Browse the Registry",
+                            crate::state::Route::Registry,
+                            cx,
+                        );
+                    }
                     return div()
                         .p_6()
-                        .child(Text::new(message).size(Size::Sm).dimmed())
+                        .child(Text::new("No containers match your search.").size(Size::Sm).dimmed())
                         .into_any_element();
                 }
                 let mut rows = div().flex().flex_col();
