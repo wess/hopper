@@ -77,7 +77,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1438,7 +1438,7 @@ dependencies = [
 
 [[package]]
 name = "docker"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "base64",
@@ -1548,7 +1548,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2583,7 +2583,7 @@ dependencies = [
 
 [[package]]
 name = "host"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "docker",
@@ -3310,7 +3310,7 @@ dependencies = [
 
 [[package]]
 name = "mcp"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "docker",
@@ -3374,7 +3374,7 @@ dependencies = [
 
 [[package]]
 name = "migrate"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3437,7 +3437,7 @@ dependencies = [
 
 [[package]]
 name = "model"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "regex",
  "serde",
@@ -5438,7 +5438,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.9.0"
+version = "0.10.0"
 dependencies = [
  "dirs 6.0.0",
  "keyring",
