@@ -64,9 +64,13 @@
 
       <h2 id="firstrun">First run</h2>
       <p>On launch Hopper picks an engine. On macOS it prefers its <strong>own</strong> managed VM
-        engine when the guest image is bundled (it is, in the release build) and falls back to any
-        engine you already run — Docker Desktop, Colima, Rancher Desktop, or a remote daemon over
-        TCP.</p>
+        engine and falls back to any engine you already run — Docker Desktop, Colima, Rancher
+        Desktop, or a remote daemon over TCP.</p>
+      <p>The managed engine needs a small guest image (a kernel and initramfs). The release bundles
+        it, but if it is ever missing — a lean install, a stripped bundle — Hopper
+        <strong>fetches it once</strong>, on the first start, from its own release: a ~120 MB
+        download, checksum-verified before it boots, and cached under <code>~/.hopper/</code> for
+        every run after. So a Mac with no Docker at all still ends up with a working one.</p>
       <p>If Hopper is providing the engine and autostart is on (the default), it boots the VM in
         the background; the status footer moves from <em>starting</em> to <em>connected</em> once
         <code>dockerd</code> answers. You can control this under <strong>Settings → Engine</strong>.</p>
@@ -74,6 +78,8 @@
       <h2 id="engine">The managed engine</h2>
       <p>On a Mac with no Docker installed at all, Hopper still gives you a working Docker. It:</p>
       <ul>
+        <li>acquires its guest image if it is not already on disk — bundled with the app, or
+          downloaded and verified on first start;</li>
         <li>boots a minimal Linux guest (a raw arm64 kernel and Alpine initramfs) on
           Virtualization.framework, entirely from Rust;</li>
         <li>runs <code>dockerd</code> inside it and bridges its socket out to

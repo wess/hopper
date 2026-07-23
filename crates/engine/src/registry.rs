@@ -134,12 +134,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn selection_falls_through_to_the_provider_that_is_available() {
+    async fn selecting_an_unavailable_provider_does_not_dead_end() {
         let r = registry();
-        // "vz" is not registered on this build, so selection must not dead-end.
-        let status = r.select(Some("vz")).await;
-        assert_eq!(r.active_id(), "existing");
-        assert_eq!(status.provider, "existing");
+        // An unknown id is not registered, so selection must fall through to an
+        // available provider rather than reporting "none". Where it lands is
+        // platform-specific (macOS self-provisions its managed engine, so that
+        // one is always available); the invariant is that it lands *somewhere*
+        // registered.
+        let status = r.select(Some("does-not-exist")).await;
+        assert_ne!(status.provider, "none", "selection must not dead-end");
+        let active = r.active_id();
+        assert!(
+            r.ids().iter().any(|id| *id == active),
+            "the active provider must be a registered one"
+        );
     }
 
     #[tokio::test]

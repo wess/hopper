@@ -182,6 +182,24 @@ jobs:
           name: guest
           path: native/build/guest
 
+      # Publish the guest image as standalone, checksummed release assets so a
+      # lean or stripped install can self-provision the engine (crates/engine
+      # acquire.rs downloads these and verifies them against guest.json). The
+      # bundled copy in Resources still wins when present; this is the fallback.
+      - name: Publish guest engine image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          V="${{ needs.check-version.outputs.version }}"
+          g=native/build/guest
+          ksha=$(shasum -a 256 "$g/vmlinuz" | cut -d' ' -f1); ksize=$(stat -f%z "$g/vmlinuz")
+          isha=$(shasum -a 256 "$g/initrd"  | cut -d' ' -f1); isize=$(stat -f%z "$g/initrd")
+          printf '{"version":"%s","kernel":{"sha256":"%s","size":%s},"initrd":{"sha256":"%s","size":%s}}\n' \
+            "$V" "$ksha" "$ksize" "$isha" "$isize" > "$g/guest.json"
+          cat "$g/guest.json"
+          gh release upload "v${V}" "$g/vmlinuz" "$g/initrd" "$g/guest.json" --clobber
+
       - name: Fetch Compose + Docker CLI (host binaries)
         run: |
           set -euo pipefail

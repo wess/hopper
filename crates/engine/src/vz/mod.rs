@@ -14,3 +14,4 @@ pub mod machine;
 pub mod bridge;
 pub mod forwarder;
 pub mod provider;
+pub mod acquire;

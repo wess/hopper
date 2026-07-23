@@ -53,6 +53,9 @@ mod platform {
         machine: Mutex<Option<Arc<Machine>>>,
         phase: PhaseCell,
         forwarder: Arc<Forwarder>,
+        /// `(downloaded, total)` while the guest image is being acquired, so
+        /// the status poll can report progress instead of a dead spinner.
+        download: std::sync::Mutex<Option<(u64, u64)>>,
     }
 
     impl Vz {
@@ -64,11 +67,40 @@ mod platform {
                 machine: Mutex::new(None),
                 phase: PhaseCell::new(Phase::Stopped),
                 forwarder: Arc::new(Forwarder::new()),
+                download: std::sync::Mutex::new(None),
             }
         }
 
-        fn layout(&self) -> Layout {
-            Layout::resolve(&bundle_resources(), &self.state)
+        /// Where the guest image is, if it is on disk (bundled or cached).
+        fn guest(&self) -> Option<crate::vz::acquire::Guest> {
+            crate::vz::acquire::locate(&bundle_resources(), |p| p.exists())
+        }
+
+        /// The VM layout for a resolved guest image.
+        fn layout_for(&self, guest: &crate::vz::acquire::Guest) -> Layout {
+            Layout::with_guest(guest.kernel.clone(), guest.initrd.clone(), &self.state)
+        }
+
+        /// The download progress, if an acquisition is in flight.
+        fn download_progress(&self) -> Option<(u64, u64)> {
+            *self.download.lock().unwrap()
+        }
+
+        /// Ensure the guest image is on disk, downloading it if not, and return
+        /// its layout. Progress is published for the status poll.
+        async fn ensure_guest(&self) -> anyhow::Result<Layout> {
+            if let Some(guest) = self.guest() {
+                return Ok(self.layout_for(&guest));
+            }
+            tracing::info!("guest image not found; downloading it");
+            *self.download.lock().unwrap() = Some((0, 1));
+            let result = crate::vz::acquire::acquire(env!("CARGO_PKG_VERSION"), |done, total| {
+                *self.download.lock().unwrap() = Some((done, total.max(1)));
+            })
+            .await;
+            *self.download.lock().unwrap() = None;
+            let guest = result?;
+            Ok(self.layout_for(&guest))
         }
 
         /// The mappings the running containers currently want, and the work to
@@ -100,10 +132,13 @@ mod platform {
         }
 
         async fn available(&self) -> bool {
-            // Both the framework and the guest image have to be there; without
-            // either, selection should fall through to an existing engine
-            // rather than presenting a Start button that cannot work.
-            vm::supported() && self.layout().missing(|p| p.exists()).is_empty()
+            // A missing guest image is *not* disqualifying — it is downloaded on
+            // start, so the managed engine is still offered and self-provisions.
+            // The entitlement is: without it the VM cannot boot at all (a plain
+            // `cargo run` dev binary has neither the entitlement nor a reason to
+            // advertise an engine it can never start), so it gates availability
+            // and selection falls through to an engine that can actually run.
+            vm::supported() && vm::entitled()
         }
 
         async fn endpoint(&self) -> Option<Endpoint> {
@@ -116,12 +151,39 @@ mod platform {
             if !vm::supported() {
                 return unsupported("Virtualization.framework is unavailable on this hardware.");
             }
-            let missing = self.layout().missing(|p| p.exists());
-            if !missing.is_empty() {
-                return unsupported(format!("Missing guest image: {}.", missing.join(", ")));
+            if !vm::entitled() {
+                return unsupported(
+                    "This build lacks the virtualization entitlement — run the signed Hopper.app, \
+                     not a `cargo run` dev binary.",
+                );
             }
 
             let described = self.socket.to_string_lossy().to_string();
+
+            // A guest download in flight: report progress, not a dead spinner.
+            if let Some((done, total)) = self.download_progress() {
+                let pct = (done.saturating_mul(100) / total.max(1)).min(100);
+                return EngineStatus::new(
+                    EngineState::Starting,
+                    "vz",
+                    format!("Downloading Hopper's engine… {pct}%"),
+                )
+                .managed(true)
+                .endpoint(described);
+            }
+
+            // No image yet, and not downloading: Start will fetch it.
+            if self.guest().is_none() {
+                return EngineStatus::new(
+                    EngineState::Stopped,
+                    "vz",
+                    "Hopper's engine is not installed yet.",
+                )
+                .managed(true)
+                .detail("Starting it downloads the ~120 MB engine image, once.")
+                .endpoint(described);
+            }
+
             let phase = self.phase.get();
 
             // A running VM still has to answer; the socket can be up before
@@ -172,10 +234,22 @@ mod platform {
             let clamped = vm::clamp(resources, host_cpus, host_memory_bytes());
             let shares = shares::resolve(&settings.shared_paths, |p| p.exists());
 
+            // Acquire the guest image if it is not already on disk. This is
+            // what lets Hopper provide an engine on a machine that has none —
+            // even a lean install with no bundled image self-provisions here.
+            self.phase.set(Phase::Starting);
+            let layout = match self.ensure_guest().await {
+                Ok(layout) => layout,
+                Err(e) => {
+                    self.phase.set(Phase::Failed);
+                    return Err(e.context("could not obtain Hopper's engine image"));
+                }
+            };
+
             tracing::info!("starting engine: {}", vm::describe(&clamped, &shares));
 
             let cmdline = vm::share_args(&shares);
-            let machine = Arc::new(Machine::create(&self.layout(), &clamped, &shares, &cmdline)?);
+            let machine = Arc::new(Machine::create(&layout, &clamped, &shares, &cmdline)?);
             machine.start().await?;
             self.phase.set(Phase::Running);
 

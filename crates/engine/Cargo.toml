@@ -18,6 +18,9 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 dirs = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+sha2 = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true }

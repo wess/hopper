@@ -41,6 +41,17 @@ impl Layout {
         }
     }
 
+    /// Build from an explicit kernel/initrd pair — bundled or downloaded into
+    /// the cache — deriving the disk and console from the state directory.
+    pub fn with_guest(kernel: PathBuf, initrd: PathBuf, state: &Path) -> Self {
+        Self {
+            kernel,
+            initrd,
+            disk: state.join("docker.img"),
+            console: state.join("console.log"),
+        }
+    }
+
     /// What is missing, so startup can explain rather than fail opaquely.
     pub fn missing(&self, exists: impl Fn(&Path) -> bool) -> Vec<String> {
         let mut out = Vec::new();
@@ -159,6 +170,33 @@ mod platform {
         unsafe { VZVirtualMachine::isSupported() }
     }
 
+    /// Whether this process actually holds `com.apple.security.virtualization`.
+    ///
+    /// `supported()` reports only hardware capability; the VM still cannot start
+    /// without the entitlement, which lives on the signed `.app` and never on a
+    /// plain `cargo run` dev binary. Checking it keeps the managed engine from
+    /// advertising itself — and autostart from noisily failing — where it can
+    /// never boot. Queried via `codesign` (the same check the release gate
+    /// runs) once and cached for the process's life.
+    pub fn entitled() -> bool {
+        use std::sync::OnceLock;
+        static ENTITLED: OnceLock<bool> = OnceLock::new();
+        *ENTITLED.get_or_init(|| {
+            let Ok(exe) = std::env::current_exe() else {
+                return false;
+            };
+            std::process::Command::new("/usr/bin/codesign")
+                .args(["-d", "--entitlements", "-", "--xml"])
+                .arg(&exe)
+                .output()
+                .map(|out| {
+                    String::from_utf8_lossy(&out.stdout)
+                        .contains("com.apple.security.virtualization")
+                })
+                .unwrap_or(false)
+        })
+    }
+
     /// Assemble the full machine configuration.
     ///
     /// # Safety
@@ -275,7 +313,7 @@ mod platform {
 }
 
 #[cfg(target_os = "macos")]
-pub use platform::{build_configuration, supported};
+pub use platform::{build_configuration, entitled, supported};
 
 #[cfg(test)]
 mod tests {
