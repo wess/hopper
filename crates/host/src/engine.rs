@@ -29,10 +29,9 @@ impl Engines {
     }
 
     pub async fn status(&self) -> EngineStatus {
-        match self.registry.active() {
-            Some(provider) => provider.status().await,
-            None => EngineStatus::default(),
-        }
+        // Enriched: on a platform with a managed engine, an unmanaged engine
+        // that is down still explains why Hopper's own engine isn't running.
+        self.registry.status().await
     }
 
     pub fn active_id(&self) -> String {

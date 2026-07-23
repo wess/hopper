@@ -25,6 +25,7 @@ pub struct Root {
     detail: Option<Entity<views::Detail>>,
     volumes: Entity<views::Volumes>,
     networks: Entity<views::Networks>,
+    engine_setup: Entity<views::EngineSetup>,
 }
 
 impl Root {
@@ -42,6 +43,7 @@ impl Root {
         let settings = cx.new(views::Settings::new);
         let volumes = cx.new(views::Volumes::new);
         let networks = cx.new(views::Networks::new);
+        let engine_setup = cx.new(views::EngineSetup::new);
 
         let root = Root {
             state,
@@ -52,6 +54,7 @@ impl Root {
             settings,
             volumes,
             networks,
+            engine_setup,
             detail: None,
         };
         root.bring_up_engine(cx);
@@ -163,6 +166,24 @@ impl Render for Root {
         let font = t.font_family.clone();
 
         let route = self.state.route.get(cx);
+        let engine = self.state.engine.get(cx);
+
+        // With no engine answering, stand in for the resource lists with the
+        // first-run surface — what's happening and what to do — rather than a
+        // list that failed to load. Settings stays itself, since that is where
+        // the engine is configured and started.
+        if !engine.connected && route != Route::Settings {
+            return div()
+                .relative()
+                .size_full()
+                .flex()
+                .bg(body)
+                .text_color(text)
+                .font_family(font)
+                .child(sidebar::render(&self.state, cx))
+                .child(div().size_full().child(self.engine_setup.clone()));
+        }
+
         let content: gpui::Div = match route {
             Route::Containers => {
                 // The detail pane sits beside the list, so a container's logs

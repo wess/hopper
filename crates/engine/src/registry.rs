@@ -3,7 +3,7 @@
 use crate::provider::{candidates_for, preferred, Provider};
 use crate::providers::Existing;
 use docker::client::Client;
-use model::EngineStatus;
+use model::{EngineState, EngineStatus};
 use std::sync::Arc;
 
 pub struct Registry {
@@ -87,16 +87,68 @@ impl Registry {
                 self.client.set_endpoint(ep);
             }
             *self.active.write().unwrap() = provider.id().to_string();
-            return provider.status().await;
+            let status = provider.status().await;
+            return self.enrich(status).await;
         }
 
         // `existing` is always available, so reaching here means the registry
         // was built empty — a programming error, not a user-facing state.
         EngineStatus::new(
-            model::EngineState::NotInstalled,
+            EngineState::NotInstalled,
             "none",
             "No engine provider is available on this platform.",
         )
+    }
+
+    /// The active provider's status, enriched (see [`Self::enrich`]) so the UI
+    /// gets the whole picture from one call. This is what the status poll uses.
+    pub async fn status(&self) -> EngineStatus {
+        let Some(active) = self.active() else {
+            return EngineStatus::default();
+        };
+        let status = active.status().await;
+        self.enrich(status).await
+    }
+
+    /// The managed provider's own status, if this platform has one — reported
+    /// even when it is not the active provider, so the UI can speak to the
+    /// engine Hopper could run rather than only the one currently selected.
+    async fn managed_status(&self) -> Option<EngineStatus> {
+        for p in &self.providers {
+            if p.managed() {
+                return Some(p.status().await);
+            }
+        }
+        None
+    }
+
+    /// Fold in guidance about the managed engine when an *unmanaged* engine is
+    /// active and down. Without this, a dev build (where Hopper's own engine
+    /// can't run) or a Mac with no Docker only ever reports "no Docker" — never
+    /// that Hopper has an engine of its own and why it isn't the one answering.
+    async fn enrich(&self, status: EngineStatus) -> EngineStatus {
+        // A connected engine needs no help; a managed one already speaks for
+        // itself (its own status drives the UI).
+        if status.connected || status.managed {
+            return status;
+        }
+        let Some(managed) = self.managed_status().await else {
+            return status;
+        };
+        // Only surface the managed engine when it genuinely cannot run here —
+        // an entitlement-less dev build, or hardware without the framework.
+        // (A managed engine that *could* run would have been selected instead.)
+        if managed.connected || managed.state != EngineState::Unsupported {
+            return status;
+        }
+        let reason = match managed.detail {
+            Some(detail) => format!("{} {}", managed.message, detail),
+            None => managed.message,
+        };
+        EngineStatus {
+            detail: Some(reason),
+            ..status
+        }
     }
 }
 
