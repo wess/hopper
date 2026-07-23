@@ -165,13 +165,12 @@ fn consume_escape(rest: &str) -> EscapeResult {
         // CSI: ESC [ ... final-byte.
         Some('[') => {
             let mut params = String::new();
-            let mut len = 1; // the '['
-            for c in chars {
-                len += 1;
+            for (i, c) in chars.enumerate() {
                 if c.is_ascii_alphabetic() || c == '~' {
+                    // '[' plus the chars through this one.
                     return EscapeResult::Consumed {
                         action: csi_action(&params, c),
-                        len,
+                        len: i + 2,
                     };
                 }
                 params.push(c);
@@ -180,13 +179,11 @@ fn consume_escape(rest: &str) -> EscapeResult {
         }
         // OSC: ESC ] ... BEL (or ST). Title-setting and the like — drop it.
         Some(']') => {
-            let mut len = 1;
-            for c in chars {
-                len += 1;
+            for (i, c) in chars.enumerate() {
                 if c == '\x07' {
                     return EscapeResult::Consumed {
                         action: Action::None,
-                        len,
+                        len: i + 2,
                     };
                 }
             }

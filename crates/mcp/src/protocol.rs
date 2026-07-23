@@ -75,11 +75,12 @@ pub fn err(id: Value, code: i32, message: impl Into<String>) -> Response {
 }
 
 /// Parse one line into a request.
-pub fn parse(line: &str) -> Result<Request, Response> {
+pub fn parse(line: &str) -> Result<Request, Box<Response>> {
     serde_json::from_str::<Request>(line).map_err(|e| {
         // An unparseable frame has no id to correlate with, so the spec says
-        // to answer with a null id rather than staying silent.
-        err(Value::Null, codes::PARSE_ERROR, format!("Invalid JSON: {e}"))
+        // to answer with a null id rather than staying silent. Boxed because
+        // the error is a full Response, far larger than the parsed Request.
+        Box::new(err(Value::Null, codes::PARSE_ERROR, format!("Invalid JSON: {e}")))
     })
 }
 

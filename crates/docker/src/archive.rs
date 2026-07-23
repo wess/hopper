@@ -41,11 +41,11 @@ pub async fn upload(client: &Client, id: &str, path: &str, tar: Bytes) -> Result
 pub async fn read_file(client: &Client, id: &str, path: &str) -> Result<Vec<u8>> {
     let archive = download(client, id, path).await?;
     let mut tar = tar::Archive::new(Cursor::new(archive));
-    let mut entries = tar
+    let entries = tar
         .entries()
         .map_err(|e| DockerError::decode(format!("Could not read the archive: {e}")))?;
 
-    while let Some(entry) = entries.next() {
+    for entry in entries {
         let mut entry =
             entry.map_err(|e| DockerError::decode(format!("Damaged archive entry: {e}")))?;
         if entry.header().entry_type().is_dir() {

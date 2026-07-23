@@ -65,11 +65,11 @@ impl Workspace {
 
 /// A `None` workspace is the built-in "all" scope and matches everything.
 pub fn matches_workspace(c: &Container, ws: Option<&Workspace>) -> bool {
-    ws.map_or(true, |w| w.matches(c))
+    ws.is_none_or(|w| w.matches(c))
 }
 
 pub fn image_matches_workspace(repo_tags: &[String], ws: Option<&Workspace>) -> bool {
-    ws.map_or(true, |w| w.matches_image(repo_tags))
+    ws.is_none_or(|w| w.matches_image(repo_tags))
 }
 
 #[cfg(test)]

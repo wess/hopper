@@ -129,9 +129,11 @@ mod tests {
 
     #[test]
     fn settings_round_trip_through_json() {
-        let mut s = Settings::default();
-        s.theme = ThemeMode::Dark;
-        s.shared_paths = vec!["/opt/data".into()];
+        let s = Settings {
+            theme: ThemeMode::Dark,
+            shared_paths: vec!["/opt/data".into()],
+            ..Default::default()
+        };
         let raw = serde_json::to_string(&s).unwrap();
         let back: Settings = serde_json::from_str(&raw).unwrap();
         assert_eq!(back, s);

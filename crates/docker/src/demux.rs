@@ -48,7 +48,7 @@ impl Frames {
 
     /// A valid header carries a known stream type and three zero pad bytes.
     fn looks_framed(head: &[u8]) -> bool {
-        matches!(head[0], 0 | 1 | 2) && head[1] == 0 && head[2] == 0 && head[3] == 0
+        matches!(head[0], 0..=2) && head[1] == 0 && head[2] == 0 && head[3] == 0
     }
 
     /// Feed a chunk, returning every complete frame it completed.

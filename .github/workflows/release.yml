@@ -75,12 +75,14 @@ jobs:
         run: |
           git tag "v${{ needs.check-version.outputs.version }}"
           git push origin "v${{ needs.check-version.outputs.version }}"
-      - name: GitHub Release
+      - name: GitHub Release (draft)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ needs.check-version.outputs.version }}"
           generate_release_notes: true
-          draft: false
+          # Draft until the signed DMG is uploaded — a published release with
+          # no assets is worse than none (the Homebrew cask 404s on it).
+          draft: true
 
   # The guest engine image: a raw arm64 kernel plus the rootfs initramfs. Built
   # on Linux where cross-compilation and buildx are cheap, then handed to the
@@ -255,9 +257,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-  update-homebrew:
+  publish:
     runs-on: ubuntu-latest
     needs: [check-version, build]
+    if: needs.check-version.outputs.changed == 'true'
+    steps:
+      - uses: actions/checkout@v5
+      # Flip the draft live only once the DMG is attached.
+      - name: Publish the release
+        run: gh release edit "v${{ needs.check-version.outputs.version }}" --draft=false
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  update-homebrew:
+    runs-on: ubuntu-latest
+    needs: [check-version, publish]
     if: needs.check-version.outputs.changed == 'true'
     steps:
       - name: Download DMG and compute SHA

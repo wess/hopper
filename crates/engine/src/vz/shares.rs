@@ -131,7 +131,7 @@ mod tests {
     fn a_configured_path_outside_home_is_shared() {
         // The whole point: /opt/data must reach the container.
         let shares = resolve(&["/opt/data".into()], always);
-        assert!(shares.iter().any(|s| s.path == PathBuf::from("/opt/data")));
+        assert!(shares.iter().any(|s| s.path == std::path::Path::new("/opt/data")));
     }
 
     #[test]
@@ -154,7 +154,7 @@ mod tests {
         );
         assert!(!shares
             .iter()
-            .any(|s| s.path == PathBuf::from("/definitely/not/here")));
+            .any(|s| s.path == std::path::Path::new("/definitely/not/here")));
     }
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(
             shares
                 .iter()
-                .filter(|s| s.path == PathBuf::from("/opt/data"))
+                .filter(|s| s.path == std::path::Path::new("/opt/data"))
                 .count(),
             1
         );

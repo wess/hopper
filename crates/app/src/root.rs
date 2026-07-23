@@ -54,9 +54,48 @@ impl Root {
             networks,
             detail: None,
         };
+        root.bring_up_engine(cx);
         root.poll_engine(cx);
         root.watch_events(cx);
         root
+    }
+
+    /// Select an engine on launch, and start Hopper's own if that is what the
+    /// active provider is and the user has autostart on.
+    ///
+    /// Without this the app only ever probes the default socket, so a user
+    /// with no Docker installed would never reach the managed VM engine — the
+    /// whole point of being a Docker Desktop replacement.
+    fn bring_up_engine(&self, cx: &mut Context<Self>) {
+        let host = Arc::clone(&self.state.host);
+        let engine = self.state.engine.clone();
+        cx.spawn(async move |_, cx| {
+            // Pick the provider (managed VM where available, else an existing
+            // engine) and point the client at it.
+            let status = {
+                let host = Arc::clone(&host);
+                let (tx, rx) = futures::channel::oneshot::channel();
+                bridge::runtime().spawn(async move { let _ = tx.send(host.select_engine().await); });
+                rx.await.ok()
+            };
+            let Some(status) = status else { return };
+            let _ = cx.update(|cx| engine.set(cx, status.clone()));
+
+            // Start the managed engine if it is selected, idle, and autostart
+            // is on. An existing engine someone else runs is left alone.
+            let autostart = host.settings().autostart_engine;
+            if autostart && status.managed && !status.connected {
+                let host = Arc::clone(&host);
+                let (tx, rx) = futures::channel::oneshot::channel();
+                bridge::runtime().spawn(async move {
+                    let _ = tx.send(host.start_engine().await.map_err(|e| e.to_string()));
+                });
+                if let Ok(Err(e)) = rx.await {
+                    tracing::warn!("engine autostart failed: {e}");
+                }
+            }
+        })
+        .detach();
     }
 
     /// Probe the engine on a timer so a daemon starting or stopping outside
