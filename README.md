@@ -1,116 +1,106 @@
 # Hopper
 
-A native desktop app for managing Docker — a Docker Desktop–style client built
-on the [Butter](https://github.com/wess/butter) framework. TypeScript on both
-sides (Bun host + React 19 webview), no bundled browser, talks directly to the
-Docker Engine API over the local unix socket.
+A native desktop app that both **manages** Docker and **is** a Docker engine —
+a Docker Desktop replacement written in Rust. The UI is [gpui](https://github.com/zed-industries/zed)
++ [guise](https://github.com/wess/guise); the async layer is Tokio; the whole
+thing talks to the Docker Engine API directly and, on macOS, runs its own Linux
+VM (Apple Virtualization.framework) with `dockerd` inside it, so you can
+uninstall Docker Desktop entirely.
+
+No bundled browser, no Electron, no sidecar processes — the VM is created
+in-process, so the app itself carries `com.apple.security.virtualization`.
 
 ## Features
 
 - **Dashboard** — running/total containers, image/volume/network counts, disk
-  usage with reclaimable meters, full engine/system info, and a live activity
-  feed off the Docker event stream. One-click "Clean up" (system prune).
-- **Containers** — list with **compose-stack grouping**, search, "only running"
-  filter, multi-select bulk actions, and per-row lifecycle (start/stop/restart/
-  pause/kill/remove/rename). Each compose stack header shows an aggregate
-  up/total state badge and **stack-level start/stop/restart/remove**. Detail
-  pane with tabs:
-  - **Logs** — live streaming, demuxed stdout/stderr
-  - **Stats** — live CPU / memory / network / block-IO meters
-  - **Terminal** — interactive `/bin/sh` exec session (real TTY via socket hijack)
-  - **Processes** — `top` of the container
-  - **Inspect** — full JSON tree
-  - **Run a container** dialog (image, ports, env, volumes, restart policy)
-- **Compose** — bring stacks **up/down from a compose file** (file picker,
-  optional project name, live streamed output). Backed by the `docker compose`
-  CLI; the button only appears when the CLI is installed. See `docs/compose.md`.
-- **Docker CLI compatibility** — expose Hopper's engine to host shell tools via
-  `DOCKER_HOST` or a `hopper` Docker context, so `docker info` and
-  `docker compose` can target Hopper instead of Docker Desktop. See
-  `docs/cli.md`.
-- **Images** — list with in-use state, **pull with live layer progress**,
-  **build from a Dockerfile** (context picker, build args, target, `.dockerignore`,
-  live build log), **push to a registry** (credentials reused from your docker
-  config), **Docker Hub search**, tag, history, inspect, remove, and prune.
-  See `docs/build.md` and `docs/push.md`.
-- **Volumes** — list with size/usage, create, inspect, remove, prune.
-- **Networks** — list, create (driver/subnet/gateway/internal/attachable),
-  inspect, connect/disconnect containers, remove, prune (built-ins protected).
-- **Registry search** — one search across **Docker Hub**, **GitHub/GHCR**, and
-  **Quay.io**, merged and ranked, each result one click from a pull.
-- **Workspaces** — saved, named scopes (by compose project and/or name pattern)
-  that filter the Containers and Images views; switch from the sidebar, manage
-  in Settings. See `docs/workspaces.md`.
-- **Menubar (status-bar) app** — a 🐳 item with live engine/running-container
-  status, quick navigation, and quit, so Hopper runs like Docker Desktop.
-- **MCP server** — a standalone Model Context Protocol server (`bun run mcp`)
-  exposing Docker tools (list/start/stop/remove containers, logs, exec, images,
-  pull, volumes, networks, system info/df) so AI clients can manage Docker.
-  Copy the launch config from Settings → MCP Server.
-- Command palette (⌘K), **light / dark / system** theme (⌘⇧L cycles), collapsible
-  sidebar, native menu, auto-refresh off the engine event stream, and live
-  connect/disconnect detection.
+  usage with reclaimable meters, and one-click "Clean up" (system prune).
+- **Containers** — live list with search, "only running" filter, and per-row
+  lifecycle (start/stop/restart). A detail pane opens beside the list with tabs:
+  - **Logs** — live streaming, demuxed stdout/stderr, stderr coloured
+  - **Stats** — live CPU / memory / network / block-IO / PID meters
+  - **Files** — browse the container's filesystem and copy files out
+  - **Terminal** — a real interactive shell (socket hijack + a minimal terminal
+    emulator, not a line-buffered fake)
+  - **Inspect** — the full JSON tree
+- **Images** — list with in-use state, pull with live layer progress, build from
+  a Dockerfile (`.dockerignore` honoured, including negations), push, tag,
+  history, remove, prune, save/load.
+- **Volumes** — list with in-use detection, create, remove, prune.
+- **Networks** — list, create, connect/disconnect, remove, prune (built-ins
+  protected).
+- **Stacks** — compose projects reconstructed from container labels, so they
+  appear with no compose CLI and start/stop label-driven.
+- **Settings** — engine control, VM resources, file-sharing paths, Docker CLI
+  integration.
+- **Migration** — scan a source engine (Docker Desktop / Colima / Rancher) and
+  copy images, volumes, and networks into Hopper's engine.
+- **MCP server** — a standalone stdio Model Context Protocol server
+  (`hoppermcp`) exposing Docker tools to AI clients.
 
-## Run
+### The managed engine (macOS)
 
-```bash
-bun install
-bun run dev        # opens the native window (Docker must be running)
-```
+On macOS Hopper can supply its own engine rather than attaching to one:
 
-Build a distributable:
+- Boots a minimal Linux guest (raw arm64 kernel + Alpine initramfs) on
+  Virtualization.framework, entirely from Rust.
+- Runs `dockerd` inside it and bridges its socket out to
+  `~/.hopper/run/docker.sock`.
+- **Forwards published container ports to `localhost`** — `docker run -p 8080:80`
+  is reachable at `http://localhost:8080` on the Mac.
+- **Shares host directories into the guest** — a bind mount outside `$HOME`
+  reaches the container instead of resolving to an empty directory.
 
-```bash
-bun run bundle     # .app bundle (macOS)
-bun run package    # .dmg installer
-```
-
-Run just the MCP server (for AI clients):
-
-```bash
-bun run mcp        # stdio MCP server exposing Docker tools
-```
-
-Tests / checks:
-
-```bash
-bun test           # unit tests (scoped to src/ via bunfig.toml)
-bunx tsc --noEmit  # typecheck
-bunx biome check src
-```
+If no managed engine is available (or you prefer one you already run), Hopper
+falls back to any existing engine — Docker Desktop, Colima, Rancher Desktop, a
+remote daemon over TCP.
 
 ## Architecture
 
+A Cargo workspace, layered bottom-up. Each crate depends only on those below it,
+and the gpui-free core never imports gpui.
+
 ```
-src/
-  host/                       Bun backend (runs in the Butter host process)
-    docker/                   Docker Engine API client + domain modules
-      client.ts               unix-socket fetch wrapper + ndjson / log-demux streaming
-      containers.ts images.ts volumes.ts networks.ts system.ts
-      stats.ts logs.ts exec.ts
-      build.ts                image build (classic builder) — tar context + /build stream
-      compose.ts              compose up/down via the docker compose CLI
-      credentials.ts          registry auth resolved from the user's docker config
-    index.ts                  IPC handler wiring + stream/exec session management
-    menu.ts                   native menu
-  shared/
-    types.ts                  the host <-> webview data contract
-    channels.ts               typed IPC channels + events (@basket/ipc)
-  app/                        React 19 webview
-    components/               one folder per view (containers, images, …) + ui primitives
-    lib/                      ipc facade + formatters
-    state/                    tiny external store
-    styles.css                design system (Docker-blue, light/dark)
+crates/
+  model     shared domain types (the wire contract)
+  store     ~/.hopper/ JSON persistence + OS keychain
+  docker    Engine API client (hyper over unix/tcp/npipe) + every domain module
+  engine    provider abstraction; the macOS VM (objc2 + Virtualization.framework)
+  migrate   Docker Desktop → Hopper migration
+  host      the async service facade the UI calls
+  mcp       the stdio MCP server (hoppermcp)
+  app       the gpui + guise application (hopperdev / hopper)
 ```
 
-The host reaches Docker over whichever transport `docker/endpoint.ts` resolves
-from the environment — a unix socket (Linux/macOS), a Windows named pipe, or
-TCP for remote daemons — honoring `DOCKER_HOST` (e.g. `tcp://host:2376`,
-`npipe:////./pipe/docker_engine`), then `DOCKER_SOCKET`, then a per-platform
-default. The API is pinned to `v1.43`. Streaming endpoints (logs, stats, events, pull)
-arrive as host→webview events; interactive exec hijacks the socket for a raw
-TTY. Built with Butter's vendored framework + the `basket` workspace packages
-(`@basket/ipc`, `@basket/ui`, `@basket/window`, `@basket/menu`, `@basket/store`).
+The async Docker layer runs on a Tokio runtime; gpui has its own executor. The
+two meet at one seam — `app::bridge` — which runs a future on Tokio and
+delivers the result on the gpui main thread. Streaming calls (logs, stats,
+events, exec) are cancelled by dropping the producer, so a closed view closes
+its stream with no separate abort registry. This mirrors the
+[tables](https://github.com/wess/tables) architecture.
+
+## Run
+
+```sh
+cargo run -p app            # launch the app (dev binary: hopperdev)
+cargo test                  # the whole suite
+cargo clippy --all-targets  # lint
+cargo run -p mcp            # the stdio MCP server
 ```
+
+An engine must be reachable, or (on macOS, with the guest image built) Hopper
+starts its own.
+
+## Build a release
+
+```sh
+scripts/build/guest.sh      # build the guest kernel + initramfs (Linux/buildx)
+scripts/bundle.sh           # assemble + sign dist/Hopper.app
+scripts/dmg.sh              # package dist/Hopper.dmg
+```
+
+Pushing a version bump in `Cargo.toml` to `main` tags, builds, notarizes, and
+publishes via `.github/workflows/release.yml`.
+
+## Sponsor
 
 ♥ [Sponsor this project](https://github.com/sponsors/wess)

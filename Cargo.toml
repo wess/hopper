@@ -1,0 +1,146 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/model",
+    "crates/store",
+    "crates/docker",
+    "crates/engine",
+    "crates/host",
+    "crates/mcp",
+    "crates/migrate",
+    "crates/app",
+]
+
+[workspace.package]
+version = "0.6.0"
+edition = "2021"
+license = "MIT"
+authors = ["Wess Cope <opensource@wess.io>"]
+repository = "https://github.com/wess/hopper"
+
+[workspace.dependencies]
+# UI. Same recipe Tables uses: plain crates.io gpui, guise from git, no
+# `[patch.crates-io]` and no vendored crates. Hopper embeds no terminal widget
+# of its own (the container terminal is drawn from the exec stream), so nothing
+# forces the zed-rev gpui pin that Sinclair needs.
+gpui = "0.2.2"
+guise-ui = { git = "https://github.com/wess/guise", default-features = false }
+
+# Async runtime. Every Docker call, stream, and engine process runs here; the
+# gpui app reaches it through the one bridge seam in `app::bridge`.
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "process",
+    "time",
+    "io-util",
+    "net",
+    "fs",
+    "signal",
+] }
+tokio-util = { version = "0.7", features = ["io", "codec"] }
+
+# HTTP over the Docker transport. The Engine API is plain HTTP/1.1 spoken over
+# a unix socket, a Windows named pipe, or TCP — hyper gives us the client with
+# the low-level control the streaming endpoints need (ndjson framing, the
+# 8-byte log demux header, and the raw socket upgrade that interactive exec
+# hijacks). `hyper-util` supplies the connection pooling and the executor.
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", "tokio"] }
+http-body-util = "0.1"
+bytes = "1"
+
+# TLS for remote daemons reached over tcp:// with DOCKER_TLS_VERIFY.
+tokio-native-tls = "0.3"
+native-tls = "0.2"
+
+# Registry search + GitHub PAT validation.
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "stream",
+    "native-tls",
+] }
+
+# Build contexts are streamed to the daemon as a tar; volume migration moves
+# tar archives in both directions through `/archive`.
+tar = "0.4"
+flate2 = "1"
+ignore = "0.4"
+
+# Credentials live in the OS keychain, matching what the Bun host wrote:
+# service "io.wess.hopper", one single-line JSON blob per key.
+keyring = { version = "3", features = ["apple-native", "linux-native", "windows-native"] }
+
+# Shared support crates, pinned once.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_yaml = "0.9"
+anyhow = "1"
+thiserror = "2"
+futures = "0.3"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+dirs = "6"
+
+# Apple Virtualization.framework, for the managed macOS engine. Porting off
+# Bun removes the JIT entitlement that could not coexist with
+# com.apple.security.virtualization, so the VM runs in-process and the Swift
+# hopperd sidecar is no longer needed.
+objc2 = "0.6"
+block2 = "0.6"
+dispatch2 = "0.3"
+objc2-foundation = "0.3"
+objc2-virtualization = { version = "0.3", features = [
+    "VZBootLoader",
+    "VZLinuxBootLoader",
+    "VZVirtualMachine",
+    "VZVirtualMachineConfiguration",
+    "VZStorageDeviceConfiguration",
+    "VZVirtioBlockDeviceConfiguration",
+    "VZStorageDeviceAttachment",
+    "VZDiskImageStorageDeviceAttachment",
+    "VZSocketDeviceConfiguration",
+    "VZVirtioSocketDeviceConfiguration",
+    "VZDirectorySharingDeviceConfiguration",
+    "VZVirtioFileSystemDeviceConfiguration",
+    "VZDirectoryShare",
+    "VZSingleDirectoryShare",
+    "VZMultipleDirectoryShare",
+    "VZSharedDirectory",
+    "VZNetworkDeviceConfiguration",
+    "VZVirtioNetworkDeviceConfiguration",
+    "VZNetworkDeviceAttachment",
+    "VZNATNetworkDeviceAttachment",
+    "VZEntropyDeviceConfiguration",
+    "VZVirtioEntropyDeviceConfiguration",
+    "VZMemoryBalloonDeviceConfiguration",
+    "VZVirtioTraditionalMemoryBalloonDeviceConfiguration",
+    "VZSerialPortConfiguration",
+    "VZVirtioConsoleDeviceSerialPortConfiguration",
+    "VZSerialPortAttachment",
+    "VZFileHandleSerialPortAttachment",
+    "VZPlatformConfiguration",
+    "VZGenericPlatformConfiguration",
+] }
+regex = "1"
+base64 = "0.22"
+urlencoding = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Internal crates.
+model = { path = "crates/model" }
+store = { path = "crates/store" }
+docker = { path = "crates/docker" }
+engine = { path = "crates/engine" }
+migrate = { path = "crates/migrate" }
+host = { path = "crates/host" }
+mcp = { path = "crates/mcp" }
+
+[profile.dev]
+debug = "limited"
+
+[profile.release]
+lto = "thin"

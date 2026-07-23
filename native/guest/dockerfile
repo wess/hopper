@@ -31,4 +31,5 @@ RUN wget -O /tmp/docker.tgz \
 
 COPY init /init
 COPY agent /agent
-RUN chmod +x /init /agent
+COPY forward /forward
+RUN chmod +x /init /agent /forward

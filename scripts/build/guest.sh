@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Produce the Hopper guest assets (vmlinuz + initrd) that hopperd boots.
+# Produce the Hopper guest assets (vmlinuz + initrd) the engine boots.
 #
 # Builds the rootfs from native/guest/dockerfile with whatever container engine
 # is on PATH, exports it, and packs it into a gzipped cpio initramfs. The
@@ -7,13 +7,13 @@
 # accept a gzipped vmlinuz) — supply it via HOPPER_KERNEL. See
 # native/guest/readme.md.
 #
-# Output: native/hopperd/.build/guest/{vmlinuz,initrd} — picked up by the
-# sidecar list in butter.yaml at bundle time.
+# Output: native/build/guest/{vmlinuz,initrd} — copied into
+# Contents/Resources by scripts/bundle.sh (they are data, not code).
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 guest="$root/native/guest"
-out="$root/native/hopperd/.build/guest"
+out="$root/native/build/guest"
 arch="${ARCH:-aarch64}"
 engine="${DOCKER:-docker}"
 mkdir -p "$out"

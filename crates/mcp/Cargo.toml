@@ -1,0 +1,26 @@
+[package]
+name = "mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# The stdio MCP server, exposing Docker tools to AI clients.
+[[bin]]
+name = "hoppermcp"
+path = "src/main.rs"
+
+[dependencies]
+model = { workspace = true }
+docker = { workspace = true }
+host = { workspace = true }
+
+tokio = { workspace = true, features = ["io-std"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

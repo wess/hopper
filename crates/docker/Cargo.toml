@@ -1,0 +1,34 @@
+[package]
+name = "docker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+model = { workspace = true }
+store = { workspace = true }
+
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+hyper = { workspace = true }
+hyper-util = { workspace = true }
+http-body-util = { workspace = true }
+bytes = { workspace = true }
+tokio-native-tls = { workspace = true }
+native-tls = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+base64 = { workspace = true }
+urlencoding = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+tar = { workspace = true }
+ignore = { workspace = true }
+keyring = { workspace = true }
+dirs = { workspace = true }

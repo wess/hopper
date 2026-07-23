@@ -4,7 +4,7 @@
 # The OS lives entirely in the (read-only) initramfs. /dev/vda is the
 # persistent data disk supplied by the host; we format it on first boot and
 # mount it at /var/lib/docker. Then start dockerd and forward its unix socket
-# onto a vsock port so the host-side bridge (hopperd) can reach it.
+# onto a vsock port so the host-side bridge in the app can reach it.
 set -e
 
 # PID 1 starts with no PATH; dockerd resolves containerd/runc/docker-proxy from
@@ -35,16 +35,27 @@ if mount -t virtiofs rosetta /mnt/rosetta 2>/dev/null; then
     > /proc/sys/fs/binfmt_misc/register 2>/dev/null || true
 fi
 
-# Host home share (virtiofs) mounted at its real path, so bind mounts like
-# `docker run -v /Users/you/proj:/app` resolve to the host's files.
-share=$(sed -n 's/.*hopper\.share=\([^ ]*\).*/\1/p' /proc/cmdline)
-if [ -n "$share" ]; then
-  mkdir -p "$share"
-  vfscache=$(sed -n 's/.*hopper\.vfscache=\([^ ]*\).*/\1/p' /proc/cmdline)
-  mount -t virtiofs home "$share" -o "cache=${vfscache:-auto}" 2>/dev/null \
-    || mount -t virtiofs home "$share" 2>/dev/null \
-    || echo "[guest] virtiofs home mount failed"
-fi
+# Host shares (virtiofs), each mounted at its real host path so a bind mount
+# like `docker run -v /opt/data:/data` resolves to the host's actual files.
+#
+# The host passes one `hopper.share=<tag>:<path>` per directory. Earlier builds
+# shared only the home directory under a fixed `home` tag, which is why a bind
+# mount outside $HOME silently produced an empty directory.
+vfscache=$(sed -n 's/.*hopper\.vfscache=\([^ ]*\).*/\1/p' /proc/cmdline)
+for entry in $(sed -n 's/.*\(hopper\.share=[^ ]*\).*/\1/gp' /proc/cmdline; \
+               tr ' ' '\n' < /proc/cmdline | grep '^hopper\.share='); do
+  spec=${entry#hopper.share=}
+  tag=${spec%%:*}
+  path=${spec#*:}
+  [ -n "$tag" ] && [ -n "$path" ] && [ "$tag" != "$spec" ] || continue
+  mkdir -p "$path"
+  if mount -t virtiofs "$tag" "$path" -o "cache=${vfscache:-auto}" 2>/dev/null \
+     || mount -t virtiofs "$tag" "$path" 2>/dev/null; then
+    echo "[guest] shared $path"
+  else
+    echo "[guest] virtiofs mount failed for $path (tag $tag)"
+  fi
+done
 
 # Persistent data disk -> /var/lib/docker. Format on first boot only.
 if ! blkid /dev/vda >/dev/null 2>&1; then
@@ -72,9 +83,15 @@ while [ ! -S /run/docker.sock ] && [ "$i" -lt 200 ]; do
 done
 
 # Guest agent on a second vsock port — answers reclaim/stats requests from
-# hopperd (one socat instance per connection).
+# the host (one socat instance per connection).
 echo "[guest] starting agent on vsock:2377"
 socat VSOCK-LISTEN:2377,reuseaddr,fork EXEC:/agent &
+
+# Port-forwarding agent on a third vsock port. The host opens one listener per
+# published container port and splices each connection through here, which is
+# what makes `-p 8080:80` reachable at localhost:8080 on the Mac.
+echo "[guest] starting port forwarder on vsock:2378"
+socat VSOCK-LISTEN:2378,reuseaddr,fork EXEC:/forward &
 
 echo "[guest] forwarding dockerd onto vsock:2375"
 # VSOCK-LISTEN needs socat >= 1.7.4 built with vsock support. CID is implicit

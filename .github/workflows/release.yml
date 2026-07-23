@@ -1,10 +1,18 @@
 name: Release
 
+# Ships a notarized, Rust-only Hopper. The version lives in the workspace
+# Cargo.toml (not package.json — that is the retired Bun build); pushing a bump
+# to main tags and releases.
+#
+# There is no `hopperd` Swift sidecar: the VM is created in-process, so the app
+# itself carries com.apple.security.virtualization and there is no inside-out
+# signing dance.
+
 on:
   push:
     branches: [main]
     paths:
-      - "package.json"
+      - "Cargo.toml"
   workflow_dispatch: {}
 
 permissions:
@@ -19,60 +27,77 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Release when the package.json version has no matching tag yet. This is
-      # idempotent and works for both push and manual workflow_dispatch (a
-      # HEAD~1 diff would miss dispatches and re-released versions).
+      - name: Read workspace version
+        id: version
+        run: |
+          V=$(sed -n 's/^version = "\([0-9][^"]*\)".*/\1/p' Cargo.toml | head -1)
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      # Release when the version has no matching tag yet — idempotent across
+      # both push and manual dispatch.
       - name: Decide whether to release
         id: diff
         run: |
-          NEW=$(jq -r '.version' package.json)
-          if git ls-remote --tags origin "refs/tags/v${NEW}" | grep -q .; then
-            echo "v${NEW} already released — skipping."
+          V="${{ steps.version.outputs.version }}"
+          if git ls-remote --tags origin "refs/tags/v${V}" | grep -q .; then
+            echo "v${V} already released — skipping."
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Get version
-        id: version
-        run: echo "version=$(jq -r '.version' package.json)" >> "$GITHUB_OUTPUT"
-
-  create-release:
-    runs-on: ubuntu-latest
+  # The correctness gate the Bun workflow never had: nothing ships unless the
+  # tests, clippy, and a release build all pass first.
+  verify:
+    runs-on: macos-14
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --workspace
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Release build
+        run: cargo build --workspace --release
 
-      - name: Create git tag
+  create-release:
+    runs-on: ubuntu-latest
+    needs: [check-version, verify]
+    if: needs.check-version.outputs.changed == 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tag
         run: |
           git tag "v${{ needs.check-version.outputs.version }}"
           git push origin "v${{ needs.check-version.outputs.version }}"
-
-      - name: Create GitHub Release
+      - name: GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ needs.check-version.outputs.version }}"
           generate_release_notes: true
           draft: false
 
-  # Build the guest engine image (kernel + initramfs) that hopperd boots. A raw
-  # arm64 kernel cross-compiled from native/guest/kernel.config, plus the rootfs
-  # (Apache-2.0 Docker Engine) packed into an initramfs with GNU cpio.
+  # The guest engine image: a raw arm64 kernel plus the rootfs initramfs. Built
+  # on Linux where cross-compilation and buildx are cheap, then handed to the
+  # macOS bundling job. Output goes to native/build/guest (the retired sidecar's
+  # .build tree is gone).
   guest:
     runs-on: ubuntu-latest
-    needs: [check-version, create-release]
+    needs: [check-version, verify]
     if: needs.check-version.outputs.changed == 'true'
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: "v${{ needs.check-version.outputs.version }}"
 
       - name: Cache guest kernel
         id: kcache
         uses: actions/cache@v4
         with:
-          path: native/hopperd/.build/guest/vmlinuz
+          path: native/build/guest/vmlinuz
           key: hopper-kernel-6.12.8-${{ hashFiles('native/guest/kernel.config') }}
 
       - name: Install kernel build deps
@@ -98,28 +123,31 @@ jobs:
           make olddefconfig
           grep -q '^CONFIG_BRIDGE=y' .config || { echo 'FATAL: CONFIG_BRIDGE not built-in'; exit 1; }
           make -j"$(nproc)" Image
-          mkdir -p "$GITHUB_WORKSPACE/native/hopperd/.build/guest"
-          cp arch/arm64/boot/Image "$GITHUB_WORKSPACE/native/hopperd/.build/guest/vmlinuz"
+          mkdir -p "$GITHUB_WORKSPACE/native/build/guest"
+          # A raw arm64 Image — Virtualization.framework will not accept a
+          # gzipped vmlinuz.
+          cp arch/arm64/boot/Image "$GITHUB_WORKSPACE/native/build/guest/vmlinuz"
 
       - name: Set up QEMU (cross-arch rootfs build)
         uses: docker/setup-qemu-action@v3
-
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Build guest rootfs -> initrd
         run: |
           set -euo pipefail
-          out="native/hopperd/.build/guest"
+          out="native/build/guest"
           mkdir -p "$out"
           docker buildx build --load \
             --platform linux/arm64 \
             --build-arg "DOCKER_ARCH=aarch64" \
             -f native/guest/dockerfile \
             -t hopper-guest native/guest
-          # Pack the initramfs inside a Linux container (GNU cpio).
-          docker run --rm --platform linux/arm64 --entrypoint sh hopper-guest \
-            -c 'cd / && find . -xdev | cpio -o -H newc 2>/dev/null | gzip -9' > "$out/initrd"
+          cid="$(docker create --platform linux/arm64 hopper-guest)"
+          tmp="$(mktemp -d)"
+          docker export "$cid" | tar -x -C "$tmp"
+          docker rm -f "$cid"
+          ( cd "$tmp" && find . -xdev | cpio -o -H newc 2>/dev/null | gzip -9 ) > "$out/initrd"
           ls -la "$out"
 
       - name: Upload guest assets
@@ -127,16 +155,13 @@ jobs:
         with:
           name: guest
           path: |
-            native/hopperd/.build/guest/vmlinuz
-            native/hopperd/.build/guest/initrd
+            native/build/guest/vmlinuz
+            native/build/guest/initrd
 
   build:
-    needs: [check-version, create-release, guest]
+    needs: [check-version, verify, create-release, guest]
     if: needs.check-version.outputs.changed == 'true'
-    runs-on: macos-latest
-    # All signing creds are wired through env so butter.yaml's `{APPLE_*}`
-    # placeholders resolve. Absent (forks), butter falls back to ad-hoc and
-    # skips notarization — but then the embedded VM engine won't boot.
+    runs-on: macos-14
     env:
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -146,22 +171,26 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: "v${{ needs.check-version.outputs.version }}"
-      - uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        run: bun install
-
-      - name: Build hopperd (release)
-        run: swift build -c release --package-path native/hopperd
-
-      - name: Fetch Compose v2 (host binary)
-        run: scripts/build/compose.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
       - name: Download guest assets
         uses: actions/download-artifact@v4
         with:
           name: guest
-          path: native/hopperd/.build/guest
+          path: native/build/guest
+
+      - name: Fetch Compose + Docker CLI (host binaries)
+        run: |
+          set -euo pipefail
+          scripts/build/compose.sh
+          # The Docker CLI is Apache-2.0; shipping it is what lets a user
+          # uninstall Docker Desktop and keep a working `docker` command.
+          ver="27.5.1"
+          curl -fsSL "https://download.docker.com/mac/static/stable/aarch64/docker-${ver}.tgz" \
+            | tar -xz -C /tmp
+          mkdir -p native/build
+          cp /tmp/docker/docker native/build/docker
 
       - name: Import signing certificate
         if: env.APPLE_SIGNING_IDENTITY != ''
@@ -170,8 +199,6 @@ jobs:
           CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          # Import the Developer ID Application cert into a temporary keychain
-          # so `codesign` can find it. The keychain is wiped at job end.
           KEYCHAIN="$RUNNER_TEMP/build.keychain"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
@@ -182,64 +209,46 @@ jobs:
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed s/\"//g)
           rm -f "$RUNNER_TEMP/cert.p12"
 
-      # butter compile embeds a prebuilt semhelper dylib, but butter only
-      # builds it as a side effect of running the app — so build it here in the
-      # installed package first, otherwise `butter compile` fails reading it.
-      - name: Build butter native helper
+      # bundle.sh builds the release binary, assembles Hopper.app, stages the
+      # guest assets into Resources, and signs the app itself with the
+      # virtualization entitlement.
+      - name: Bundle (.app) + package (.dmg)
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
-          find node_modules -path '*/butter/src/ipc/native/semhelper.c' -print0 \
-            | while IFS= read -r -d '' src; do
-                clang -shared -o "${src%.c}.dylib" "$src" -fPIC
-                echo "built ${src%.c}.dylib"
-              done
+          scripts/bundle.sh
+          scripts/dmg.sh
 
-      - name: Compile
-        run: bun run build
-
-      - name: Bundle (.app — embeds hopperd + compose in MacOS/sidecars)
-        run: bun run bundle
-
-      # The guest kernel + initrd are DATA: they go in Contents/Resources/, not
-      # under MacOS/ (codesign rejects unsigned "code" there). Copy them in
-      # before signing so the outer signature seals them as resources.
-      - name: Stage guest assets into Resources
+      - name: Notarize
+        if: env.APPLE_ID != ''
         run: |
-          res="dist/Hopper.app/Contents/Resources"
-          mkdir -p "$res"
-          cp native/hopperd/.build/guest/vmlinuz native/hopperd/.build/guest/initrd "$res/"
-
-      # Reads bundle.macos from butter.yaml. With creds, signs inside-out
-      # (hopperd gets com.apple.security.virtualization) + hardened runtime +
-      # JIT entitlements, then notarizes. Without creds, ad-hoc fallback.
-      - name: Sign + notarize
-        run: bun run sign
-
-      - name: Package (.dmg)
-        run: bun run package
+          xcrun notarytool submit dist/Hopper.dmg \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple dist/Hopper.dmg
 
       - name: Verify engine bundle
         run: |
           set -euo pipefail
-          codesign --verify --deep --strict --verbose=2 dist/Hopper.app
           app="dist/Hopper.app/Contents"
-          helper="$app/MacOS/sidecars/hopperd"
-          test -x "$helper" || { echo "FATAL: hopperd helper missing from the bundle"; exit 1; }
-          test -f "$app/Resources/vmlinuz" || { echo "FATAL: guest kernel (vmlinuz) not in Resources"; exit 1; }
+          codesign --verify --strict --verbose=2 dist/Hopper.app
+          test -x "$app/MacOS/hopper" || { echo "FATAL: app binary missing"; exit 1; }
+          test -f "$app/Resources/vmlinuz" || { echo "FATAL: guest kernel not in Resources"; exit 1; }
           test -f "$app/Resources/initrd" || { echo "FATAL: guest initrd not in Resources"; exit 1; }
           if file "$app/Resources/vmlinuz" | grep -qi gzip; then
             echo "FATAL: vmlinuz is gzip-compressed; VZ needs a raw arm64 Image"; exit 1
           fi
-          if codesign -d --entitlements - "$helper" 2>/dev/null | grep -q virtualization; then
-            echo "OK: hopperd carries com.apple.security.virtualization"
+          # The whole point of the Rust port: the entitlement is on the app
+          # itself, not a separate sidecar.
+          if codesign -d --entitlements - "$app/MacOS/hopper" 2>/dev/null | grep -q virtualization; then
+            echo "OK: the app carries com.apple.security.virtualization"
           else
-            echo "FATAL: hopperd is missing the virtualization entitlement — the VM cannot start"
+            echo "FATAL: the app is missing the virtualization entitlement — the VM cannot start"
             exit 1
           fi
           if [ -z "${APPLE_SIGNING_IDENTITY}" ]; then
             echo "::warning::Ad-hoc build — the VM engine will not boot without a Developer ID."
           fi
-          spctl --assess --type execute --verbose dist/Hopper.app || \
-            echo "spctl assessment failed (expected for ad-hoc / unnotarized builds)"
 
       - name: Upload DMG
         run: gh release upload "v${{ needs.check-version.outputs.version }}" dist/Hopper.dmg --clobber

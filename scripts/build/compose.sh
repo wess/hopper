@@ -5,7 +5,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-out="$root/native/hopperd/.build/compose"
+out="$root/native/build"
 ver="${COMPOSE_VERSION:-v2.32.4}"
 
 case "$(uname -m)" in

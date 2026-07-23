@@ -5,7 +5,7 @@ The marketing site for Hopper. Static, dependency-free — plain HTML/CSS/JS.
 ## Run
 
 ```bash
-bun run site/serve.ts        # → http://localhost:3000
+rustc site/serve.rs -o /tmp/hoppersite && SITE_DIR=site /tmp/hoppersite        # → http://localhost:3000
 ```
 
 Or just open `site/index.html` in a browser — there's no build step.

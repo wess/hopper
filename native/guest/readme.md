@@ -1,6 +1,6 @@
 # Hopper guest image
 
-The Linux guest that `hopperd` boots on Apple's Virtualization.framework to run
+The Linux guest that Hopper boots on Apple's Virtualization.framework to run
 the Docker engine. The OS lives in an initramfs (read-only, shipped in the app
 bundle); the host supplies a persistent data disk for `/var/lib/docker`.
 
@@ -13,18 +13,17 @@ bundle); the host supplies a persistent data disk for `/var/lib/docker`.
 - `init` — PID 1 in the initramfs. Mounts the pseudo-filesystems, formats and
   mounts the data disk (`/dev/vda` → `/var/lib/docker`) on first boot, starts
   `dockerd`, then forwards its unix socket onto **vsock port 2375**. The
-  host-side bridge in `hopperd` dials that port and re-exposes it as a unix
+  host-side bridge in `engine::vz::bridge` dials that port and re-exposes it as a unix
   socket Hopper talks to.
 
 ## Build
 
 ```sh
-scripts/build/hopperd.sh           # the Swift VM helper (release, signed)
 HOPPER_KERNEL=/path/to/Image \
   scripts/build/guest.sh           # rootfs -> initrd, plus the kernel
 ```
 
-Outputs land in `native/hopperd/.build/{release/hopperd,guest/{vmlinuz,initrd}}`,
+Outputs land in `native/build/guest/{vmlinuz,initrd}`,
 which `butter.yaml` lists as sidecars — they're copied into the bundle's
 `Contents/MacOS/sidecars/` and resolved at runtime by the `vz` provider.
 

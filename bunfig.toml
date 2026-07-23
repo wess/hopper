@@ -1,4 +1,0 @@
-# Scope `bun test` to our source. The vendored butter/ and basket/ trees ship
-# their own (native/FFI) tests we don't run — crawling them crashes the runner.
-[test]
-root = "./src"

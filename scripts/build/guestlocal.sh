@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Build the guest kernel + initrd LOCALLY on Apple Silicon — no cross-compile,
 # no CI. Builds a raw arm64 Image and the rootfs natively inside arm64 Linux
-# containers, then stages them next to the local hopperd so `bun run dev` can
+# containers, then stages them where a local `cargo run -p app` can
 # boot the VM. Requires a running container engine (Docker/Colima/OrbStack) on
 # an arm64 host. Slow the first time (kernel compile); cached after.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-out="$root/native/hopperd/.build/guest"
+out="$root/native/build/guest"
 guest="$root/native/guest"
 kver="${KERNEL_VERSION:-6.12.8}"
 dver="${DOCKER_VERSION:-27.5.1}"
@@ -47,8 +47,8 @@ echo "[guestlocal] building rootfs -> initrd…"
 "$engine" run --rm --platform linux/arm64 --entrypoint sh hopper-guest \
   -c 'cd / && find . -xdev | cpio -o -H newc 2>/dev/null | gzip -9' > "$out/initrd"
 
-# Stage next to the local hopperd binary (config.swift resolves assets from the
+# Stage where the dev build resolves them from (see vz::provider::bundle_resources).
 # executable's directory).
-cp "$out/vmlinuz" "$out/initrd" "$root/native/hopperd/.build/release/"
-echo "[guestlocal] done — vmlinuz + initrd staged in native/hopperd/.build/{guest,release}/"
+# The dev build reads them straight from native/build/guest.
+echo "[guestlocal] done — vmlinuz + initrd staged in native/build/guest/"
 file "$out/vmlinuz"
