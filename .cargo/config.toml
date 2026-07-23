@@ -1,0 +1,11 @@
+# Local macOS development only.
+#
+# `cargo run -p app` runs an unsigned dev binary, which cannot start the managed
+# VM engine (Virtualization.framework needs the com.apple.security.virtualization
+# entitlement, and only a signed binary carries it). This runner signs the dev
+# binary ad-hoc with that entitlement so the engine actually starts under
+# `cargo run` — see scripts/dev/run.sh. It signs only the app binary; test
+# runs pass through untouched. CI and the release sign through bundle.sh, not
+# this, and only the aarch64 macOS target is affected.
+[target.aarch64-apple-darwin]
+runner = "scripts/dev/run.sh"

@@ -20,10 +20,18 @@ pub const MANIFEST: &str = "guest.json";
 
 const RELEASE_BASE: &str = "https://github.com/wess/hopper/releases/download";
 
-/// Where downloaded assets are cached, distinct from the bundled copy so a
+/// The root of the download cache, distinct from the bundled copy so a
 /// reinstall's bundled image always wins over a stale download.
 pub fn cache_dir() -> PathBuf {
     store::paths::engine_dir().join("guest")
+}
+
+/// Where a *specific version's* downloaded image is cached. Scoping by version
+/// is what keeps an upgrade from booting the previous release's guest: the
+/// kernel and the guest init that expects it must always be the matched pair,
+/// so v0.8.0 never reuses a v0.7.0 download left on disk.
+fn cache_for(version: &str) -> PathBuf {
+    cache_dir().join(version)
 }
 
 /// The kernel/initrd pair, wherever they live.
@@ -46,14 +54,15 @@ impl Guest {
     }
 }
 
-/// Find the guest image, preferring the bundled copy over a download cache.
-/// Returns `None` when neither has it — the signal to acquire.
-pub fn locate(bundle: &Path, exists: impl Fn(&Path) -> bool + Copy) -> Option<Guest> {
+/// Find the guest image for `version`, preferring the bundled copy over the
+/// download cache. Returns `None` when neither has it — the signal to acquire.
+/// A cache from a *different* version is ignored, not reused.
+pub fn locate(bundle: &Path, version: &str, exists: impl Fn(&Path) -> bool + Copy) -> Option<Guest> {
     let bundled = Guest::under(bundle);
     if bundled.present(exists) {
         return Some(bundled);
     }
-    let cached = Guest::under(&cache_dir());
+    let cached = Guest::under(&cache_for(version));
     cached.present(exists).then_some(cached)
 }
 
@@ -166,7 +175,7 @@ pub async fn acquire(
     version: &str,
     mut on_progress: impl FnMut(u64, u64),
 ) -> anyhow::Result<Guest> {
-    let dir = cache_dir();
+    let dir = cache_for(version);
     tokio::fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("creating {}", dir.display()))?;
@@ -238,22 +247,31 @@ mod tests {
     fn locate_prefers_the_bundled_image_over_the_cache() {
         // Bundle has both files → bundle wins.
         let bundle = PathBuf::from("/App.app/Contents/Resources");
-        let found = locate(&bundle, |_| true).unwrap();
+        let found = locate(&bundle, "0.8.0", |_| true).unwrap();
         assert_eq!(found.kernel, bundle.join(KERNEL));
     }
 
     #[test]
-    fn locate_falls_back_to_the_cache() {
+    fn locate_falls_back_to_the_versioned_cache() {
         let bundle = PathBuf::from("/App.app/Contents/Resources");
-        // Only cache files exist.
-        let cache = cache_dir();
-        let found = locate(&bundle, |p| p.starts_with(&cache)).unwrap();
+        // Only this version's cache files exist.
+        let cache = cache_for("0.8.0");
+        let found = locate(&bundle, "0.8.0", |p| p.starts_with(&cache)).unwrap();
         assert!(found.kernel.starts_with(&cache));
     }
 
     #[test]
+    fn locate_ignores_a_cache_from_another_version() {
+        // A v0.7.0 download left on disk must not satisfy a v0.8.0 lookup —
+        // the kernel and its guest init are a matched pair.
+        let old = cache_for("0.7.0");
+        let found = locate(&PathBuf::from("/nowhere"), "0.8.0", |p| p.starts_with(&old));
+        assert!(found.is_none());
+    }
+
+    #[test]
     fn locate_returns_none_when_neither_has_the_image() {
-        assert!(locate(&PathBuf::from("/nowhere"), |_| false).is_none());
+        assert!(locate(&PathBuf::from("/nowhere"), "0.8.0", |_| false).is_none());
     }
 
     #[test]

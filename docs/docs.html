@@ -152,10 +152,11 @@ docker compose version</code></pre>
 cargo test                  <span class="c"># the whole suite</span>
 cargo clippy --all-targets  <span class="c"># lint</span>
 cargo run -p mcp            <span class="c"># the MCP server</span></code></pre>
-      <p>In a plain <code>cargo run</code> build the managed engine is inactive — the guest image
-        is not beside the dev binary and it is not signed with the virtualization entitlement — so
-        it uses any engine you already run. The managed engine activates in the bundled,
-        signed <code>.app</code>. To build the guest image and a bundle:</p>
+      <p>On macOS, <code>cargo run -p app</code> brings up the real managed engine: a cargo runner
+        (<code>scripts/dev/run.sh</code>, wired in through <code>.cargo/config.toml</code>) signs the
+        dev binary ad-hoc with the virtualization entitlement, and the engine downloads its guest
+        image on first start — so a source build is a working Docker, not just a manager for one you
+        already run. To build the guest image yourself and produce a signed, notarizable bundle:</p>
       <pre><code>scripts/build/guest.sh      <span class="c"># guest kernel + initramfs (Linux/buildx)</span>
 scripts/bundle.sh           <span class="c"># assemble + sign dist/Hopper.app</span>
 scripts/dmg.sh              <span class="c"># package dist/Hopper.dmg</span></code></pre>

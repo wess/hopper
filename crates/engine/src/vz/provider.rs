@@ -71,9 +71,14 @@ mod platform {
             }
         }
 
-        /// Where the guest image is, if it is on disk (bundled or cached).
+        /// Where the guest image is, if it is on disk (bundled, or cached for
+        /// this exact version — a stale cache from an upgrade is ignored).
         fn guest(&self) -> Option<crate::vz::acquire::Guest> {
-            crate::vz::acquire::locate(&bundle_resources(), |p| p.exists())
+            crate::vz::acquire::locate(
+                &bundle_resources(),
+                env!("CARGO_PKG_VERSION"),
+                |p| p.exists(),
+            )
         }
 
         /// The VM layout for a resolved guest image.
