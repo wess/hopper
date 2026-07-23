@@ -7,7 +7,7 @@
   <meta name="description" content="A native macOS app that manages Docker and runs its own engine — a Rust Docker Desktop replacement that boots a real Linux VM, forwards ports to localhost, and shares your files.">
   <meta name="theme-color" content="#0c1018">
   <meta property="og:title" content="Hopper — Docker, without the Desktop">
-  <meta property="og:description" content="Manages Docker and is the engine. A Rust rewrite that boots its own Linux VM on macOS — no Docker Desktop required.">
+  <meta property="og:description" content="Manages Docker and is the engine. Native Rust that boots its own Linux VM on macOS — no Docker Desktop required.">
   <meta property="og:type" content="website">
   <link rel="stylesheet" href="styles.css">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -115,8 +115,8 @@
         <div class="section-head" data-reveal style="grid-column: 1 / -1; margin-bottom: 2.5rem">
           <p class="kicker">Be the engine</p>
           <h2>It carries <em>its own ocean.</em></h2>
-          <p>The Bun build shipped a Swift sidecar to run the VM. Rust has no JIT, so Hopper holds
-            the virtualization entitlement itself — the VM runs in-process, no sidecar.</p>
+          <p>Hopper holds the virtualization entitlement itself, so the VM runs entirely in-process —
+            no helper daemon, no second process to sign, supervise, or crash.</p>
         </div>
 
         <ol class="pipeline" data-reveal>
