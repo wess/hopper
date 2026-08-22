@@ -31,13 +31,13 @@
       <h5>Start</h5>
       <a href="#install">Install</a>
       <a href="#firstrun">First run</a>
-      <a href="#engine">The managed engine</a>
+      <a href="#engine">The engine</a>
       <h5>Use</h5>
       <a href="#registry">Find images</a>
       <a href="#detail">Detail pane</a>
       <a href="#cli">Docker CLI</a>
-      <a href="#sharing">File sharing</a>
-      <a href="#migrate">Migrate in</a>
+      <a href="#sharing">Bind mounts</a>
+      <a href="#import">Import from Docker</a>
       <a href="#mcp">MCP server</a>
       <h5>Build</h5>
       <a href="#source">From source</a>
@@ -59,39 +59,55 @@
         drag <strong>Hopper.app</strong> to Applications. The build is signed with a Developer ID
         and notarized, so Gatekeeper opens it without a fuss.</p>
       <div class="callout">
-        <p><strong>Requirements.</strong> Apple Silicon (arm64) and macOS Sonoma or newer. The
-          managed engine needs Apple's Virtualization framework, which is Apple-Silicon only.</p>
+        <p><strong>Requirements.</strong> Apple Silicon (arm64). Apple Containers needs
+          <strong>macOS 26 or later</strong> — the vmnet APIs that container-to-container
+          networking depends on do not exist before it. On an older macOS, Hopper still works
+          against a Docker engine you already run.</p>
       </div>
 
       <h2 id="firstrun">First run</h2>
-      <p>On launch Hopper picks an engine. On macOS it prefers its <strong>own</strong> managed VM
-        engine and falls back to any engine you already run — Docker Desktop, Colima, Rancher
-        Desktop, or a remote daemon over TCP.</p>
-      <p>The managed engine needs a small guest image (a kernel and initramfs). The release bundles
-        it, but if it is ever missing — a lean install, a stripped bundle — Hopper
-        <strong>fetches it once</strong>, on the first start, from its own release: a ~120 MB
-        download, checksum-verified before it boots, and cached under <code>~/.hopper/</code> for
-        every run after. So a Mac with no Docker at all still ends up with a working one.</p>
-      <p>If Hopper is providing the engine and autostart is on (the default), it boots the VM in
-        the background; the status footer moves from <em>starting</em> to <em>connected</em> once
-        <code>dockerd</code> answers. You can control this under <strong>Settings → Engine</strong>.</p>
+      <p>On launch Hopper picks an engine. On macOS it prefers <strong>Apple Containers</strong>
+        and falls back to any engine you already run — Docker Desktop, Colima, Rancher Desktop, or
+        a remote daemon over TCP. On Linux it looks for Docker or Podman, checking rootless
+        sockets before the system ones.</p>
+      <p>If Apple's <code>container</code> is not installed, Hopper says so and offers to get it:
+        it downloads the package <em>Apple</em> signed and hands it to the system installer, which
+        asks you to approve it. Hopper never elevates privileges itself.</p>
+      <p>Once it is there and autostart is on (the default), Hopper starts Apple's services in the
+        background and the status footer moves from <em>starting</em> to <em>connected</em>. You
+        can control this under <strong>Settings → Engine</strong>.</p>
 
-      <h2 id="engine">The managed engine</h2>
-      <p>On a Mac with no Docker installed at all, Hopper still gives you a working Docker. It:</p>
+      <h2 id="engine">The engine</h2>
+      <p>On macOS the engine is <a href="https://github.com/apple/container">Apple's
+        <code>container</code></a>: every container is its own lightweight VM, and Apple maintains
+        it. Hopper installs it, starts and stops its services, and drives it.</p>
+      <p>It is not the Docker Engine API, and Hopper does not pretend otherwise. Apple's runtime
+        publishes no Docker socket — the request for one was closed as not planned — so Hopper
+        speaks to it through the <code>container</code> command instead. Some things simply are not
+        there:</p>
       <ul>
-        <li>acquires its guest image if it is not already on disk — bundled with the app, or
-          downloaded and verified on first start;</li>
-        <li>boots a minimal Linux guest (a raw arm64 kernel and Alpine initramfs) on
-          Virtualization.framework, entirely from Rust;</li>
-        <li>runs <code>dockerd</code> inside it and bridges its socket out to
-          <code>~/.hopper/run/docker.sock</code>;</li>
-        <li>forwards published container ports to <code>localhost</code>; and</li>
-        <li>shares host directories into the guest so bind mounts work.</li>
+        <li><strong>pause</strong> and <strong>unpause</strong>, and renaming a container;</li>
+        <li>changing a container's CPU or memory after it is created;</li>
+        <li>restart policies and <code>--hostname</code>;</li>
+        <li>healthchecks, so no container reports a health state; and</li>
+        <li>Compose, and the live event stream (Hopper polls instead).</li>
       </ul>
-      <p>Resources (CPU, memory, disk) and the shared-directory list live in
-        <strong>Settings</strong>. CPU and memory apply on the next engine restart; the data disk
-        is a sparse file created once at <code>~/.hopper/engine/</code> and never recreated, so
-        your images and volumes survive upgrades.</p>
+      <p>Hopper hides those rather than offering a button that always fails. If you need them,
+        switch to a Docker engine under <strong>Settings → Engine</strong>.</p>
+      <p>Two things worth knowing about Apple's volumes: a named volume is a real ext4 filesystem,
+        so it arrives with a <code>lost+found</code> directory — Postgres needs
+        <code>PGDATA</code> pointed at a subdirectory — and anonymous volumes are not removed with
+        their container.</p>
+
+      <h2 id="import">Import from Docker</h2>
+      <p><strong>Import</strong> finds Docker Desktop, Colima or Rancher Desktop and copies your
+        images, networks and containers into whichever engine Hopper is running. Containers are
+        recreated rather than moved: the image, ports, mounts and labels travel, and a writable
+        layer is by definition scratch. <strong>Nothing is removed from the source</strong>, so if
+        the import goes wrong your Docker install is exactly where it was.</p>
+      <p>The source engine is pinned when you scan, so a daemon coming up or down mid-import
+        cannot quietly redirect it somewhere else. Per-item failures are reported and the rest
+        continues — one unreadable image should not cost you the other nineteen.</p>
       <div class="callout warn">
         <p><strong>Already running Docker Desktop?</strong> On macOS Hopper prefers its own engine
           by default. To have it manage your existing daemon instead, set the engine preference to
@@ -135,18 +151,11 @@ docker compose version</code></pre>
           symlink for those; it is off by default because the path is machine-wide.</p>
       </div>
 
-      <h2 id="sharing">File sharing</h2>
-      <p>Bind mounts only reach the container for directories Hopper shares into the guest. Your
-        home directory is shared by default; add others under
-        <strong>Settings → File sharing</strong>. A bind mount outside a shared path shows the
-        container an empty directory rather than your files — Hopper warns when it detects one.</p>
-
-      <h2 id="migrate">Migrate in</h2>
-      <p>Hopper can move your existing Docker world over. It scans for a source engine — Docker
-        Desktop, Colima, or Rancher Desktop — lists what it holds, and copies your selection
-        (images as tar streams, volumes through a helper container, networks recreated) into
-        Hopper's engine, streaming progress. The source is pinned at scan time, so a daemon coming
-        up or down mid-migration cannot redirect it.</p>
+      <h2 id="sharing">Bind mounts</h2>
+      <p>Apple's runtime bind-mounts host directories directly
+        (<code>--volume /host/path:/in/container</code>), so there is no share list to maintain.
+        Two caveats: only <code>ro</code> is honoured as a mount option, and a bind mount performs
+        worse than a named volume, so put databases on volumes.</p>
 
       <h2 id="mcp">MCP server</h2>
       <p>Hopper ships a standalone Model Context Protocol server that exposes Docker tools to AI
@@ -162,13 +171,11 @@ docker compose version</code></pre>
 cargo test                  <span class="c"># the whole suite</span>
 cargo clippy --all-targets  <span class="c"># lint</span>
 cargo run -p mcp            <span class="c"># the MCP server</span></code></pre>
-      <p>On macOS, <code>cargo run -p app</code> brings up the real managed engine: a cargo runner
-        (<code>scripts/dev/run.sh</code>, wired in through <code>.cargo/config.toml</code>) signs the
-        dev binary ad-hoc with the virtualization entitlement, and the engine downloads its guest
-        image on first start — so a source build is a working Docker, not just a manager for one you
-        already run. To build the guest image yourself and produce a signed, notarizable bundle:</p>
-      <pre><code>scripts/build/guest.sh      <span class="c"># guest kernel + initramfs (Linux/buildx)</span>
-scripts/bundle.sh           <span class="c"># assemble + sign dist/Hopper.app</span>
+      <p>A source build behaves exactly like the shipped one. Hopper runs no VM of its own any
+        more, so it needs no entitlement and no code-signing dance to reach its engine — Apple's
+        <code>container</code> does the virtualizing, under its own privileged helpers. To produce
+        a signed, notarizable bundle:</p>
+      <pre><code>scripts/bundle.sh           <span class="c"># assemble + sign dist/Hopper.app</span>
 scripts/dmg.sh              <span class="c"># package dist/Hopper.dmg</span></code></pre>
 
       <h2 id="architecture">Architecture</h2>
@@ -177,12 +184,16 @@ scripts/dmg.sh              <span class="c"># package dist/Hopper.dmg</span></co
       <pre><code>model     <span class="c">shared domain types (the wire contract)</span>
 store     <span class="c">~/.hopper/ JSON persistence + OS keychain</span>
 docker    <span class="c">Engine API client (hyper) + every domain module</span>
-engine    <span class="c">provider abstraction; the macOS VM (objc2)</span>
-migrate   <span class="c">Docker Desktop → Hopper migration</span>
+apple     <span class="c">Apple Containers, driven through the `container` CLI</span>
+engine    <span class="c">provider abstraction; Apple / Docker-or-Podman / existing</span>
+migrate   <span class="c">Docker → Hopper import</span>
 host      <span class="c">the async service facade the UI calls</span>
 mcp       <span class="c">the stdio MCP server</span>
 app       <span class="c">the gpui + guise application</span></code></pre>
-      <p>The async Docker layer runs on a Tokio runtime; gpui has its own executor. They meet at one
+      <p>Hopper speaks to two kinds of engine, behind one enum in <code>host::runtime</code>: the
+        Engine API over a socket, and Apple's runtime over its CLI. An enum rather than a trait
+        because the streaming calls take closures, which are not object-safe.</p>
+      <p>The async layer runs on a Tokio runtime; gpui has its own executor. They meet at one
         seam — <code>app::bridge</code> — which runs a future on Tokio and delivers the result on the
         gpui main thread. This mirrors the
         <a href="https://github.com/wess/tables">tables</a> architecture.</p>
@@ -190,8 +201,8 @@ app       <span class="c">the gpui + guise application</span></code></pre>
       <h2 id="release">Releasing</h2>
       <p>A workspace version bump in <code>Cargo.toml</code> pushed to <code>main</code> is the
         release. CI runs the full gate (tests, <code>clippy -D warnings</code>, a release build),
-        builds the guest image, produces a signed and notarized <code>Hopper.dmg</code>, publishes
-        the GitHub release, and updates the Homebrew cask.</p>
+        produces a signed and notarized <code>Hopper.dmg</code>, publishes the GitHub release, and
+        updates the Homebrew cask.</p>
 
       <p style="margin-top: 3rem; color: var(--dim)">
         Questions or issues? <a href="https://github.com/wess/hopper/issues">Open an issue</a> ·

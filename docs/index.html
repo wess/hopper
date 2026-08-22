@@ -36,13 +36,13 @@
 
   <main id="main">
     <section class="hero wrap">
-      <p class="eyebrow" data-reveal><span class="dot"></span>Native Rust · gpui + guise · runs its own engine</p>
+      <p class="eyebrow" data-reveal><span class="dot"></span>Native Rust · gpui + guise · Apple Containers</p>
       <h1 class="title" data-reveal data-delay="1">Docker,<br>without the <em>Desktop.</em></h1>
       <p class="lede" data-reveal data-delay="2">
-        Hopper manages your containers <strong>and is the engine</strong>. On macOS it boots a
-        real Linux VM in-process, runs <strong>dockerd</strong> inside it, forwards published
-        ports to <strong>localhost</strong>, and shares your directories — so you can uninstall
-        Docker Desktop entirely.
+        On macOS, Hopper runs your containers on <strong>Apple Containers</strong> — the
+        runtime Apple ships with macOS 26, where every container is its own lightweight VM.
+        On Linux it uses the <strong>Docker or Podman</strong> you already have. Either way,
+        <strong>Import from Docker</strong> brings your images across first.
       </p>
       <div class="actions" data-reveal data-delay="3">
         <a class="button primary" href="docs.html#install">Install Hopper →</a>
@@ -59,9 +59,9 @@
 
     <div class="strip wrap" data-reveal>
       <span><b>One binary.</b> No Electron, no browser.</span>
-      <span><b>Own engine.</b> No Docker Desktop.</span>
+      <span><b>Apple's runtime.</b> No Docker Desktop.</span>
       <span><b>Zero telemetry.</b> Local by design.</span>
-      <span><b>Apache-2.0 dockerd</b> inside.</span>
+      <span><b>Docker or Podman</b> on Linux.</span>
     </div>
 
     <!-- workflow / features -->
@@ -113,17 +113,17 @@
     <section id="engine" class="engine">
       <div class="wrap">
         <div class="section-head" data-reveal style="grid-column: 1 / -1; margin-bottom: 2.5rem">
-          <p class="kicker">Be the engine</p>
-          <h2>It carries <em>its own ocean.</em></h2>
-          <p>Hopper holds the virtualization entitlement itself, so the VM runs entirely in-process —
-            no helper daemon, no second process to sign, supervise, or crash.</p>
+          <p class="kicker">The engine</p>
+          <h2>Apple's runtime, <em>driven properly.</em></h2>
+          <p>macOS 26 ships a container runtime Apple maintains. Hopper installs it, starts it,
+            and speaks to it — and is honest about the parts of Docker it does not have.</p>
         </div>
 
         <ol class="pipeline" data-reveal>
-          <li><span class="n"></span><div><h4>Boots a Linux guest</h4><p>A raw arm64 kernel and Alpine initramfs on Apple's Virtualization.framework — up in about eight seconds.</p></div></li>
-          <li><span class="n"></span><div><h4>Runs dockerd inside</h4><p>Static Apache-2.0 Docker Engine, bridged out to <code>~/.hopper/run/docker.sock</code> over vsock.</p></div></li>
-          <li><span class="n"></span><div><h4>Forwards ports to localhost</h4><p><code>docker run -p 8080:80</code> is reachable at <code>http://localhost:8080</code> on your Mac — bound to loopback, not every interface.</p></div></li>
-          <li><span class="n"></span><div><h4>Shares your directories</h4><p>A bind mount outside <code>$HOME</code> reaches the container instead of resolving to an empty folder.</p></div></li>
+          <li><span class="n"></span><div><h4>Installs it for you</h4><p>If Apple's <code>container</code> is missing, Hopper fetches the package Apple signed and hands it to the system installer. Hopper never elevates.</p></div></li>
+          <li><span class="n"></span><div><h4>A VM per container</h4><p>Stronger isolation than a shared kernel, and on macOS 26 containers reach each other by name across isolated networks.</p></div></li>
+          <li><span class="n"></span><div><h4>Imports from Docker</h4><p>Copies your images, networks and containers out of Docker Desktop, Colima or Rancher Desktop. Nothing is removed from the source.</p></div></li>
+          <li><span class="n"></span><div><h4>Says what it cannot do</h4><p>Apple's runtime has no pause, rename, restart policy or healthchecks. Hopper hides those rather than offering a button that fails.</p></div></li>
         </ol>
 
         <div class="termcard" data-reveal data-delay="1">
