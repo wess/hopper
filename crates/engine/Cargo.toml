@@ -17,21 +17,11 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-dirs = { workspace = true }
-futures = { workspace = true }
-reqwest = { workspace = true }
-sha2 = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Apple Containers, the macOS engine. It publishes no socket, so this is a CLI
 # driver rather than another Engine API endpoint.
 apple = { workspace = true }
-objc2 = { workspace = true }
-block2 = { workspace = true }
-dispatch2 = { workspace = true }
-libc = "0.2"
-objc2-foundation = { workspace = true }
-objc2-virtualization = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

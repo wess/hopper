@@ -1,14 +1,17 @@
 # Hopper
 
-A native desktop app that both **manages** Docker and **is** a Docker engine —
-a Docker Desktop replacement written in Rust. The UI is [gpui](https://github.com/zed-industries/zed)
-+ [guise](https://github.com/wess/guise); the async layer is Tokio; the whole
-thing talks to the Docker Engine API directly and, on macOS, runs its own Linux
-VM (Apple Virtualization.framework) with `dockerd` inside it, so you can
-uninstall Docker Desktop entirely.
+A native desktop app for running and managing containers — a Docker Desktop
+replacement written in Rust. The UI is [gpui](https://github.com/zed-industries/zed)
++ [guise](https://github.com/wess/guise); the async layer is Tokio.
 
-No bundled browser, no Electron, no sidecar processes — the VM is created
-in-process, so the app itself carries `com.apple.security.virtualization`.
+On **macOS** the engine is [Apple's `container`](https://github.com/apple/container)
+(macOS 26+): every container is its own lightweight VM, maintained by Apple, and
+Hopper installs and drives it for you. On **Linux** Hopper uses whichever of
+Docker or Podman you have. Either way you can uninstall Docker Desktop — and
+**Import from Docker** brings your images and containers across first.
+
+No bundled browser, no Electron, no sidecar processes, and no entitlements
+beyond files and networking.
 
 ## Features
 
@@ -37,22 +40,28 @@ in-process, so the app itself carries `com.apple.security.virtualization`.
 - **MCP server** — a standalone stdio Model Context Protocol server
   (`hoppermcp`) exposing Docker tools to AI clients.
 
-### The managed engine (macOS)
+### Engines
 
-On macOS Hopper can supply its own engine rather than attaching to one:
+- **macOS — Apple Containers.** Needs macOS 26. If it is not installed, Hopper
+  offers to fetch Apple's signed installer and hands it to the system installer;
+  Hopper never elevates. After that it starts and stops the services itself.
+- **Linux — Docker or Podman.** Whichever is there, rootless sockets checked
+  before the system ones, so a desktop Podman is not passed over for a stale
+  root daemon. Podman's socket is Docker-compatible, so nothing else changes.
+- **Anywhere — an engine you already run.** Docker Desktop, Colima, Rancher
+  Desktop, or a remote daemon over TCP.
 
-- Boots a minimal Linux guest (raw arm64 kernel + Alpine initramfs) on
-  Virtualization.framework, entirely from Rust.
-- Runs `dockerd` inside it and bridges its socket out to
-  `~/.hopper/run/docker.sock`.
-- **Forwards published container ports to `localhost`** — `docker run -p 8080:80`
-  is reachable at `http://localhost:8080` on the Mac.
-- **Shares host directories into the guest** — a bind mount outside `$HOME`
-  reaches the container instead of resolving to an empty directory.
+Apple's runtime is not the Engine API, and Hopper does not pretend otherwise:
+pause, rename, post-create resource changes, restart policies, healthchecks and
+the event stream do not exist there, so the UI hides them rather than offering a
+button that fails. Anything that needs them can switch engines in Settings.
 
-If no managed engine is available (or you prefer one you already run), Hopper
-falls back to any existing engine — Docker Desktop, Colima, Rancher Desktop, a
-remote daemon over TCP.
+### Import from Docker
+
+Copies images, networks and containers out of Docker Desktop, Colima or Rancher
+Desktop and into whichever engine Hopper is running. Containers are recreated
+rather than moved — the image, ports, mounts and labels travel; a writable layer
+is by definition scratch. Nothing is removed from the source.
 
 ## Architecture
 
@@ -64,7 +73,8 @@ crates/
   model     shared domain types (the wire contract)
   store     ~/.hopper/ JSON persistence + OS keychain
   docker    Engine API client (hyper over unix/tcp/npipe) + every domain module
-  engine    provider abstraction; the macOS VM (objc2 + Virtualization.framework)
+  apple     Apple Containers, driven through the `container` CLI
+  engine    provider abstraction; Apple / Docker-or-Podman / existing
   migrate   Docker Desktop → Hopper migration
   host      the async service facade the UI calls
   mcp       the stdio MCP server (hoppermcp)
@@ -87,13 +97,12 @@ cargo clippy --all-targets  # lint
 cargo run -p mcp            # the stdio MCP server
 ```
 
-An engine must be reachable, or (on macOS, with the guest image built) Hopper
-starts its own.
+An engine must be reachable. On macOS that means Apple's `container` — Hopper's
+first-run panel installs it if it is missing.
 
 ## Build a release
 
 ```sh
-scripts/build/guest.sh      # build the guest kernel + initramfs (Linux/buildx)
 scripts/bundle.sh           # assemble + sign dist/Hopper.app
 scripts/dmg.sh              # package dist/Hopper.dmg
 ```

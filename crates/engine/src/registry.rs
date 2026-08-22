@@ -10,18 +10,14 @@ pub struct Registry {
     client: Client,
     providers: Vec<Arc<dyn Provider>>,
     active: std::sync::RwLock<String>,
-    /// The managed engine, kept concretely as well as behind the trait.
-    /// Port forwarding is specific to a VM-backed engine, so it has no place
-    /// on the trait — but the caller still needs to reach it.
-    #[cfg(target_os = "macos")]
-    vz: Option<Arc<crate::vz::provider::Vz>>,
 }
 
 impl Registry {
     /// Build the registry for this platform.
     ///
-    /// The managed engine comes first where it exists; `existing` is always
-    /// the tail so Hopper keeps working against an engine someone else runs.
+    /// The engine Hopper is for comes first where it exists; `existing` is
+    /// always the tail so Hopper keeps working against an engine someone else
+    /// runs.
     pub fn new(client: Client) -> Self {
         #[allow(unused_mut)]
         let mut providers: Vec<Arc<dyn Provider>> = Vec::new();
@@ -31,29 +27,16 @@ impl Registry {
         #[cfg(target_os = "macos")]
         providers.push(Arc::new(crate::providers::AppleContainers::new()));
 
-        #[cfg(target_os = "macos")]
-        let vz = {
-            let vz = Arc::new(crate::vz::provider::Vz::new(client.clone()));
-            providers.push(Arc::clone(&vz) as Arc<dyn Provider>);
-            Some(vz)
-        };
-
-        // Linux uses whichever of Docker or Podman is installed.
-        providers.push(Arc::new(Linux::new(client.clone())));
-        providers.push(Arc::new(Existing::new(client.clone())));
+        providers.extend([
+            // Linux uses whichever of Docker or Podman is installed.
+            Arc::new(Linux::new(client.clone())) as Arc<dyn Provider>,
+            Arc::new(Existing::new(client.clone())),
+        ]);
         Self {
             client,
             providers,
             active: std::sync::RwLock::new("existing".to_string()),
-            #[cfg(target_os = "macos")]
-            vz,
         }
-    }
-
-    /// The managed engine, when this platform has one.
-    #[cfg(target_os = "macos")]
-    pub fn vz(&self) -> Option<Arc<crate::vz::provider::Vz>> {
-        self.vz.clone()
     }
 
     pub fn ids(&self) -> Vec<&'static str> {

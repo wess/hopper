@@ -73,31 +73,10 @@ impl Engines {
     /// Bring forwarded host ports in line with what the running containers
     /// publish.
     ///
-    /// Only the managed engine forwards anything: against an engine someone
-    /// else runs, published ports are already bound on the host and opening
-    /// our own listener would collide with it.
-    #[cfg(target_os = "macos")]
-    pub async fn resync_forwards(&self) -> Vec<String> {
-        let Some(provider) = self.registry.active() else {
-            return Vec::new();
-        };
-        if provider.id() != "vz" {
-            return Vec::new();
-        }
-        // The registry keeps the concrete provider alongside the trait object,
-        // because forwarding belongs to a VM-backed engine rather than to
-        // every engine.
-        let Some(vz) = self.registry.vz() else {
-            return Vec::new();
-        };
-        vz.resync_forwards()
-            .await
-            .into_iter()
-            .map(|(_, reason)| reason)
-            .collect()
-    }
-
-    #[cfg(not(target_os = "macos"))]
+    /// Nothing to do on either backend today: an engine someone else runs
+    /// already binds its published ports on the host, and Apple's runtime
+    /// forwards its own. Kept as the seam the event stream calls so a future
+    /// engine that needs forwarding has somewhere to put it.
     pub async fn resync_forwards(&self) -> Vec<String> {
         Vec::new()
     }
@@ -132,8 +111,8 @@ mod tests {
     #[tokio::test]
     async fn forwarding_is_a_no_op_against_an_engine_hopper_does_not_manage() {
         let e = engines();
-        // Force the fallback: its ports are already bound on the host, so
-        // opening our own listeners would collide.
+        // The fallback's ports are already bound on the host, so opening our
+        // own listeners would collide with them.
         e.select(Some("existing")).await;
         assert!(e.resync_forwards().await.is_empty());
     }

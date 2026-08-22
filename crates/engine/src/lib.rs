@@ -1,14 +1,8 @@
 //! Engine providers: attaching to an engine, or supplying one.
 
-pub mod backoff;
-pub mod cli;
 pub mod provider;
 pub mod providers;
 pub mod registry;
-pub mod socket;
-
-#[cfg(target_os = "macos")]
-pub mod vz;
 
 pub use provider::Provider;
 pub use registry::Registry;

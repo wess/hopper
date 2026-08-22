@@ -4,9 +4,9 @@ name: Release
 # Cargo.toml (not package.json — that is the retired Bun build); pushing a bump
 # to main tags and releases.
 #
-# There is no `hopperd` Swift sidecar: the VM is created in-process, so the app
-# itself carries com.apple.security.virtualization and there is no inside-out
-# signing dance.
+# Hopper ships no engine of its own any more. On macOS the engine is Apple's
+# `container`, which the user installs and which does its own virtualization,
+# so there is no guest kernel to compile here and no entitlement to sign in.
 
 on:
   push:
@@ -84,84 +84,8 @@ jobs:
           # no assets is worse than none (the Homebrew cask 404s on it).
           draft: true
 
-  # The guest engine image: a raw arm64 kernel plus the rootfs initramfs. Built
-  # on Linux where cross-compilation and buildx are cheap, then handed to the
-  # macOS bundling job. Output goes to native/build/guest (the retired sidecar's
-  # .build tree is gone).
-  guest:
-    runs-on: ubuntu-latest
-    needs: [check-version, verify]
-    if: needs.check-version.outputs.changed == 'true'
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Cache guest kernel
-        id: kcache
-        uses: actions/cache@v4
-        with:
-          path: native/build/guest/vmlinuz
-          key: hopper-kernel-6.12.8-${{ hashFiles('native/guest/kernel.config') }}
-
-      - name: Install kernel build deps
-        if: steps.kcache.outputs.cache-hit != 'true'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu bc bison flex libssl-dev libelf-dev cpio xz-utils
-
-      - name: Build aarch64 kernel
-        if: steps.kcache.outputs.cache-hit != 'true'
-        run: |
-          set -euo pipefail
-          ver="6.12.8"
-          series="v${ver%%.*}.x"
-          curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/${series}/linux-${ver}.tar.xz" | tar -xJ
-          cd "linux-${ver}"
-          export ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
-          make defconfig
-          ./scripts/kconfig/merge_config.sh -m .config "$GITHUB_WORKSPACE/native/guest/kernel.config"
-          # Force the bridge stack built-in (IPV6=m would otherwise cap BRIDGE
-          # at =m, and an initramfs-only guest has no modules).
-          scripts/config -e IPV6 -e BRIDGE -e BRIDGE_NETFILTER -e LLC -e STP -e VLAN_8021Q
-          make olddefconfig
-          grep -q '^CONFIG_BRIDGE=y' .config || { echo 'FATAL: CONFIG_BRIDGE not built-in'; exit 1; }
-          make -j"$(nproc)" Image
-          mkdir -p "$GITHUB_WORKSPACE/native/build/guest"
-          # A raw arm64 Image — Virtualization.framework will not accept a
-          # gzipped vmlinuz.
-          cp arch/arm64/boot/Image "$GITHUB_WORKSPACE/native/build/guest/vmlinuz"
-
-      - name: Set up QEMU (cross-arch rootfs build)
-        uses: docker/setup-qemu-action@v3
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build guest rootfs -> initrd
-        run: |
-          set -euo pipefail
-          out="native/build/guest"
-          mkdir -p "$out"
-          docker buildx build --load \
-            --platform linux/arm64 \
-            --build-arg "DOCKER_ARCH=aarch64" \
-            -f native/guest/dockerfile \
-            -t hopper-guest native/guest
-          cid="$(docker create --platform linux/arm64 hopper-guest)"
-          tmp="$(mktemp -d)"
-          docker export "$cid" | tar -x -C "$tmp"
-          docker rm -f "$cid"
-          ( cd "$tmp" && find . -xdev | cpio -o -H newc 2>/dev/null | gzip -9 ) > "$out/initrd"
-          ls -la "$out"
-
-      - name: Upload guest assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: guest
-          path: |
-            native/build/guest/vmlinuz
-            native/build/guest/initrd
-
   build:
-    needs: [check-version, verify, create-release, guest]
+    needs: [check-version, verify, create-release]
     if: needs.check-version.outputs.changed == 'true'
     runs-on: macos-14
     env:
@@ -175,30 +99,6 @@ jobs:
           ref: "v${{ needs.check-version.outputs.version }}"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-
-      - name: Download guest assets
-        uses: actions/download-artifact@v4
-        with:
-          name: guest
-          path: native/build/guest
-
-      # Publish the guest image as standalone, checksummed release assets so a
-      # lean or stripped install can self-provision the engine (crates/engine
-      # acquire.rs downloads these and verifies them against guest.json). The
-      # bundled copy in Resources still wins when present; this is the fallback.
-      - name: Publish guest engine image
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          V="${{ needs.check-version.outputs.version }}"
-          g=native/build/guest
-          ksha=$(shasum -a 256 "$g/vmlinuz" | cut -d' ' -f1); ksize=$(stat -f%z "$g/vmlinuz")
-          isha=$(shasum -a 256 "$g/initrd"  | cut -d' ' -f1); isize=$(stat -f%z "$g/initrd")
-          printf '{"version":"%s","kernel":{"sha256":"%s","size":%s},"initrd":{"sha256":"%s","size":%s}}\n' \
-            "$V" "$ksha" "$ksize" "$isha" "$isize" > "$g/guest.json"
-          cat "$g/guest.json"
-          gh release upload "v${V}" "$g/vmlinuz" "$g/initrd" "$g/guest.json" --clobber
 
       - name: Fetch Compose + Docker CLI (host binaries)
         run: |
@@ -230,8 +130,7 @@ jobs:
           rm -f "$RUNNER_TEMP/cert.p12"
 
       # bundle.sh builds the release binary, assembles Hopper.app, stages the
-      # guest assets into Resources, and signs the app itself with the
-      # virtualization entitlement.
+      # bundled Docker CLI and Compose, and signs the app.
       - name: Bundle (.app) + package (.dmg)
         env:
           CODESIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
@@ -247,28 +146,20 @@ jobs:
             --password "$APPLE_APP_PASSWORD" --wait
           xcrun stapler staple dist/Hopper.dmg
 
-      - name: Verify engine bundle
+      - name: Verify bundle
         run: |
           set -euo pipefail
           app="dist/Hopper.app/Contents"
           codesign --verify --strict --verbose=2 dist/Hopper.app
           test -x "$app/MacOS/hopper" || { echo "FATAL: app binary missing"; exit 1; }
-          test -f "$app/Resources/vmlinuz" || { echo "FATAL: guest kernel not in Resources"; exit 1; }
-          test -f "$app/Resources/initrd" || { echo "FATAL: guest initrd not in Resources"; exit 1; }
-          if file "$app/Resources/vmlinuz" | grep -qi gzip; then
-            echo "FATAL: vmlinuz is gzip-compressed; VZ needs a raw arm64 Image"; exit 1
-          fi
-          # The whole point of the Rust port: the entitlement is on the app
-          # itself, not a separate sidecar.
+          # Hopper no longer ships a VM, so it no longer asks for the
+          # entitlement that used to gate it. Carrying it would widen the
+          # sandbox for nothing, so assert it is *absent*.
           if codesign -d --entitlements - "$app/MacOS/hopper" 2>/dev/null | grep -q virtualization; then
-            echo "OK: the app carries com.apple.security.virtualization"
-          else
-            echo "FATAL: the app is missing the virtualization entitlement — the VM cannot start"
+            echo "FATAL: the virtualization entitlement is back; Apple's runtime does its own"
             exit 1
           fi
-          if [ -z "${APPLE_SIGNING_IDENTITY}" ]; then
-            echo "::warning::Ad-hoc build — the VM engine will not boot without a Developer ID."
-          fi
+          echo "OK: signed, and asking for no virtualization entitlement"
 
       - name: Upload DMG
         run: gh release upload "v${{ needs.check-version.outputs.version }}" dist/Hopper.dmg --clobber

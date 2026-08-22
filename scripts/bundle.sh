@@ -52,14 +52,6 @@ if [ -f native/build/docker ]; then
   cp native/build/docker "$contents/MacOS/sidecars/docker"
 fi
 
-# The guest kernel and initrd are DATA and must live in Resources: codesign
-# rejects unsigned "code" under Contents/MacOS.
-for asset in vmlinuz initrd; do
-  if [ -f "native/build/guest/$asset" ]; then
-    cp "native/build/guest/$asset" "$contents/Resources/$asset"
-  fi
-done
-
 cat > "$contents/Info.plist" << PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

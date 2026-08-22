@@ -4,19 +4,25 @@ Guidance for AI agents working in this repository (mirrors CLAUDE.md).
 
 ## What this is
 
-Hopper is a native desktop app that both **manages** Docker and **is** a Docker
-engine — a Docker Desktop replacement written entirely in Rust. The UI is
+Hopper is a native desktop app for running and managing containers — a Docker
+Desktop replacement written entirely in Rust. The UI is
 [gpui](https://github.com/zed-industries/zed) + [guise](https://github.com/wess/guise);
-the async layer is Tokio; it talks to the Docker Engine API directly and, on
-macOS, runs its own Linux VM via Apple's Virtualization.framework with `dockerd`
-inside it.
+the async layer is Tokio.
+
+It speaks to two kinds of engine. On **macOS** it drives
+[Apple's `container`](https://github.com/apple/container) runtime, which needs
+macOS 26 — each container is its own lightweight VM, maintained by Apple. On
+**Linux** it attaches to whichever of Docker or Podman is installed. Anything
+that answers the Docker Engine API (Docker Desktop, Colima, Rancher Desktop, a
+remote daemon over TCP) works everywhere as a fallback.
 
 The architecture follows [tables](https://github.com/wess/tables) — a Cargo
 workspace layered bottom-up, gpui-free core crates, one Tokio↔gpui bridge.
 
-> This was ported from an earlier TypeScript/Bun + React build. That
-> implementation has been removed; nothing in the repo depends on Bun, Node,
-> `butter`, or `basket` any more.
+> Ported from an earlier TypeScript/Bun + React build, and from a hand-rolled
+> Virtualization.framework VM that Apple's runtime now supersedes on macOS.
+> Nothing in the repo depends on Bun, Node, `butter`, `basket`, or a guest
+> kernel any more.
 
 ## Commands
 
@@ -34,7 +40,6 @@ cargo run -p mcp                 # the stdio MCP server (hoppermcp)
 Release (macOS `.app` + `.dmg`):
 
 ```sh
-scripts/build/guest.sh   # guest kernel + initramfs (Linux/buildx; raw arm64 Image)
 scripts/bundle.sh        # assemble + sign dist/Hopper.app (CODESIGN_IDENTITY)
 scripts/dmg.sh           # package dist/Hopper.dmg
 ```
@@ -59,12 +64,16 @@ the gpui-free core never imports gpui.
   `exec.rs` hijacks the socket for an interactive TTY (needs the
   `Upgrade: tcp` / `Connection: Upgrade` headers or the daemon won't 101);
   `archive.rs` copies files in/out and browses container filesystems.
+- **`apple`** — Apple Containers, the macOS engine. `container` talks to its
+  apiserver over XPC and publishes no Docker Engine API (the request to expose
+  one was closed as not planned), so `cli.rs` drives the binary and `wire.rs`
+  maps its JSON onto the same `model` types the Engine API path produces. Be
+  liberal in what you accept there: Apple promises stability only within a
+  patch version.
 - **`engine`** — the provider abstraction (attach to an engine, or supply one).
-  `providers/existing.rs` is the always-available fallback. `vz/` is the macOS
-  managed engine: `vm.rs` builds the `VZVirtualMachineConfiguration` (objc2),
-  `machine.rs` owns the lifecycle over a dispatch queue, `bridge.rs` serves the
-  guest socket at `~/.hopper/run/docker.sock`, `forwarder.rs` forwards published
-  ports to `localhost`, `shares.rs` maps host directories into the guest.
+  `providers/apple.rs` is the macOS engine, `providers/linux.rs` finds Docker or
+  Podman (rootless sockets first), `providers/existing.rs` is the
+  always-available fallback.
 - **`migrate`** — Docker Desktop → Hopper migration (scan + copy).
 - **`host`** — the async service facade (`Host`) the UI calls. Owns the Docker
   client, the engine registry, settings, and workspace scoping. gpui-free.
@@ -72,14 +81,21 @@ the gpui-free core never imports gpui.
 - **`app`** — the gpui + guise application. `bridge.rs` is the Tokio↔gpui seam;
   `state.rs` the cross-view signal contract; `views/` one module per surface.
 
-### The macOS managed engine (`crates/engine/src/vz/`)
+### The two backends
 
-Replaces the Swift `hopperd` sidecar the Bun build shipped. Because a Rust app
-has no JIT, `com.apple.security.virtualization` sits on the app itself and the
-VM runs in-process — no sidecar, no inside-out signing. The guest
-(`native/guest/`) is an Alpine + static Docker Engine initramfs plus a persistent
-`/var/lib/docker` disk; the kernel + initrd are **data** and live in
-`Contents/Resources/` (codesign rejects unsigned code under `MacOS/`).
+`host::runtime::Backend` is an enum, not a trait: the streaming calls take
+closures, and `FnMut(LogLine) -> bool` is not object-safe. `EngineCapabilities`
+carries what each backend can actually do, so the UI hides what is missing
+rather than offering a button that always fails. Apple's runtime has no pause,
+no rename, no post-create resource update, no event stream and no healthchecks.
+
+Two traps worth knowing:
+
+- `container system start` reads from stdin when it is not told whether to
+  install the default kernel. Hopper runs it with no terminal, so it always
+  passes `--enable-kernel-install`.
+- Apple renders JSON dates as ISO8601 (`Output.renderJSON` defaults to the
+  `.compact` options), not Swift's reference-epoch default.
 
 ## Conventions
 
@@ -89,6 +105,7 @@ VM runs in-process — no sidecar, no inside-out signing. The guest
 - File names lowercase, no spaces/dashes/underscores; split by directory, not
   compound names. Small, focused files.
 - Pure logic carries the unit coverage (parsers, arg builders, framing, diffing,
-  reducers). Integration seams — the VM, vsock, port forwarding, virtiofs — are
-  where the real bugs hide; verify those against a live engine, not just tests.
+  reducers). Integration seams — the `container` CLI, socket discovery, the
+  import path — are where the real bugs hide; verify those against a live
+  engine, not just tests.
 - The workspace version in the root `Cargo.toml` drives releases.

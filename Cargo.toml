@@ -87,46 +87,6 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 
-# Apple Virtualization.framework, for the managed macOS engine. Porting off
-# Bun removes the JIT entitlement that could not coexist with
-# com.apple.security.virtualization, so the VM runs in-process and the Swift
-# hopperd sidecar is no longer needed.
-objc2 = "0.6"
-block2 = "0.6"
-dispatch2 = "0.3"
-objc2-foundation = "0.3"
-objc2-virtualization = { version = "0.3", features = [
-    "VZBootLoader",
-    "VZLinuxBootLoader",
-    "VZVirtualMachine",
-    "VZVirtualMachineConfiguration",
-    "VZStorageDeviceConfiguration",
-    "VZVirtioBlockDeviceConfiguration",
-    "VZStorageDeviceAttachment",
-    "VZDiskImageStorageDeviceAttachment",
-    "VZSocketDeviceConfiguration",
-    "VZVirtioSocketDeviceConfiguration",
-    "VZDirectorySharingDeviceConfiguration",
-    "VZVirtioFileSystemDeviceConfiguration",
-    "VZDirectoryShare",
-    "VZSingleDirectoryShare",
-    "VZMultipleDirectoryShare",
-    "VZSharedDirectory",
-    "VZNetworkDeviceConfiguration",
-    "VZVirtioNetworkDeviceConfiguration",
-    "VZNetworkDeviceAttachment",
-    "VZNATNetworkDeviceAttachment",
-    "VZEntropyDeviceConfiguration",
-    "VZVirtioEntropyDeviceConfiguration",
-    "VZMemoryBalloonDeviceConfiguration",
-    "VZVirtioTraditionalMemoryBalloonDeviceConfiguration",
-    "VZSerialPortConfiguration",
-    "VZVirtioConsoleDeviceSerialPortConfiguration",
-    "VZSerialPortAttachment",
-    "VZFileHandleSerialPortAttachment",
-    "VZPlatformConfiguration",
-    "VZGenericPlatformConfiguration",
-] }
 regex = "1"
 base64 = "0.22"
 urlencoding = "2"

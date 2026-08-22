@@ -1425,8 +1425,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e0e367e4e7da84520dedcac1901e4da967309406d1e51017ae1abfb97adbd38"
 dependencies = [
  "bitflags 2.13.1",
- "block2",
- "libc",
  "objc2",
 ]
 
@@ -1567,20 +1565,10 @@ dependencies = [
  "anyhow",
  "apple",
  "async-trait",
- "block2",
- "dirs 6.0.0",
- "dispatch2",
  "docker",
- "futures",
- "libc",
  "model",
- "objc2",
- "objc2-foundation",
- "objc2-virtualization",
- "reqwest",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "store",
  "thiserror 2.0.19",
  "tokio",
@@ -3786,8 +3774,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3e0adef53c21f888deb4fa59fc59f7eb17404926ee8a6f59f5df0fd7f9f3272"
 dependencies = [
  "bitflags 2.13.1",
- "block2",
- "libc",
  "objc2",
  "objc2-core-foundation",
 ]
@@ -3828,21 +3814,6 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-foundation",
  "objc2-quartz-core",
-]
-
-[[package]]
-name = "objc2-virtualization"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8edb98625ad1f7dea2e82ab54d5bdf3f477e6645b550f4a7cced1818be9ff59d"
-dependencies = [
- "bitflags 2.13.1",
- "block2",
- "dispatch2",
- "objc2",
- "objc2-app-kit",
- "objc2-core-foundation",
- "objc2-foundation",
 ]
 
 [[package]]

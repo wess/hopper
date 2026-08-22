@@ -2,20 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Hopper runs the guest Linux VM that provides its Docker engine. In the
-	     Bun build this entitlement had to live on a separate `hopperd` sidecar,
-	     because Apple will not grant virtualization alongside the JIT
-	     entitlements JavaScriptCore requires. A Rust app has no JIT, so the
-	     entitlement sits on the app itself and the sidecar is gone. -->
-	<key>com.apple.security.virtualization</key>
-	<true/>
+	<!-- Hopper no longer runs a VM of its own. On macOS the engine is Apple's
+	     `container`, which does its own virtualization in its own privileged
+	     helpers, so `com.apple.security.virtualization` is not needed here —
+	     and without it an ad-hoc dev build behaves like the signed one. -->
 
-	<!-- The guest's data disk and the shared host directories live outside the
-	     app container. -->
+	<!-- Bind-mounted host directories, and the tars an import stages on disk. -->
 	<key>com.apple.security.files.user-selected.read-write</key>
 	<true/>
 
-	<!-- Registry pulls, the Docker socket, and forwarded container ports. -->
+	<!-- Registry pulls, the Docker socket, and published container ports. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
 	<key>com.apple.security.network.server</key>
