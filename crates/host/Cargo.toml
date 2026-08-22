@@ -10,6 +10,7 @@ model = { workspace = true }
 store = { workspace = true }
 docker = { workspace = true }
 engine = { workspace = true }
+migrate = { workspace = true }
 
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -21,3 +22,7 @@ reqwest = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# The macOS engine is driven by Apple's CLI, not by the Engine API client.
+apple = { workspace = true }

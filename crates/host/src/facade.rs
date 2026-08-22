@@ -8,11 +8,16 @@ use docker::{archive, containers, exec, images, logs, networks, stats, system, v
 use model::*;
 use std::sync::{Arc, RwLock};
 
+use crate::runtime::{refuse, Backend};
+
 pub struct Host {
     client: Client,
     engines: crate::engine::Engines,
     provider: RwLock<String>,
     managed: RwLock<bool>,
+    /// Which client answers. Set when an engine is selected; every operation
+    /// resolves its backend from this.
+    runtime: RwLock<RuntimeKind>,
     settings: RwLock<Settings>,
     workspaces: RwLock<Vec<Workspace>>,
 }
@@ -24,6 +29,7 @@ impl Host {
             client,
             provider: RwLock::new("existing".into()),
             managed: RwLock::new(false),
+            runtime: RwLock::new(RuntimeKind::default()),
             settings: RwLock::new(store::load_settings()),
             workspaces: RwLock::new(store::load_workspaces()),
         })
@@ -44,6 +50,20 @@ impl Host {
         *self.managed.write().unwrap() = managed;
     }
 
+    /// The client that answers for the active engine.
+    pub(crate) fn backend(&self) -> Backend {
+        Backend::resolve(*self.runtime.read().unwrap())
+    }
+
+    /// What the active engine can do, so the UI can hide what it cannot.
+    pub fn capabilities(&self) -> EngineCapabilities {
+        EngineCapabilities::for_runtime(*self.runtime.read().unwrap())
+    }
+
+    pub fn runtime_kind(&self) -> RuntimeKind {
+        *self.runtime.read().unwrap()
+    }
+
     // --- engine ----------------------------------------------------------
 
     pub fn engines(&self) -> &crate::engine::Engines {
@@ -56,6 +76,7 @@ impl Host {
         let status = self.engines.select(preference.as_deref()).await;
         *self.provider.write().unwrap() = status.provider.clone();
         *self.managed.write().unwrap() = status.managed;
+        *self.runtime.write().unwrap() = self.engines.registry().active_runtime();
         status
     }
 
@@ -77,6 +98,12 @@ impl Host {
 
     /// Probe the engine and describe what we found.
     pub async fn engine_status(&self) -> EngineStatus {
+        // Apple's runtime answers no socket, so there is nothing to ping —
+        // its provider reports on the services instead.
+        if self.runtime_kind() == RuntimeKind::Apple {
+            return self.engines.status().await;
+        }
+
         let provider = self.provider.read().unwrap().clone();
         let managed = *self.managed.read().unwrap();
         let endpoint = self.client.endpoint().describe();
@@ -95,18 +122,74 @@ impl Host {
     }
 
     pub async fn version(&self) -> docker::Result<SystemVersion> {
-        system::version(&self.client).await
+        match self.backend() {
+            #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::system::version(&cli).await,
+            Backend::EngineApi => system::version(&self.client).await,
+        }
     }
 
     pub async fn info(&self) -> docker::Result<SystemInfo> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            // Apple publishes no `info` equivalent, so the dashboard's totals
+            // are counted from the lists it does publish.
+            let containers = apple::containers::list(&cli, true).await.unwrap_or_default();
+            let images = apple::images::list(&cli).await.unwrap_or_default();
+            let running = containers
+                .iter()
+                .filter(|c| c.state == ContainerState::Running)
+                .count() as i64;
+            let version = apple::system::version(&cli).await.unwrap_or_default();
+            return Ok(SystemInfo {
+                name: "Apple Containers".into(),
+                containers: containers.len() as i64,
+                containers_running: running,
+                // Apple's runtime cannot pause, so this is always zero rather
+                // than unknown.
+                containers_paused: 0,
+                containers_stopped: containers.len() as i64 - running,
+                images: images.len() as i64,
+                server_version: version.version,
+                operating_system: "macOS".into(),
+                architecture: std::env::consts::ARCH.into(),
+                ncpu: std::thread::available_parallelism()
+                    .map(|n| n.get() as i64)
+                    .unwrap_or(0),
+                mem_total: 0,
+                docker_root_dir: String::new(),
+            });
+        }
         system::info(&self.client).await
     }
 
     pub async fn disk_usage(&self) -> docker::Result<DiskUsage> {
-        system::df(&self.client).await
+        match self.backend() {
+            #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::system::df(&cli).await,
+            Backend::EngineApi => system::df(&self.client).await,
+        }
     }
 
     pub async fn prune_all(&self) -> Vec<PruneReport> {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            // No single prune command, so run the four and keep whichever
+            // succeeded — one failing kind must not cost the others.
+            let mut out = Vec::new();
+            for report in [
+                self.containers_prune().await,
+                self.images_prune(false).await,
+                self.volumes_prune().await,
+                self.networks_prune().await,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                out.push(report);
+            }
+            return out;
+        }
         system::prune_all(&self.client).await
     }
 
@@ -114,7 +197,11 @@ impl Host {
 
     /// List containers, scoped to the active workspace.
     pub async fn containers(&self, all: bool) -> docker::Result<Vec<Container>> {
-        let list = containers::list(&self.client, all).await?;
+        let list = match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::containers::list(&cli, all).await?,
+            Backend::EngineApi => containers::list(&self.client, all).await?,
+        };
         let ws = self.active_workspace();
         Ok(list
             .into_iter()
@@ -123,50 +210,107 @@ impl Host {
     }
 
     pub async fn container_inspect(&self, id: &str) -> docker::Result<InspectResult> {
-        containers::inspect(&self.client, id).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::containers::inspect(&cli, id).await,
+            Backend::EngineApi => containers::inspect(&self.client, id).await,
+        }
     }
 
     pub async fn container_start(&self, id: &str) -> docker::Result<()> {
-        containers::start(&self.client, id).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::containers::start(&cli, id).await,
+            Backend::EngineApi => containers::start(&self.client, id).await,
+        }
     }
 
     pub async fn container_stop(&self, id: &str) -> docker::Result<()> {
-        containers::stop(&self.client, id).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::containers::stop(&cli, id).await,
+            Backend::EngineApi => containers::stop(&self.client, id).await,
+        }
     }
 
     pub async fn container_restart(&self, id: &str) -> docker::Result<()> {
-        containers::restart(&self.client, id).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::containers::restart(&cli, id).await,
+            Backend::EngineApi => containers::restart(&self.client, id).await,
+        }
     }
 
     pub async fn container_pause(&self, id: &str) -> docker::Result<()> {
-        containers::pause(&self.client, id).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(_) => refuse("pause a container"),
+            Backend::EngineApi => containers::pause(&self.client, id).await,
+        }
     }
 
     pub async fn container_unpause(&self, id: &str) -> docker::Result<()> {
-        containers::unpause(&self.client, id).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(_) => refuse("resume a paused container"),
+            Backend::EngineApi => containers::unpause(&self.client, id).await,
+        }
     }
 
     pub async fn container_kill(&self, id: &str) -> docker::Result<()> {
-        containers::kill(&self.client, id).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::containers::kill(&cli, id).await,
+            Backend::EngineApi => containers::kill(&self.client, id).await,
+        }
     }
 
     pub async fn container_rename(&self, id: &str, name: &str) -> docker::Result<()> {
-        containers::rename(&self.client, id, name).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            // A container's name *is* its id under Apple's runtime, so there
+            // is nothing to rename it to.
+            Backend::Apple(_) => refuse("rename a container"),
+            Backend::EngineApi => containers::rename(&self.client, id, name).await,
+        }
     }
 
     pub async fn container_remove(&self, id: &str, force: bool, volumes: bool) -> docker::Result<()> {
-        containers::remove(&self.client, id, force, volumes).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            // Apple keeps anonymous volumes when a container goes; the
+            // volumes view is where they are reclaimed.
+            Backend::Apple(cli) => apple::containers::remove(&cli, id, force).await,
+            Backend::EngineApi => containers::remove(&self.client, id, force, volumes).await,
+        }
     }
 
     pub async fn container_top(&self, id: &str) -> docker::Result<ProcessList> {
-        containers::top(&self.client, id).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(_) => refuse("list the processes in a container"),
+            Backend::EngineApi => containers::top(&self.client, id).await,
+        }
     }
 
     pub async fn container_update(&self, id: &str, input: &UpdateInput) -> docker::Result<()> {
-        containers::update(&self.client, id, input).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            // Apple fixes a container's VM size at creation.
+            Backend::Apple(_) => refuse("change a container's resources after it is created"),
+            Backend::EngineApi => containers::update(&self.client, id, input).await,
+        }
     }
 
     pub async fn container_run(&self, input: &RunInput) -> docker::Result<String> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            // Anything Apple cannot honour is reported rather than dropped.
+            for note in apple::containers::unsupported(input) {
+                tracing::warn!("{note}");
+            }
+            return apple::containers::run(&cli, input).await;
+        }
         containers::run(&self.client, input).await
     }
 
@@ -203,7 +347,11 @@ impl Host {
     }
 
     pub async fn containers_prune(&self) -> docker::Result<PruneReport> {
-        containers::prune(&self.client).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::containers::prune(&cli).await,
+            Backend::EngineApi => containers::prune(&self.client).await,
+        }
     }
 
     /// Apply one action to many containers, reporting per-item failures rather
@@ -233,7 +381,11 @@ impl Host {
     // --- images ----------------------------------------------------------
 
     pub async fn images(&self, all: bool) -> docker::Result<Vec<Image>> {
-        let list = images::list(&self.client, all).await?;
+        let list = match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::images::list(&cli).await?,
+            Backend::EngineApi => images::list(&self.client, all).await?,
+        };
         let ws = self.active_workspace();
         Ok(list
             .into_iter()
@@ -242,26 +394,53 @@ impl Host {
     }
 
     pub async fn image_inspect(&self, id: &str) -> docker::Result<InspectResult> {
-        images::inspect(&self.client, id).await
+        match self.backend() {
+        #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => apple::images::inspect(&cli, id).await,
+            Backend::EngineApi => images::inspect(&self.client, id).await,
+        }
     }
 
     pub async fn image_history(&self, id: &str) -> docker::Result<Vec<ImageHistoryEntry>> {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("show an image's layer history");
+        }
         images::history(&self.client, id).await
     }
 
     pub async fn image_remove(&self, id: &str, force: bool) -> docker::Result<()> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::images::remove(&cli, id).await;
+        }
         images::remove(&self.client, id, force).await
     }
 
     pub async fn image_tag(&self, id: &str, repo: &str, tag: &str) -> docker::Result<()> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            let target = if tag.is_empty() { repo.to_string() } else { format!("{repo}:{tag}") };
+            return apple::images::tag(&cli, id, &target).await;
+        }
         images::tag(&self.client, id, repo, tag).await
     }
 
     pub async fn images_prune(&self, all: bool) -> docker::Result<PruneReport> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::images::prune(&cli, all).await;
+        }
         images::prune(&self.client, all).await
     }
 
     pub async fn image_search(&self, term: &str) -> docker::Result<Vec<ImageSearchResult>> {
+        // Apple has no daemon-side search. The Registry view reaches Docker Hub
+        // and GitHub over HTTP instead, which works on every backend.
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("search a registry from the daemon");
+        }
         images::search(&self.client, term).await
     }
 
@@ -278,39 +457,75 @@ impl Host {
     // --- volumes / networks ----------------------------------------------
 
     pub async fn volumes(&self) -> docker::Result<Vec<Volume>> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::volumes::list(&cli).await;
+        }
         volumes::list(&self.client).await
     }
 
     pub async fn volume_inspect(&self, name: &str) -> docker::Result<InspectResult> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::volumes::inspect(&cli, name).await;
+        }
         volumes::inspect(&self.client, name).await
     }
 
     pub async fn volume_create(&self, name: &str) -> docker::Result<Volume> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::volumes::create(&cli, name).await;
+        }
         volumes::create(&self.client, name, None, &Default::default()).await
     }
 
     pub async fn volume_remove(&self, name: &str, force: bool) -> docker::Result<()> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::volumes::remove(&cli, name).await;
+        }
         volumes::remove(&self.client, name, force).await
     }
 
     pub async fn volumes_prune(&self) -> docker::Result<PruneReport> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::volumes::prune(&cli).await;
+        }
         volumes::prune(&self.client).await
     }
 
     pub async fn networks(&self) -> docker::Result<Vec<Network>> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::networks::list(&cli).await;
+        }
         networks::list(&self.client).await
     }
 
     pub async fn network_inspect(&self, id: &str) -> docker::Result<InspectResult> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::networks::inspect(&cli, id).await;
+        }
         networks::inspect(&self.client, id).await
     }
 
     pub async fn network_create(&self, input: &NetworkCreateInput) -> docker::Result<String> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::networks::create(&cli, input).await;
+        }
         networks::create(&self.client, input).await
     }
 
     /// Remove a network, refusing Docker's built-ins with a clear reason.
     pub async fn network_remove(&self, id: &str) -> docker::Result<()> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::networks::remove(&cli, id).await;
+        }
         if let Ok(list) = networks::list(&self.client).await {
             if let Some(net) = list.iter().find(|n| n.id == id || n.name == id) {
                 networks::ensure_removable(net)?;
@@ -320,6 +535,11 @@ impl Host {
     }
 
     pub async fn network_connect(&self, id: &str, container: &str) -> docker::Result<()> {
+        // Apple attaches a container to its networks when it is created.
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("attach a running container to a network");
+        }
         networks::connect(&self.client, id, container).await
     }
 
@@ -329,10 +549,18 @@ impl Host {
         container: &str,
         force: bool,
     ) -> docker::Result<()> {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("detach a running container from a network");
+        }
         networks::disconnect(&self.client, id, container, force).await
     }
 
     pub async fn networks_prune(&self) -> docker::Result<PruneReport> {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::networks::prune(&cli).await;
+        }
         networks::prune(&self.client).await
     }
 

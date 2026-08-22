@@ -7,7 +7,7 @@
 
 use async_trait::async_trait;
 use docker::Endpoint;
-use model::{EngineResources, EngineStats, EngineStatus, ReclaimResult};
+use model::{EngineResources, EngineStats, EngineStatus, ReclaimResult, RuntimeKind};
 
 #[async_trait]
 pub trait Provider: Send + Sync {
@@ -20,6 +20,12 @@ pub trait Provider: Send + Sync {
     /// Whether Hopper owns this engine's lifecycle.
     fn managed(&self) -> bool {
         false
+    }
+
+    /// Which client this engine is driven by. Almost every engine speaks the
+    /// Engine API; Apple's speaks nothing, and needs its own.
+    fn runtime(&self) -> RuntimeKind {
+        RuntimeKind::EngineApi
     }
 
     /// Whether this provider can run on this machine at all.
@@ -60,7 +66,7 @@ pub trait Provider: Send + Sync {
 /// someone else runs, whatever else fails.
 pub fn candidates_for(os: &str) -> Vec<&'static str> {
     match os {
-        "macos" => vec!["vz", "existing"],
+        "macos" => vec!["apple", "existing"],
         "linux" => vec!["linux", "existing"],
         _ => vec!["existing"],
     }
@@ -89,9 +95,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn macos_prefers_the_managed_vm_but_can_fall_back() {
+    fn macos_leads_with_apple_containers_but_can_fall_back() {
         let order = candidates_for("macos");
-        assert_eq!(order.first(), Some(&"vz"));
+        assert_eq!(order.first(), Some(&"apple"));
         assert_eq!(
             order.last(),
             Some(&"existing"),
@@ -112,7 +118,7 @@ mod tests {
 
     #[test]
     fn the_environment_variable_overrides_everything() {
-        assert_eq!(preferred(Some("existing"), Some("vz"), "macos"), "existing");
+        assert_eq!(preferred(Some("existing"), Some("apple"), "macos"), "existing");
     }
 
     #[test]
@@ -122,13 +128,13 @@ mod tests {
 
     #[test]
     fn with_no_preference_the_platform_default_wins() {
-        assert_eq!(preferred(None, None, "macos"), "vz");
+        assert_eq!(preferred(None, None, "macos"), "apple");
         assert_eq!(preferred(None, None, "linux"), "linux");
     }
 
     #[test]
     fn blank_preferences_are_ignored_rather_than_selecting_nothing() {
-        assert_eq!(preferred(Some("  "), None, "macos"), "vz");
+        assert_eq!(preferred(Some("  "), None, "macos"), "apple");
         assert_eq!(preferred(Some(""), Some("   "), "linux"), "linux");
     }
 }

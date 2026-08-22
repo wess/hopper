@@ -5,9 +5,13 @@
 //! tokio bridge, which is the only seam between the async world and the
 //! renderer.
 
+#[cfg(target_os = "macos")]
+pub mod appleinstall;
 pub mod compose;
 pub mod engine;
+pub mod runtime;
 pub mod facade;
+pub mod import;
 pub mod registry;
 pub mod status;
 

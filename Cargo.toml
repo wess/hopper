@@ -4,6 +4,7 @@ members = [
     "crates/model",
     "crates/store",
     "crates/docker",
+    "crates/apple",
     "crates/engine",
     "crates/host",
     "crates/mcp",
@@ -19,12 +20,14 @@ authors = ["Wess Cope <opensource@wess.io>"]
 repository = "https://github.com/wess/hopper"
 
 [workspace.dependencies]
-# UI. Same recipe Tables uses: plain crates.io gpui, guise from git, no
+# UI. Both from crates.io, pinned: guise reached 1.0 with a stability promise,
+# so a released version beats floating on its default branch. No
 # `[patch.crates-io]` and no vendored crates. Hopper embeds no terminal widget
 # of its own (the container terminal is drawn from the exec stream), so nothing
-# forces the zed-rev gpui pin that Sinclair needs.
+# forces the zed-rev gpui pin that Sinclair needs. `default-features = false`
+# drops guise's `webview` feature — Hopper draws no web content.
 gpui = "0.2.2"
-guise-ui = { git = "https://github.com/wess/guise", default-features = false }
+guise-ui = { version = "1.2.1", default-features = false }
 
 # Async runtime. Every Docker call, stream, and engine process runs here; the
 # gpui app reaches it through the one bridge seam in `app::bridge`.
@@ -134,6 +137,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 model = { path = "crates/model" }
 store = { path = "crates/store" }
 docker = { path = "crates/docker" }
+apple = { path = "crates/apple" }
 engine = { path = "crates/engine" }
 migrate = { path = "crates/migrate" }
 host = { path = "crates/host" }

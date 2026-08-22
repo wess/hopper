@@ -1,0 +1,21 @@
+[package]
+name = "apple"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Apple Containers (`container`) as a Hopper engine backend."
+
+[dependencies]
+# The shared engine error type. `apple` sits beside `docker` rather than above
+# it, and borrows only `DockerError`/`Result` so both backends fail the same
+# way and `host` can hold either behind one enum.
+docker = { workspace = true }
+model = { workspace = true }
+
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }

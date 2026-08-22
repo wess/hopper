@@ -20,6 +20,7 @@ pub enum Route {
     Volumes,
     Networks,
     Stacks,
+    Import,
     Settings,
 }
 
@@ -33,6 +34,7 @@ impl Route {
             Route::Volumes => "Volumes",
             Route::Networks => "Networks",
             Route::Stacks => "Stacks",
+            Route::Import => "Import",
             Route::Settings => "Settings",
         }
     }
@@ -46,6 +48,7 @@ impl Route {
             Route::Volumes => IconName::Database,
             Route::Networks => IconName::Network,
             Route::Stacks => IconName::Boxes,
+            Route::Import => IconName::Import,
             Route::Settings => IconName::Settings,
         }
     }
@@ -57,7 +60,7 @@ impl Route {
     }
 
     /// Sidebar order.
-    pub fn all() -> [Route; 8] {
+    pub fn all() -> [Route; 9] {
         [
             Route::Dashboard,
             Route::Containers,
@@ -66,6 +69,7 @@ impl Route {
             Route::Volumes,
             Route::Networks,
             Route::Stacks,
+            Route::Import,
             Route::Settings,
         ]
     }

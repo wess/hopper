@@ -21,6 +21,7 @@ pub struct Root {
     images: Entity<views::Images>,
     dashboard: Entity<views::Dashboard>,
     stacks: Entity<views::Stacks>,
+    import: Entity<views::Import>,
     settings: Entity<views::Settings>,
     detail: Option<Entity<views::Detail>>,
     volumes: Entity<views::Volumes>,
@@ -42,6 +43,7 @@ impl Root {
         let images = cx.new(views::Images::new);
         let dashboard = cx.new(views::Dashboard::new);
         let stacks = cx.new(views::Stacks::new);
+        let import = cx.new(views::Import::new);
         let settings = cx.new(views::Settings::new);
         let volumes = cx.new(views::Volumes::new);
         let networks = cx.new(views::Networks::new);
@@ -55,6 +57,7 @@ impl Root {
             images,
             dashboard,
             stacks,
+            import,
             settings,
             volumes,
             networks,
@@ -179,7 +182,10 @@ impl Render for Root {
         // list that failed to load. Settings stays itself (the engine is
         // configured there), and Registry stays reachable so you can browse and
         // queue images to pull before the engine is even up.
-        let show_setup = !engine.connected && route != Route::Settings && route != Route::Registry;
+        let show_setup = !engine.connected
+            && route != Route::Settings
+            && route != Route::Registry
+            && route != Route::Import;
 
         let content: gpui::Div = if show_setup {
             div().size_full().child(self.engine_setup.clone())
@@ -217,6 +223,7 @@ impl Render for Root {
                 Route::Networks => div().size_full().child(self.networks.clone()),
                 Route::Dashboard => div().size_full().child(self.dashboard.clone()),
                 Route::Stacks => div().size_full().child(self.stacks.clone()),
+                Route::Import => div().size_full().child(self.import.clone()),
                 Route::Settings => div().size_full().child(self.settings.clone()),
             }
         };

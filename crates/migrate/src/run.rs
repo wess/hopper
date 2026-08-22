@@ -9,7 +9,10 @@ use docker::client::Client;
 use model::{MigrationPhase, MigrationPlan, MigrationProgress};
 
 /// A progress sink.
-pub type Report<'a> = &'a mut dyn FnMut(MigrationProgress);
+///
+/// `Send` because the import runs on the tokio runtime while the view that
+/// draws the progress lives on the gpui thread.
+pub type Report<'a> = &'a mut (dyn FnMut(MigrationProgress) + Send);
 
 fn step(
     phase: MigrationPhase,

@@ -2,6 +2,30 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Which client speaks to the engine.
+///
+/// Docker, Podman and Hopper's own daemon all answer the Engine API over a
+/// socket. Apple's runtime answers nothing — it has no socket at all — so the
+/// two are driven by different code and the host has to know which it holds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeKind {
+    /// Anything that speaks the Docker Engine API.
+    #[default]
+    EngineApi,
+    /// Apple Containers, driven through the `container` CLI.
+    Apple,
+}
+
+impl RuntimeKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::EngineApi => "engineApi",
+            Self::Apple => "apple",
+        }
+    }
+}
+
 /// The engine lifecycle as Hopper sees it.
 ///
 /// Richer than a reachable/not boolean so the UI can act: a managed provider
@@ -184,4 +208,136 @@ pub struct ReclaimResult {
 pub struct McpLaunch {
     pub command: String,
     pub args: Vec<String>,
+}
+
+/// What the active engine can actually do.
+///
+/// The Engine API and Apple's runtime are not the same shape: Apple has no
+/// pause, no rename, no post-create resource update, no event stream and no
+/// healthchecks. Carrying that as data lets the UI hide what is not there
+/// instead of offering a button that always fails.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineCapabilities {
+    /// Pause and unpause a running container.
+    pub pause: bool,
+    /// Rename a container in place.
+    pub rename: bool,
+    /// Change resource limits after creation.
+    pub update: bool,
+    /// List processes inside a container.
+    pub top: bool,
+    /// A live event stream. Without it, lists are refreshed by polling.
+    pub events: bool,
+    /// An interactive shell.
+    pub exec: bool,
+    /// Browse and edit the container filesystem.
+    pub files: bool,
+    /// Live CPU/memory samples.
+    pub stats: bool,
+    /// Healthchecks, and therefore a health state worth showing.
+    pub health: bool,
+    /// Compose stacks driven by a compose CLI.
+    pub compose: bool,
+    /// Build images from a Dockerfile.
+    pub build: bool,
+    /// Restart policies on `run`.
+    pub restart_policy: bool,
+}
+
+impl EngineCapabilities {
+    /// Everything, as the Docker Engine API offers it. Podman answers the same
+    /// API and is treated the same.
+    pub const fn engine_api() -> Self {
+        Self {
+            pause: true,
+            rename: true,
+            update: true,
+            top: true,
+            events: true,
+            exec: true,
+            files: true,
+            stats: true,
+            health: true,
+            compose: true,
+            build: true,
+            restart_policy: true,
+        }
+    }
+
+    /// Apple Containers, as of `container` 1.2.
+    ///
+    /// Logs, stats and exec exist as commands, so they are supported; what is
+    /// missing is missing from the runtime itself, not from this driver.
+    pub const fn apple() -> Self {
+        Self {
+            pause: false,
+            rename: false,
+            update: false,
+            top: false,
+            // No event stream — Hopper polls instead.
+            events: false,
+            exec: true,
+            files: true,
+            stats: true,
+            // Each container is its own VM; there is no healthcheck runner.
+            health: false,
+            // Apple ships no compose; Hopper drives stacks itself.
+            compose: false,
+            build: true,
+            restart_policy: false,
+        }
+    }
+
+    pub fn for_runtime(kind: RuntimeKind) -> Self {
+        match kind {
+            RuntimeKind::EngineApi => Self::engine_api(),
+            RuntimeKind::Apple => Self::apple(),
+        }
+    }
+}
+
+impl Default for EngineCapabilities {
+    fn default() -> Self {
+        Self::engine_api()
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    #[test]
+    fn apple_is_honest_about_what_it_cannot_do() {
+        let c = EngineCapabilities::apple();
+        assert!(!c.pause, "Apple's runtime has no pause");
+        assert!(!c.rename);
+        assert!(!c.events, "no event stream means the UI must poll");
+        assert!(!c.health, "no healthcheck runner, so no health dot");
+        assert!(!c.restart_policy);
+    }
+
+    #[test]
+    fn apple_still_does_the_things_it_does_do() {
+        let c = EngineCapabilities::apple();
+        assert!(c.exec && c.stats && c.build && c.files);
+    }
+
+    #[test]
+    fn the_engine_api_offers_everything() {
+        let c = EngineCapabilities::engine_api();
+        assert!(c.pause && c.rename && c.update && c.top && c.events && c.health && c.compose);
+    }
+
+    #[test]
+    fn capabilities_follow_the_runtime_kind() {
+        assert_eq!(
+            EngineCapabilities::for_runtime(RuntimeKind::Apple),
+            EngineCapabilities::apple()
+        );
+        assert_eq!(
+            EngineCapabilities::for_runtime(RuntimeKind::EngineApi),
+            EngineCapabilities::engine_api()
+        );
+    }
 }

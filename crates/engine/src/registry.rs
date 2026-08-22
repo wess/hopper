@@ -1,9 +1,9 @@
 //! Choosing a provider and pointing the Docker client at it.
 
 use crate::provider::{candidates_for, preferred, Provider};
-use crate::providers::Existing;
+use crate::providers::{Existing, Linux};
 use docker::client::Client;
-use model::{EngineState, EngineStatus};
+use model::{EngineState, EngineStatus, RuntimeKind};
 use std::sync::Arc;
 
 pub struct Registry {
@@ -26,6 +26,11 @@ impl Registry {
         #[allow(unused_mut)]
         let mut providers: Vec<Arc<dyn Provider>> = Vec::new();
 
+        // macOS runs on Apple's runtime. It comes first because on a machine
+        // that has it, it is the engine Hopper is for.
+        #[cfg(target_os = "macos")]
+        providers.push(Arc::new(crate::providers::AppleContainers::new()));
+
         #[cfg(target_os = "macos")]
         let vz = {
             let vz = Arc::new(crate::vz::provider::Vz::new(client.clone()));
@@ -33,6 +38,8 @@ impl Registry {
             Some(vz)
         };
 
+        // Linux uses whichever of Docker or Podman is installed.
+        providers.push(Arc::new(Linux::new(client.clone())));
         providers.push(Arc::new(Existing::new(client.clone())));
         Self {
             client,
@@ -63,6 +70,13 @@ impl Registry {
 
     pub fn active(&self) -> Option<Arc<dyn Provider>> {
         self.get(&self.active_id())
+    }
+
+    /// Which client the active engine is driven by. The host swaps its
+    /// backend on this, so it has to come from the provider rather than be
+    /// inferred from the id.
+    pub fn active_runtime(&self) -> RuntimeKind {
+        self.active().map(|p| p.runtime()).unwrap_or_default()
     }
 
     /// Pick the first available provider in preference order, and point the
@@ -170,13 +184,13 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn the_managed_engine_is_registered_and_ordered_first_on_macos() {
+    fn apple_containers_is_registered_and_ordered_first_on_macos() {
         let ids = registry().ids();
-        assert_eq!(ids.first(), Some(&"vz"));
+        assert_eq!(ids.first(), Some(&"apple"));
         assert_eq!(
             ids.last(),
             Some(&"existing"),
-            "the fallback must stay reachable even when the VM cannot run"
+            "the fallback must stay reachable even when Apple's runtime cannot run"
         );
     }
 
