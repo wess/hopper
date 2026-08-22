@@ -6,9 +6,10 @@
 # CODESIGN_IDENTITY when set (a real Developer ID for a notarizable build),
 # otherwise ad-hoc ("-") so it still runs locally.
 #
-# Unlike the Bun build there is no `hopperd` sidecar: the VM is created
-# in-process, so the app itself carries com.apple.security.virtualization and
-# there is no inside-out signing dance.
+# There is no sidecar and no VM: on macOS the engine is Apple's `container`,
+# installed separately and running under its own privileged helpers. So the app
+# asks for no virtualization entitlement, and an ad-hoc build behaves like the
+# signed one.
 #
 # Usage: scripts/bundle.sh
 set -euo pipefail
