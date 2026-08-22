@@ -213,7 +213,7 @@ impl Render for Import {
         match &self.stage {
             Stage::Idle => {
                 body = body.child(
-                    div().child(
+                    Group::new().child(
                         Button::new("import-scan", "Look for Docker")
                             .size(Size::Sm)
                             .variant(Variant::Filled)
@@ -241,7 +241,7 @@ impl Render for Import {
                     .size(Size::Sm),
                 )
                 .child(
-                    div().child(
+                    Group::new().child(
                         Button::new("import-rescan", "Scan again")
                             .size(Size::Sm)
                             .variant(Variant::Light)
@@ -292,7 +292,7 @@ impl Render for Import {
 
                 let n = self.selected.len();
                 body = body.child(
-                    div().child(
+                    Group::new().child(
                         Button::new(
                             "import-run",
                             if n == 0 {
@@ -343,7 +343,7 @@ impl Render for Import {
                             .child(Text::new(summary.clone()).size(Size::Sm).medium()),
                     )
                     .child(
-                        div().child(
+                        Group::new().child(
                             Button::new("import-again", "Import something else")
                                 .size(Size::Sm)
                                 .variant(Variant::Light)

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{div, Context, Entity, Window};
+use gpui::{div, Context, Entity, FocusHandle, Window};
 use guise::prelude::*;
 
 use crate::bridge;
@@ -29,6 +29,10 @@ pub struct Root {
     registry: Entity<views::Registry>,
     engine_setup: Entity<views::EngineSetup>,
     run_dialog: Entity<views::RunDialog>,
+    /// The window root's focus. gpui dispatches actions along the focus path,
+    /// so with nothing focused the menu bar greys out and its shortcuts are
+    /// swallowed.
+    focus: FocusHandle,
 }
 
 impl Root {
@@ -50,6 +54,7 @@ impl Root {
         let registry = cx.new(views::Registry::new);
         let engine_setup = cx.new(views::EngineSetup::new);
         let run_dialog = cx.new(views::RunDialog::new);
+        let focus = cx.focus_handle();
 
         let root = Root {
             state,
@@ -65,6 +70,7 @@ impl Root {
             engine_setup,
             run_dialog,
             detail: None,
+            focus,
         };
         root.bring_up_engine(cx);
         root.poll_engine(cx);
@@ -72,18 +78,18 @@ impl Root {
         root
     }
 
-    /// Select an engine on launch, and start Hopper's own if that is what the
-    /// active provider is and the user has autostart on.
+    /// Select an engine on launch, and start it if it is one Hopper manages
+    /// and the user has autostart on.
     ///
-    /// Without this the app only ever probes the default socket, so a user
-    /// with no Docker installed would never reach the managed VM engine — the
-    /// whole point of being a Docker Desktop replacement.
+    /// Without this the app only ever probes the default socket, so a Mac with
+    /// no Docker would never reach Apple's runtime — the whole point of being
+    /// a Docker Desktop replacement.
     fn bring_up_engine(&self, cx: &mut Context<Self>) {
         let host = Arc::clone(&self.state.host);
         let engine = self.state.engine.clone();
         cx.spawn(async move |_, cx| {
-            // Pick the provider (managed VM where available, else an existing
-            // engine) and point the client at it.
+            // Pick the provider (Apple's runtime where available, else an
+            // engine someone else runs) and point the client at it.
             let status = {
                 let host = Arc::clone(&host);
                 let (tx, rx) = futures::channel::oneshot::channel();
@@ -94,7 +100,7 @@ impl Root {
             let _ = cx.update(|cx| engine.set(cx, status.clone()));
 
             // Start the managed engine if it is selected, idle, and autostart
-            // is on. An existing engine someone else runs is left alone.
+            // is on. An engine someone else runs is left alone.
             let autostart = host.settings().autostart_engine;
             if autostart && status.managed && !status.connected {
                 let host = Arc::clone(&host);
@@ -168,7 +174,7 @@ impl Root {
 }
 
 impl Render for Root {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = cx.global::<Theme>();
         let body = t.body().hsla();
         let text = t.text().hsla();
@@ -228,7 +234,21 @@ impl Render for Root {
             }
         };
 
+        // Take focus when nothing has it, so the menu bar stays live.
+        if window.focused(cx).is_none() {
+            window.focus(&self.focus);
+        }
+
+        // The menu declares Settings… and Refresh and binds ⌘, and ⌘R to them,
+        // but nothing ever handled either — both items rendered greyed and
+        // both shortcuts did nothing. gpui dispatches along the focus path,
+        // which is what `track_focus` above puts this element on.
         div()
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &crate::OpenSettings, _, cx| {
+                this.state.route.set(cx, Route::Settings)
+            }))
+            .on_action(cx.listener(|this, _: &crate::Refresh, _, cx| this.state.bump(cx)))
             .relative()
             .size_full()
             .flex()

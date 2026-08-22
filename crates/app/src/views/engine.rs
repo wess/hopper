@@ -67,7 +67,7 @@ pub fn describe(e: &EngineStatus) -> Setup {
         Starting => Setup {
             icon: IconName::HardDriveDownload,
             tone: ColorName::Blue,
-            title: "Setting up Hopper's engine".into(),
+            title: if apple { "Starting Apple Containers".into() } else { "Connecting to the engine".into() },
             body,
             hint,
             busy: true,
@@ -146,7 +146,7 @@ pub fn describe(e: &EngineStatus) -> Setup {
         Connected => Setup {
             icon: IconName::Container,
             tone: ColorName::Green,
-            title: "Hopper's engine is running".into(),
+            title: "The engine is running".into(),
             body,
             hint,
             busy: false,
@@ -357,7 +357,7 @@ mod tests {
         );
         assert!(s.busy);
         assert!(!s.can_start());
-        assert_eq!(s.title, "Setting up Hopper's engine");
+        assert_eq!(s.title, "Starting Apple Containers");
     }
 
     #[test]
