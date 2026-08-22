@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Images — Hopper</title>
+  <meta name="description" content="Local images, registry search across Docker Hub and GitHub, and pulling without a terminal.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html" class="active">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Images</h1>
+      <p class="lede-sm">Local images, registry search across Docker Hub and GitHub, and pulling without a terminal.</p>
+<h2>The list</h2>
+<p>Every local image with its tags, size and age. Dangling images are marked, and
+<code>&lt;none&gt;:&lt;none&gt;</code> renders as a short digest rather than nothing.</p>
+<p><strong>Run</strong> on any row opens the run dialog with the image filled in. <strong>Delete</strong>
+removes it, with a force option for images a stopped container still references.</p>
+<h2>Finding images</h2>
+<p>The Registry view searches <strong>Docker Hub</strong> and <strong>GitHub Container Registry</strong> over
+HTTP, not through the daemon. That matters for two reasons: it works before an
+engine is even up, and it works identically on every backend — Apple's runtime
+has no daemon-side search at all.</p>
+<p>Results show the description, stars and whether the image is official. <strong>Pull</strong>
+brings it down; <strong>Run</strong> pulls and opens the run dialog.</p>
+<h2>Credentials</h2>
+<p>Registry credentials live in the OS keychain under <code>io.wess.hopper</code>, one
+single-line JSON blob per key. A pull is authenticated whenever a credential
+exists for that registry — which is what raises Docker Hub's anonymous rate limit
+and unlocks private and GHCR images. With no credential it is an anonymous pull.</p>
+<h2>Running one</h2>
+<p>The run dialog covers name, ports, volumes, environment, network, working
+directory, user, resource limits and labels.</p>
+<p>On Apple Containers a few of those have nowhere to go — restart policies and
+<code>--hostname</code> do not exist in that runtime. Hopper does not drop them silently;
+it warns that they were not applied.</p>
+      <nav class="pager">
+        <a class="prev" href="containers.html"><span>Previous</span>Containers</a>
+        <a class="next" href="volumes.html"><span>Next</span>Volumes and networks</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

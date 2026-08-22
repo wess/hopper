@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Docker CLI — Hopper</title>
+  <meta name="description" content="Point docker and docker compose at the engine Hopper is running.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html" class="active">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Docker CLI</h1>
+      <p class="lede-sm">Point docker and docker compose at the engine Hopper is running.</p>
+<p>Hopper is a GUI, not a replacement for your terminal. Both should talk to the
+same engine.</p>
+<h2>With an Engine API engine</h2>
+<p>Point <code>DOCKER_HOST</code> at whatever Hopper reports under <strong>Settings → Docker CLI</strong>:</p>
+<pre><code class="language-sh">export DOCKER_HOST="unix:///var/run/docker.sock"
+</code></pre>
+<p>Or make it permanent with a context:</p>
+<pre><code class="language-sh">docker context create hopper --docker "host=unix:///var/run/docker.sock"
+docker context use hopper
+</code></pre>
+<h2>With Apple Containers</h2>
+<p>There is nothing to point <code>DOCKER_HOST</code> at — Apple publishes no Docker socket.
+Use Apple's own CLI, which is installed alongside the runtime:</p>
+<pre><code class="language-sh">container ls
+container run --detach --name web --publish 8080:80 nginx
+container logs -f web
+</code></pre>
+<p>Most Docker muscle memory transfers. The flags that do not have an Apple
+equivalent — <code>--restart</code>, <code>--hostname</code>, <code>--network=none</code> — fail loudly rather
+than silently doing nothing, which is the right choice.</p>
+<h2>What the app bundles</h2>
+<p>The release ships the Docker CLI and a standalone Compose binary inside
+<code>Hopper.app</code>, because Docker Desktop's uninstaller takes <code>docker</code> with it. You
+can add them to your <code>PATH</code> from <strong>Settings → Docker CLI</strong>; it is off by default
+because the symlink is machine-wide.</p>
+      <nav class="pager">
+        <a class="prev" href="import.html"><span>Previous</span>Import from Docker</a>
+        <a class="next" href="settings.html"><span>Next</span>Settings</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

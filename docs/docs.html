@@ -3,11 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hopper Docs</title>
-  <meta name="description" content="Install Hopper, run its managed engine, wire up the docker CLI, migrate from Docker Desktop, and build from source.">
+  <title>Documentation — Hopper</title>
+  <meta name="description" content="Install Hopper, point it at an engine, bring your Docker world across, and drive it from the CLI or an AI client.">
   <meta name="theme-color" content="#0c1018">
   <link rel="stylesheet" href="styles.css">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -22,6 +21,7 @@
       <a href="index.html#workflow">Workflow</a>
       <a href="index.html#engine">Engine</a>
       <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
     </nav>
     <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
   </header>
@@ -29,200 +29,67 @@
   <div class="wrap docs-layout">
     <aside class="docs-nav" aria-label="Documentation">
       <h5>Start</h5>
-      <a href="#install">Install</a>
-      <a href="#firstrun">First run</a>
-      <a href="#engine">The engine</a>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
       <h5>Use</h5>
-      <a href="#registry">Find images</a>
-      <a href="#detail">Detail pane</a>
-      <a href="#cli">Docker CLI</a>
-      <a href="#sharing">Bind mounts</a>
-      <a href="#import">Import from Docker</a>
-      <a href="#mcp">MCP server</a>
-      <h5>Build</h5>
-      <a href="#source">From source</a>
-      <a href="#architecture">Architecture</a>
-      <a href="#release">Releasing</a>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
     </aside>
 
     <article class="docs-body">
       <h1>Documentation</h1>
-      <p>Hopper is a native macOS app that both manages Docker and provides it. This covers
-        installing it, running its own engine, pointing the <code>docker</code> CLI at it,
-        migrating off Docker Desktop, and building from source.</p>
-
-      <h2 id="install">Install</h2>
-      <p>The simplest path is Homebrew:</p>
-      <pre><code>brew install --cask wess/packages/hopper</code></pre>
-      <p>Or download <code>Hopper.dmg</code> from the
-        <a href="https://github.com/wess/hopper/releases/latest">latest release</a>, open it, and
-        drag <strong>Hopper.app</strong> to Applications. The build is signed with a Developer ID
-        and notarized, so Gatekeeper opens it without a fuss.</p>
-      <div class="callout">
-        <p><strong>Requirements.</strong> Apple Silicon (arm64). Apple Containers needs
-          <strong>macOS 26 or later</strong> — the vmnet APIs that container-to-container
-          networking depends on do not exist before it. On an older macOS, Hopper still works
-          against a Docker engine you already run.</p>
-      </div>
-
-      <h2 id="firstrun">First run</h2>
-      <p>On launch Hopper picks an engine. On macOS it prefers <strong>Apple Containers</strong>
-        and falls back to any engine you already run — Docker Desktop, Colima, Rancher Desktop, or
-        a remote daemon over TCP. On Linux it looks for Docker or Podman, checking rootless
-        sockets before the system ones.</p>
-      <p>If Apple's <code>container</code> is not installed, Hopper says so and offers to get it:
-        it downloads the package <em>Apple</em> signed and hands it to the system installer, which
-        asks you to approve it. Hopper never elevates privileges itself.</p>
-      <p>Once it is there and autostart is on (the default), Hopper starts Apple's services in the
-        background and the status footer moves from <em>starting</em> to <em>connected</em>. You
-        can control this under <strong>Settings → Engine</strong>.</p>
-
-      <h2 id="engine">The engine</h2>
-      <p>On macOS the engine is <a href="https://github.com/apple/container">Apple's
-        <code>container</code></a>: every container is its own lightweight VM, and Apple maintains
-        it. Hopper installs it, starts and stops its services, and drives it.</p>
-      <p>It is not the Docker Engine API, and Hopper does not pretend otherwise. Apple's runtime
-        publishes no Docker socket — the request for one was closed as not planned — so Hopper
-        speaks to it through the <code>container</code> command instead. Some things simply are not
-        there:</p>
-      <ul>
-        <li><strong>pause</strong> and <strong>unpause</strong>, and renaming a container;</li>
-        <li>changing a container's CPU or memory after it is created;</li>
-        <li>restart policies and <code>--hostname</code>;</li>
-        <li>healthchecks, so no container reports a health state; and</li>
-        <li>Compose, and the live event stream (Hopper polls instead).</li>
-      </ul>
-      <p>Hopper hides those rather than offering a button that always fails. If you need them,
-        switch to a Docker engine under <strong>Settings → Engine</strong>.</p>
-      <p>Two things worth knowing about Apple's volumes: a named volume is a real ext4 filesystem,
-        so it arrives with a <code>lost+found</code> directory — Postgres needs
-        <code>PGDATA</code> pointed at a subdirectory — and anonymous volumes are not removed with
-        their container.</p>
-
-      <h2 id="import">Import from Docker</h2>
-      <p><strong>Import</strong> finds Docker Desktop, Colima or Rancher Desktop and copies your
-        images, networks and containers into whichever engine Hopper is running. Containers are
-        recreated rather than moved: the image, ports, mounts and labels travel, and a writable
-        layer is by definition scratch. <strong>Nothing is removed from the source</strong>, so if
-        the import goes wrong your Docker install is exactly where it was.</p>
-      <p>The source engine is pinned when you scan, so a daemon coming up or down mid-import
-        cannot quietly redirect it somewhere else. Per-item failures are reported and the rest
-        continues — one unreadable image should not cost you the other nineteen.</p>
-      <div class="callout warn">
-        <p><strong>Already running Docker Desktop?</strong> On macOS Hopper prefers its own engine
-          by default. To have it manage your existing daemon instead, set the engine preference to
-          <em>existing</em> in Settings, or launch with <code>HOPPER_ENGINE=existing</code>.</p>
-      </div>
-
-      <h2 id="registry">Find images</h2>
-      <p>The <strong>Registry</strong> tab searches public registries for images to pull. Type a
-        term and switch between <strong>Docker Hub</strong> and <strong>GitHub</strong> — each hit
-        shows its stars, an <em>official</em> marker where it applies, and the exact reference
-        <code>Pull</code> will fetch (<code>nginx</code>, <code>ghcr.io/owner/app</code>). Search
-        talks to the registries directly, so it works before an engine is even up; the pull lands
-        the image on the <strong>Images</strong> tab. Private and rate-limited pulls use whatever
-        credentials you have stored.</p>
-
-      <h2 id="detail">Detail pane</h2>
-      <p>Selecting a container opens a pane beside the list with five tabs:</p>
-      <ul>
-        <li><strong>Logs</strong> — live streaming, demuxed stdout/stderr, with stderr coloured.</li>
-        <li><strong>Stats</strong> — CPU, memory (page cache excluded), network, block-IO, and PIDs.</li>
-        <li><strong>Files</strong> — browse the container's filesystem and copy files out.</li>
-        <li><strong>Terminal</strong> — a real interactive shell over a hijacked socket, with a
-          terminal model that interprets escape sequences.</li>
-        <li><strong>Inspect</strong> — the full JSON tree.</li>
-      </ul>
-      <p>Streams are cancelled by closing the pane or switching containers — there is no separate
-        abort registry to fall out of sync with what is on screen.</p>
-
-      <h2 id="cli">Docker CLI</h2>
-      <p>Hopper serves the Docker API at a unix socket, so any tooling can target it:</p>
-      <pre><code><span class="k">export</span> DOCKER_HOST=<span class="k">"unix://$HOME/.hopper/run/docker.sock"</span>
-docker info
-docker compose version</code></pre>
-      <p>Or create a Docker context named <code>hopper</code> so <code>docker</code> and
-        <code>docker compose</code> target it by default. Hopper ships the Apache-2.0
-        <code>docker</code> CLI in the app bundle, so uninstalling Docker Desktop does not take
-        your <code>docker</code> command with it.</p>
-      <div class="callout">
-        <p><strong>Tools that hardcode <code>/var/run/docker.sock</code></strong> (Testcontainers,
-          socket-mounting sidecars) ignore Docker contexts. Settings offers an opt-in compatibility
-          symlink for those; it is off by default because the path is machine-wide.</p>
-      </div>
-
-      <h2 id="sharing">Bind mounts</h2>
-      <p>Apple's runtime bind-mounts host directories directly
-        (<code>--volume /host/path:/in/container</code>), so there is no share list to maintain.
-        Two caveats: only <code>ro</code> is honoured as a mount option, and a bind mount performs
-        worse than a named volume, so put databases on volumes.</p>
-
-      <h2 id="mcp">MCP server</h2>
-      <p>Hopper ships a standalone Model Context Protocol server that exposes Docker tools to AI
-        clients over stdio:</p>
-      <pre><code>hoppermcp        <span class="c"># or: cargo run -p mcp</span></code></pre>
-      <p>It offers list/start/stop, logs, and system-info tools. A failed tool call is reported
-        inside the result rather than as a protocol error, so a client does not retry something
-        that cannot succeed.</p>
-
-      <h2 id="source">Build from source</h2>
-      <p>Hopper is a Cargo workspace — Rust throughout.</p>
-      <pre><code>cargo run -p app            <span class="c"># launch (dev binary: hopperdev)</span>
-cargo test                  <span class="c"># the whole suite</span>
-cargo clippy --all-targets  <span class="c"># lint</span>
-cargo run -p mcp            <span class="c"># the MCP server</span></code></pre>
-      <p>A source build behaves exactly like the shipped one. Hopper runs no VM of its own any
-        more, so it needs no entitlement and no code-signing dance to reach its engine — Apple's
-        <code>container</code> does the virtualizing, under its own privileged helpers. To produce
-        a signed, notarizable bundle:</p>
-      <pre><code>scripts/bundle.sh           <span class="c"># assemble + sign dist/Hopper.app</span>
-scripts/dmg.sh              <span class="c"># package dist/Hopper.dmg</span></code></pre>
-
-      <h2 id="architecture">Architecture</h2>
-      <p>The workspace is layered bottom-up; each crate depends only on those below it, and the
-        gpui-free core never imports gpui.</p>
-      <pre><code>model     <span class="c">shared domain types (the wire contract)</span>
-store     <span class="c">~/.hopper/ JSON persistence + OS keychain</span>
-docker    <span class="c">Engine API client (hyper) + every domain module</span>
-apple     <span class="c">Apple Containers, driven through the `container` CLI</span>
-engine    <span class="c">provider abstraction; Apple / Docker-or-Podman / existing</span>
-migrate   <span class="c">Docker → Hopper import</span>
-host      <span class="c">the async service facade the UI calls</span>
-mcp       <span class="c">the stdio MCP server</span>
-app       <span class="c">the gpui + guise application</span></code></pre>
-      <p>Hopper speaks to two kinds of engine, behind one enum in <code>host::runtime</code>: the
-        Engine API over a socket, and Apple's runtime over its CLI. An enum rather than a trait
-        because the streaming calls take closures, which are not object-safe.</p>
-      <p>The async layer runs on a Tokio runtime; gpui has its own executor. They meet at one
-        seam — <code>app::bridge</code> — which runs a future on Tokio and delivers the result on the
-        gpui main thread. This mirrors the
-        <a href="https://github.com/wess/tables">tables</a> architecture.</p>
-
-      <h2 id="release">Releasing</h2>
-      <p>A workspace version bump in <code>Cargo.toml</code> pushed to <code>main</code> is the
-        release. CI runs the full gate (tests, <code>clippy -D warnings</code>, a release build),
-        produces a signed and notarized <code>Hopper.dmg</code>, publishes the GitHub release, and
-        updates the Homebrew cask.</p>
-
-      <p style="margin-top: 3rem; color: var(--dim)">
-        Questions or issues? <a href="https://github.com/wess/hopper/issues">Open an issue</a> ·
-        <a href="https://github.com/sponsors/wess">♥ Sponsor the project</a>
-      </p>
+      <p class="lede-sm">Install Hopper, point it at an engine, bring your Docker world across, and drive it from the CLI or an AI client.</p>
+<h2>Start</h2>
+<div class="cards">
+  <a class="card" href="install.html"><h3>Install</h3><p>Download the signed app, or install it with Homebrew.</p></a>
+  <a class="card" href="engines.html"><h3>Engines</h3><p>Apple Containers on macOS, Docker or Podman on Linux, and anything that answers the Engine API.</p></a>
+  <a class="card" href="firstrun.html"><h3>First run</h3><p>What happens when you open Hopper, and what to do if no engine answers.</p></a>
+</div>
+<h2>Use</h2>
+<div class="cards">
+  <a class="card" href="containers.html"><h3>Containers</h3><p>The list, the per-row actions, and the detail pane with logs, stats, files and a shell.</p></a>
+  <a class="card" href="images.html"><h3>Images</h3><p>Local images, registry search across Docker Hub and GitHub, and pulling without a terminal.</p></a>
+  <a class="card" href="volumes.html"><h3>Volumes and networks</h3><p>Named volumes, bind mounts, and how Apple's networking differs.</p></a>
+  <a class="card" href="stacks.html"><h3>Compose stacks</h3><p>Stacks reconstructed from container labels, and why the view hides itself on Apple Containers.</p></a>
+  <a class="card" href="import.html"><h3>Import from Docker</h3><p>Copy images, networks and containers out of Docker Desktop into whichever engine Hopper runs.</p></a>
+  <a class="card" href="cli.html"><h3>Docker CLI</h3><p>Point docker and docker compose at the engine Hopper is running.</p></a>
+  <a class="card" href="settings.html"><h3>Settings</h3><p>Engine selection and lifecycle, CLI integration, and appearance.</p></a>
+</div>
+<h2>Tutorials</h2>
+<div class="cards">
+  <a class="card" href="firstcontainer.html"><h3>Run your first container</h3><p>From a fresh install to nginx serving on localhost, in about five minutes.</p></a>
+  <a class="card" href="offdockerdesktop.html"><h3>Move off Docker Desktop</h3><p>Bring your images and containers across, then uninstall the thing you were paying for.</p></a>
+  <a class="card" href="composestack.html"><h3>Run a Compose stack</h3><p>A web service and a database, brought up together and managed from the Stacks view.</p></a>
+</div>
+<h2>Reference</h2>
+<div class="cards">
+  <a class="card" href="mcp.html"><h3>MCP server</h3><p>Expose Docker tools to an AI client over stdio.</p></a>
+  <a class="card" href="architecture.html"><h3>Architecture</h3><p>A Rust workspace layered bottom-up, with one Tokio-to-gpui seam.</p></a>
+  <a class="card" href="troubleshooting.html"><h3>Troubleshooting</h3><p>The failures people actually hit, and what they mean.</p></a>
+  <a class="card" href="contributing.html"><h3>From source</h3><p>Build it, test it, and how a release is cut.</p></a>
+</div>
     </article>
   </div>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <a class="brand" href="index.html">
-        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
-        Hopper
-      </a>
-      <nav>
-        <a href="index.html">Home</a>
-        <a href="https://github.com/wess/hopper">GitHub ↗</a>
-        <a href="https://github.com/sponsors/wess">♥ Sponsor</a>
-      </nav>
-      <p>Open source under MIT · the engine inside is Apache-2.0.</p>
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>
 </body>

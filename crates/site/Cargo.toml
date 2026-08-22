@@ -1,0 +1,17 @@
+[package]
+name = "site"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish = false
+description = "The static site generator for Hopper's gh-pages docs."
+
+[[bin]]
+name = "hoppersite"
+path = "src/main.rs"
+
+[dependencies]
+# The only dependency: markdown in, HTML out. Everything else — front matter,
+# the page shell, the nav — is a few hundred lines here rather than a toolchain.
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }

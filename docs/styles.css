@@ -338,3 +338,96 @@ h2 em { font-style: normal; color: var(--muted); }
   .caps { grid-template-columns: 1fr; }
   .caps div { grid-column: span 1 !important; }
 }
+
+/* ---- docs: generated pages ------------------------------------------- */
+
+/* A page's one-line summary, under its title. */
+.docs-body .lede-sm {
+  font-size: var(--step-0);
+  color: var(--muted);
+  margin: -0.4rem 0 2rem;
+  max-width: 60ch;
+}
+
+/* The docs and tutorials indexes. */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.9rem;
+  margin: 1rem 0 2.4rem;
+}
+.card {
+  display: block;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--edge-soft);
+  border-radius: 12px;
+  background: var(--ink-raised);
+  transition: border-color 0.15s, transform 0.15s;
+}
+.card:hover {
+  border-color: color-mix(in oklch, var(--blue) 45%, var(--edge));
+  transform: translateY(-2px);
+}
+.card h3 {
+  margin: 0 0 0.35rem;
+  font-size: var(--step-0);
+  color: var(--paper);
+}
+.card p {
+  margin: 0;
+  font-size: var(--step--1);
+  color: var(--dim);
+  line-height: 1.5;
+}
+
+/* Previous / next, so the docs read as a sequence. */
+.pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 3.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--edge-soft);
+}
+.pager a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--edge-soft);
+  border-radius: 10px;
+  color: var(--paper);
+  font-size: var(--step--1);
+  transition: border-color 0.15s;
+}
+.pager a:hover { border-color: color-mix(in oklch, var(--blue) 45%, var(--edge)); }
+.pager .next { text-align: right; margin-left: auto; }
+.pager span {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--dim);
+}
+
+/* Tables in generated pages — the capability matrix leans on these. */
+.docs-body table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.2rem 0 2rem;
+  font-size: var(--step--1);
+}
+.docs-body th, .docs-body td {
+  text-align: left;
+  padding: 0.55rem 0.8rem;
+  border-bottom: 1px solid var(--edge-soft);
+  vertical-align: top;
+}
+.docs-body th { color: var(--dim); font-weight: 600; }
+.docs-body tbody tr:hover { background: color-mix(in oklch, var(--paper) 3%, transparent); }
+
+@media (max-width: 900px) {
+  .pager { flex-direction: column; }
+  .pager .next { margin-left: 0; text-align: left; }
+  .docs-body table { display: block; overflow-x: auto; }
+}

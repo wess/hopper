@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Compose stacks — Hopper</title>
+  <meta name="description" content="Stacks reconstructed from container labels, and why the view hides itself on Apple Containers.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html" class="active">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Compose stacks</h1>
+      <p class="lede-sm">Stacks reconstructed from container labels, and why the view hides itself on Apple Containers.</p>
+<p>Hopper groups containers into projects using the <code>com.docker.compose.*</code> labels
+the Compose CLI writes. That means stacks show up whether or not a Compose
+binary is installed — the grouping is read from what is already running.</p>
+<p>Each project lists its services with their states, and the whole project can be
+started or stopped together.</p>
+<h2>On Apple Containers</h2>
+<p>Apple ships no Compose, so <strong>the Stacks view is not shown</strong> when that engine is
+active. It is not an empty list or a broken button; the route leaves the sidebar.</p>
+<p>This is the biggest single gap between the two backends, and it is worth being
+plain about: if your workflow is <code>docker compose up</code>, Apple Containers is not
+there yet. Switch to a Docker engine under <strong>Settings → Engine</strong> and everything
+works as before.</p>
+<h2>What Hopper ships</h2>
+<p>The release bundles a standalone Compose binary and the Docker CLI, found at
+runtime beside the executable. Docker Desktop's uninstaller takes <code>docker</code> with
+it, so shipping one is what makes Hopper a replacement rather than a client that
+depends on the thing it replaces.</p>
+      <nav class="pager">
+        <a class="prev" href="volumes.html"><span>Previous</span>Volumes and networks</a>
+        <a class="next" href="import.html"><span>Next</span>Import from Docker</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

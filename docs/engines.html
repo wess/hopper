@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Engines — Hopper</title>
+  <meta name="description" content="Apple Containers on macOS, Docker or Podman on Linux, and anything that answers the Engine API.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html" class="active">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Engines</h1>
+      <p class="lede-sm">Apple Containers on macOS, Docker or Podman on Linux, and anything that answers the Engine API.</p>
+<p>Hopper does not have one engine. It has three ways of finding one, tried in
+order, and it tells you which answered.</p>
+<h2>macOS — Apple Containers</h2>
+<p><a href="https://github.com/apple/container">Apple's <code>container</code></a> ships as part of the
+macOS 26 story: every container is its own lightweight virtual machine, images
+are OCI, and Apple maintains it. Hopper installs it, starts and stops its
+services, and drives it.</p>
+<p>This is the default on macOS. If <code>container</code> is not on the machine, Hopper
+offers to fetch the package <strong>Apple</strong> signed and hands it to the system
+installer, which asks you to approve it. Hopper never elevates privileges
+itself.</p>
+<h2>Linux — Docker or Podman</h2>
+<p>Whichever you have. Hopper checks rootless sockets before system ones, so a
+desktop Podman is not passed over in favour of a stale root daemon:</p>
+<ol>
+<li><code>$XDG_RUNTIME_DIR/podman/podman.sock</code></li>
+<li><code>$XDG_RUNTIME_DIR/docker.sock</code></li>
+<li><code>/var/run/docker.sock</code></li>
+<li><code>/run/podman/podman.sock</code></li>
+</ol>
+<p>Podman's socket is deliberately Docker-compatible, so nothing else changes.
+<code>DOCKER_HOST</code>, when set, wins outright — if you are pointing at a remote daemon
+you mean it.</p>
+<h2>Anywhere — an engine you already run</h2>
+<p>Docker Desktop, Colima, Rancher Desktop, or a daemon over TCP. This one is
+always available and always last, so Hopper stays useful whatever else fails.</p>
+<h2>What each engine can do</h2>
+<p>Apple's runtime is not the Docker Engine API, and Hopper does not pretend
+otherwise. It publishes no Docker socket — <a href="https://github.com/apple/container/issues/636">the request for one was closed as
+not planned</a> — so Hopper speaks
+to it through the <code>container</code> command instead. Some things are simply not there:</p>
+<table><thead><tr><th></th><th>Engine API</th><th>Apple Containers</th></tr></thead><tbody>
+<tr><td>Start, stop, restart</td><td>yes</td><td>yes</td></tr>
+<tr><td>Logs</td><td>yes</td><td>yes</td></tr>
+<tr><td>Pause / unpause</td><td>yes</td><td><strong>no</strong></td></tr>
+<tr><td>Rename</td><td>yes</td><td><strong>no</strong></td></tr>
+<tr><td>Change CPU / memory after create</td><td>yes</td><td><strong>no</strong></td></tr>
+<tr><td>Restart policies</td><td>yes</td><td><strong>no</strong></td></tr>
+<tr><td>Healthchecks</td><td>yes</td><td><strong>no</strong></td></tr>
+<tr><td>Live event stream</td><td>yes</td><td><strong>no</strong>, Hopper polls</td></tr>
+<tr><td>Live stats</td><td>yes</td><td>not yet</td></tr>
+<tr><td>Shell into a container</td><td>yes</td><td>not yet</td></tr>
+<tr><td>Browse the filesystem</td><td>yes</td><td>not yet</td></tr>
+<tr><td>Compose</td><td>yes</td><td><strong>no</strong></td></tr>
+</tbody></table>
+<p>Hopper hides what an engine cannot do rather than offering a button that always
+fails. On Apple Containers the detail pane shows Logs and Inspect instead of five
+tabs where three cannot load, and Stacks leaves the sidebar entirely.</p>
+<p>If you need any of it, switch engines under <strong>Settings → Engine</strong>.</p>
+<h2>Choosing one yourself</h2>
+<p><code>HOPPER_ENGINE</code> overrides everything, then the saved setting, then the platform
+default:</p>
+<pre><code class="language-sh">HOPPER_ENGINE=existing /Applications/Hopper.app/Contents/MacOS/hopper
+</code></pre>
+<p>Valid ids are <code>apple</code>, <code>linux</code>, and <code>existing</code>.</p>
+      <nav class="pager">
+        <a class="prev" href="install.html"><span>Previous</span>Install</a>
+        <a class="next" href="firstrun.html"><span>Next</span>First run</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

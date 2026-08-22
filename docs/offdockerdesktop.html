@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Move off Docker Desktop — Hopper</title>
+  <meta name="description" content="Bring your images and containers across, then uninstall the thing you were paying for.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html" class="active">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Move off Docker Desktop</h1>
+      <p class="lede-sm">Bring your images and containers across, then uninstall the thing you were paying for.</p>
+<p>You have Docker Desktop with real work in it. This moves that work onto Apple's
+runtime and gets Docker Desktop off the machine.</p>
+<p>Read the whole thing before starting — there is one step that needs manual work.</p>
+<h2>1. Take stock</h2>
+<p>With Docker Desktop still running, open Hopper. It will connect to it — the
+footer says <code>Connected to Docker …</code>.</p>
+<p>Note what you actually need. <code>docker ps -a</code>, <code>docker images</code>, <code>docker volume ls</code>.
+Most people find half of it is scratch.</p>
+<h2>2. Install Apple Containers</h2>
+<p><strong>Settings → Engine</strong>, or the first-run panel. Install it, but <strong>do not switch
+yet</strong> — you want Docker running as the import source.</p>
+<h2>3. Import</h2>
+<p>Go to <strong>Import</strong> and click <strong>Look for Docker</strong>.</p>
+<p>Hopper finds Docker Desktop's socket, lists everything it holds, and preselects
+all of it. Untick what you do not want — this is the moment to leave the scratch
+behind.</p>
+<p>Click <strong>Import</strong>. Images stream out of Docker, land on disk as tars, and load
+into Apple's runtime. Containers are recreated from their configuration.</p>
+<p><strong>Nothing is removed from Docker.</strong> If this goes wrong, you have lost time, not
+work.</p>
+<h2>4. Deal with volumes by hand</h2>
+<p>Hopper will tell you, per volume:</p>
+<blockquote>
+<p>Volume contents are not copied yet.</p>
+</blockquote>
+<p>This is the manual step. For each volume with data you care about, the shape is:
+tar it out of Docker, create the volume on the new engine, tar it back in.</p>
+<pre><code class="language-sh"># out of Docker
+docker run --rm -v pgdata:/data -v "$PWD":/backup alpine \
+  tar czf /backup/pgdata.tgz -C /data .
+
+# into Apple Containers
+container volume create pgdata
+container run --rm --volume pgdata:/data --volume "$PWD":/backup alpine \
+  tar xzf /backup/pgdata.tgz -C /data
+</code></pre>
+<p>If that volume is a Postgres data directory, read the
+<a href="volumes.html">volumes page</a> first — Apple's named volumes contain a
+<code>lost+found</code>, and Postgres refuses to initialise into a non-empty directory.</p>
+<h2>5. Switch</h2>
+<p><strong>Settings → Engine → Apple Containers</strong>. The footer reconnects, and your
+imported containers are in the list.</p>
+<p>Check the things that matter: do they start, do their ports answer, does the data
+look right.</p>
+<h2>6. Then, and only then</h2>
+<pre><code class="language-sh">/Applications/Docker.app/Contents/MacOS/uninstall
+</code></pre>
+<p>Docker Desktop's uninstaller takes the <code>docker</code> CLI with it. Hopper bundles its
+own — <strong>Settings → Docker CLI</strong> puts it on your <code>PATH</code>.</p>
+<hr />
+<h2>Before you commit</h2>
+<p>Some things do not survive the move, and it is better to know now:</p>
+<ul>
+<li><strong>Compose stacks.</strong> Apple ships no Compose. If <code>docker compose up</code> is your
+daily driver, stay on a Docker engine — see <a href="stacks.html">Stacks</a>.</li>
+<li><strong>Anything that bind-mounts <code>/var/run/docker.sock</code></strong> — Portainer, Traefik's
+Docker provider, most CI-in-a-container setups. Apple publishes no such socket.</li>
+<li><strong>Containers needing <code>NET_ADMIN</code> or host kernel modules</strong>, WireGuard being the
+usual example. Each container is its own VM, so there is no host kernel to
+reach into.</li>
+<li><strong>x86-only images</strong> need an explicit <code>--platform linux/amd64</code>.</li>
+</ul>
+<p>None of these are Hopper limitations; they are the shape of Apple's runtime.
+Hopper's job is to tell you about them before you find out the hard way.</p>
+      <nav class="pager">
+        <a class="prev" href="firstcontainer.html"><span>Previous</span>Run your first container</a>
+        <a class="next" href="composestack.html"><span>Next</span>Run a Compose stack</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

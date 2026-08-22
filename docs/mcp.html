@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MCP server — Hopper</title>
+  <meta name="description" content="Expose Docker tools to an AI client over stdio.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html" class="active">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>MCP server</h1>
+      <p class="lede-sm">Expose Docker tools to an AI client over stdio.</p>
+<p>Hopper ships a standalone Model Context Protocol server that gives an AI client
+tools for containers, images, volumes, networks and logs.</p>
+<pre><code class="language-sh">hoppermcp        # or: cargo run -p mcp
+</code></pre>
+<p>It speaks MCP over stdio: no socket, no port, no daemon of its own. It reaches
+the engine the same way the app does, through the same host facade, so it obeys
+the same engine selection and the same capability rules.</p>
+<h2>Wiring it into Claude Code</h2>
+<pre><code class="language-json">{
+  "mcpServers": {
+    "hopper": {
+      "command": "/Applications/Hopper.app/Contents/MacOS/sidecars/hoppermcp"
+    }
+  }
+}
+</code></pre>
+<h2>What it exposes</h2>
+<p>List and inspect containers, images, volumes and networks; start, stop and
+restart containers; read logs; and report engine status.</p>
+<p>Operations the active engine cannot perform return a clear refusal naming the
+engine and the operation, rather than a generic failure — the same rule the UI
+follows.</p>
+      <nav class="pager">
+        <a class="prev" href="composestack.html"><span>Previous</span>Run a Compose stack</a>
+        <a class="next" href="architecture.html"><span>Next</span>Architecture</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>
