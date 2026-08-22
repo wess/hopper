@@ -1,4 +1,9 @@
-//! Settings: engine control, resources, file sharing, and CLI integration.
+//! Settings: engine control, CLI integration, and appearance.
+//!
+//! No resource budget and no share list: Apple sizes each container's VM when
+//! it runs it, and bind-mounts host paths directly. Both sections described
+//! the VM Hopper used to run, and showing numbers that change nothing is worse
+//! than not showing them.
 
 use std::sync::Arc;
 
@@ -130,42 +135,6 @@ impl Render for Settings {
                     ),
             );
 
-        let resources = &settings.resources;
-        let resources_body = Stack::new()
-            .gap(Size::Xs)
-            .child(
-                Text::new(format!(
-                    "{} CPUs · {} GiB memory · {} GiB disk",
-                    resources.cpus, resources.memory_gib, resources.disk_gib
-                ))
-                .size(Size::Xs),
-            )
-            .child(
-                Text::new("CPU and memory apply when the engine restarts.")
-                    .size(Size::Xs)
-                    .dimmed(),
-            );
-
-        let shares = if settings.shared_paths.is_empty() {
-            "Your home directory only.".to_string()
-        } else {
-            format!(
-                "Home directory, plus: {}",
-                settings.shared_paths.join(", ")
-            )
-        };
-        let sharing_body = Stack::new()
-            .gap(Size::Xs)
-            .child(Text::new(shares).size(Size::Xs))
-            .child(
-                Text::new(
-                    "A bind mount outside these paths shows the container an empty \
-                     directory rather than your files.",
-                )
-                .size(Size::Xs)
-                .dimmed(),
-            );
-
         let cli_body = Stack::new()
             .gap(Size::Xs)
             .child(
@@ -204,8 +173,6 @@ impl Render for Settings {
                     Stack::new()
                         .gap(Size::Md)
                         .child(self.section("Engine", engine_body, cx))
-                        .child(self.section("Resources", resources_body, cx))
-                        .child(self.section("File sharing", sharing_body, cx))
                         .child(self.section("Docker CLI", cli_body, cx))
                         .child(self.section("Appearance", theme_body, cx)),
                 ),
