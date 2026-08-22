@@ -76,6 +76,26 @@ impl Cli {
         ))
     }
 
+    /// Run a command, returning stdout *and* whether it succeeded.
+    ///
+    /// `container system status` prints a perfectly good JSON body and then
+    /// exits 1 when the services are not registered, so for that one call the
+    /// exit code has to be read alongside the output rather than instead of it.
+    pub async fn output(&self, args: &[&str]) -> Result<(String, bool)> {
+        let output = Command::new(&self.bin)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .await
+            .map_err(|e| {
+                DockerError::transport(format!("could not run `{}`: {e}", self.bin.display()))
+            })?;
+        Ok((
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            output.status.success(),
+        ))
+    }
+
     /// Run a command and discard its output.
     pub async fn ok(&self, args: &[&str]) -> Result<()> {
         self.run(args).await.map(|_| ())
@@ -226,6 +246,18 @@ mod tests {
             Some(1),
         );
         assert_eq!(e.message, "image not found");
+    }
+
+    #[test]
+    fn a_body_that_arrives_with_a_failing_exit_code_is_still_decodable() {
+        // `container system status` does exactly this: valid JSON on stdout,
+        // exit 1, when the services are not registered.
+        #[derive(serde::Deserialize)]
+        struct S {
+            status: String,
+        }
+        let s: S = decode(r#"{"status":"unregistered"}"#).unwrap();
+        assert_eq!(s.status, "unregistered");
     }
 
     #[test]

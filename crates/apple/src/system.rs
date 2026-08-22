@@ -32,16 +32,17 @@ impl SystemStatus {
 
 /// Ask the apiserver how it is doing.
 ///
-/// A non-zero exit here means "not running" rather than "broken": the command
-/// fails when the launchd job is not registered at all.
+/// This one command reports through both channels: with the services
+/// unregistered it prints `{"status":"unregistered"}` and *then* exits 1. Read
+/// the body first and only fall back to "not running" when there is nothing
+/// there — going by the exit code alone throws away the answer.
 pub async fn status(cli: &Cli) -> Result<SystemStatus> {
-    match cli.run(&["system", "status", "--format", "json"]).await {
-        Ok(raw) => crate::cli::decode(&raw),
-        Err(e) if e.is_not_found() || e.kind == docker::ErrorKind::Transport => {
-            Ok(SystemStatus::default())
-        }
-        Err(e) => Err(e),
+    let (stdout, _ok) = cli.output(&["system", "status", "--format", "json"]).await?;
+    if stdout.trim().is_empty() {
+        return Ok(SystemStatus::default());
     }
+    // A body we cannot read is still not a running engine.
+    Ok(crate::cli::decode(&stdout).unwrap_or_default())
 }
 
 /// Start the services.
@@ -184,5 +185,13 @@ mod tests {
         let s = SystemStatus { status: "Running".into(), ..Default::default() };
         assert!(s.running());
         assert!(!SystemStatus::default().running());
+    }
+
+    #[test]
+    fn unregistered_services_are_not_running() {
+        // The literal value `container system status` prints on a machine
+        // where the package is present but was never started.
+        let s = SystemStatus { status: "unregistered".into(), ..Default::default() };
+        assert!(!s.running());
     }
 }
