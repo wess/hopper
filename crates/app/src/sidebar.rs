@@ -35,7 +35,7 @@ pub fn render(state: &AppState, cx: &mut gpui::App) -> impl IntoElement {
     // One nav entry. Expanded: a left-aligned icon + label row; collapsed: an
     // icon-only action. Both drive the same route signal.
     let mut nav = Stack::new().gap(Size::Xs);
-    for route in Route::all() {
+    for route in Route::available(&state.host.capabilities()) {
         let selected = route == active;
         let signal = state.route.clone();
         let go = route;

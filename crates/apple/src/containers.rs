@@ -237,6 +237,64 @@ pub fn split_command(cmd: &str) -> Vec<String> {
     out
 }
 
+/// Stream a container's logs.
+///
+/// Apple has no log API, only `container logs`, so this spawns the command and
+/// reads its stdout. Both streams arrive interleaved on stdout — the CLI does
+/// not demux them the way the Engine API's stdcopy framing does — so every
+/// line is reported as stdout rather than guessed at.
+///
+/// `on_line` returning false stops the stream and kills the child, which is
+/// how a closed view cancels a follow.
+pub async fn stream_logs<F>(
+    cli: &Cli,
+    request_id: &str,
+    id: &str,
+    tail: u32,
+    follow: bool,
+    mut on_line: F,
+) -> Result<()>
+where
+    F: FnMut(model::LogLine) -> bool,
+{
+    use tokio::io::AsyncBufReadExt;
+
+    let n = tail.to_string();
+    let mut args: Vec<&str> = vec!["logs", "-n", &n];
+    if follow {
+        args.push("--follow");
+    }
+    args.push(id);
+
+    let mut child = tokio::process::Command::new(cli.path())
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| DockerError::transport(format!("could not read logs: {e}")))?;
+
+    let Some(stdout) = child.stdout.take() else {
+        return Err(DockerError::transport("`container logs` produced no output"));
+    };
+    let mut lines = tokio::io::BufReader::new(stdout).lines();
+
+    while let Ok(Some(text)) = lines.next_line().await {
+        if !on_line(model::LogLine {
+            request_id: request_id.to_string(),
+            text,
+            stream: model::StreamKind::Stdout,
+            at: None,
+        }) {
+            break;
+        }
+    }
+    // Whether the reader stopped or the stream ended, the child must not be
+    // left running — a `--follow` would otherwise outlive the view.
+    let _ = child.start_kill();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

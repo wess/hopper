@@ -267,24 +267,29 @@ impl EngineCapabilities {
 
     /// Apple Containers, as of `container` 1.2.
     ///
-    /// Logs, stats and exec exist as commands, so they are supported; what is
-    /// missing is missing from the runtime itself, not from this driver.
+    /// This is what Hopper *does*, not what Apple could do. `container` has
+    /// `exec`, `stats` and `cp`, but Hopper does not drive them yet — and
+    /// claiming otherwise would be worse than saying no, because the call
+    /// would fall through to whatever socket the Engine API client happens to
+    /// be holding and read a different daemon.
     pub const fn apple() -> Self {
         Self {
             pause: false,
             rename: false,
             update: false,
             top: false,
-            // No event stream — Hopper polls instead.
+            // No event stream at all — the UI polls instead.
             events: false,
-            exec: true,
-            files: true,
-            stats: true,
+            // Needs a hijacked socket; not implemented here yet.
+            exec: false,
+            files: false,
+            stats: false,
             // Each container is its own VM; there is no healthcheck runner.
             health: false,
-            // Apple ships no compose; Hopper drives stacks itself.
+            // Apple ships no compose.
             compose: false,
-            build: true,
+            // `container build` exists, but Hopper's build path is Engine API.
+            build: false,
             restart_policy: false,
         }
     }
@@ -318,9 +323,12 @@ mod capability_tests {
     }
 
     #[test]
-    fn apple_still_does_the_things_it_does_do() {
+    fn apple_claims_nothing_hopper_has_not_implemented() {
+        // Claiming a capability Hopper does not drive is worse than refusing
+        // it: the call falls through to the Engine API client, which on this
+        // backend points at some *other* daemon.
         let c = EngineCapabilities::apple();
-        assert!(c.exec && c.stats && c.build && c.files);
+        assert!(!c.exec && !c.stats && !c.files && !c.build);
     }
 
     #[test]

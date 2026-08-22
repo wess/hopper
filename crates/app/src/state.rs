@@ -53,6 +53,22 @@ impl Route {
         }
     }
 
+    /// Whether the active engine can serve this route.
+    ///
+    /// Apple's runtime ships no compose, so Stacks would be a permanently
+    /// empty list rather than a feature.
+    pub fn supported(&self, caps: &model::EngineCapabilities) -> bool {
+        match self {
+            Route::Stacks => caps.compose,
+            _ => true,
+        }
+    }
+
+    /// The routes worth showing for this engine.
+    pub fn available(caps: &model::EngineCapabilities) -> Vec<Route> {
+        Self::all().into_iter().filter(|r| r.supported(caps)).collect()
+    }
+
     /// Parse a route from its label, for the `HOPPER_ROUTE` dev override.
     pub fn from_env() -> Option<Route> {
         let want = std::env::var("HOPPER_ROUTE").ok()?;
@@ -197,6 +213,29 @@ impl AppState {
 
 /// Filter a container list by the search box. Matching name, image, and id
 /// means the same box works for all three, which is what users try.
+#[cfg(test)]
+mod route_tests {
+    use super::*;
+
+    #[test]
+    fn an_engine_api_engine_shows_every_route() {
+        let caps = model::EngineCapabilities::engine_api();
+        assert_eq!(Route::available(&caps).len(), Route::all().len());
+    }
+
+    #[test]
+    fn apple_hides_stacks_because_it_has_no_compose() {
+        let caps = model::EngineCapabilities::apple();
+        let routes = Route::available(&caps);
+        assert!(!routes.contains(&Route::Stacks));
+        // Everything else survives — Import especially, since it is how you
+        // get your Docker world onto this engine in the first place.
+        assert!(routes.contains(&Route::Import));
+        assert!(routes.contains(&Route::Containers));
+        assert_eq!(routes.len(), Route::all().len() - 1);
+    }
+}
+
 pub fn filter_containers<'a>(list: &'a [Container], query: &str) -> Vec<&'a Container> {
     let q = query.trim().to_lowercase();
     if q.is_empty() {

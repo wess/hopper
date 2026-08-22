@@ -55,6 +55,24 @@ impl Tab {
     pub fn all() -> [Tab; 5] {
         [Tab::Logs, Tab::Stats, Tab::Files, Tab::Terminal, Tab::Inspect]
     }
+
+    /// Whether the active engine can serve this tab.
+    ///
+    /// Apple's runtime has no stats, no filesystem browsing and no exec, so
+    /// those tabs are not drawn rather than drawn and broken.
+    pub fn supported(&self, caps: &model::EngineCapabilities) -> bool {
+        match self {
+            Tab::Logs | Tab::Inspect => true,
+            Tab::Stats => caps.stats,
+            Tab::Files => caps.files,
+            Tab::Terminal => caps.exec,
+        }
+    }
+
+    /// The tabs this engine can actually serve.
+    pub fn available(caps: &model::EngineCapabilities) -> Vec<Tab> {
+        Self::all().into_iter().filter(|t| t.supported(caps)).collect()
+    }
 }
 
 pub struct Detail {
@@ -306,7 +324,7 @@ impl Render for Detail {
         let active = self.tab;
 
         let mut tabs = Group::new().gap(Size::Xs);
-        for tab in Tab::all() {
+        for tab in Tab::available(&self.state.host.capabilities()) {
             tabs = tabs.child(
                 Button::new(tab.label(), tab.label())
                     .size(Size::Xs)
@@ -385,6 +403,20 @@ mod tests {
             assert!(!tab.label().is_empty());
         }
         assert_eq!(Tab::Logs.label(), "Logs");
+    }
+
+    #[test]
+    fn an_engine_api_engine_serves_every_tab() {
+        let caps = model::EngineCapabilities::engine_api();
+        assert_eq!(Tab::available(&caps).len(), Tab::all().len());
+    }
+
+    #[test]
+    fn apple_keeps_logs_and_inspect_and_drops_the_rest() {
+        // Stats, Files and Terminal have no Apple implementation, so drawing
+        // them would offer three tabs that cannot load.
+        let caps = model::EngineCapabilities::apple();
+        assert_eq!(Tab::available(&caps), vec![Tab::Logs, Tab::Inspect]);
     }
 
     #[test]

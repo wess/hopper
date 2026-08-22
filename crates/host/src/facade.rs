@@ -318,21 +318,37 @@ impl Host {
 
     /// List a directory inside a container.
     pub async fn container_ls(&self, id: &str, dir: &str) -> docker::Result<Vec<FileEntry>> {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("browse a container's filesystem");
+        }
         archive::list_dir(&self.client, id, dir).await
     }
 
     /// Read a file's bytes out of a container.
     pub async fn container_read(&self, id: &str, path: &str) -> docker::Result<Vec<u8>> {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("browse a container's filesystem");
+        }
         archive::read_file(&self.client, id, path).await
     }
 
     /// Export a path from a container to a tar file on the host.
     pub async fn container_export(&self, id: &str, path: &str, dest: &std::path::Path) -> docker::Result<()> {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("export a path from a container");
+        }
         archive::export_to(&self.client, id, path, dest).await
     }
 
     /// Write bytes to a path inside a container.
     pub async fn container_write(&self, id: &str, path: &str, content: &[u8]) -> docker::Result<()> {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("write into a container");
+        }
         archive::write_file(&self.client, id, path, content).await
     }
 
@@ -343,6 +359,10 @@ impl Host {
     where
         F: FnMut(String) -> bool + Send + 'static,
     {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("open a shell in a container");
+        }
         exec::start(&self.client, id, shell, tty, on_output).await
     }
 
@@ -576,6 +596,18 @@ impl Host {
     where
         F: FnMut(LogLine) -> bool,
     {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            return apple::containers::stream_logs(
+                &cli,
+                request_id,
+                id,
+                opts.tail,
+                opts.follow,
+                on_line,
+            )
+            .await;
+        }
         logs::stream(&self.client, request_id, id, opts, on_line).await
     }
 
@@ -583,6 +615,10 @@ impl Host {
     where
         F: FnMut(ContainerStats) -> bool,
     {
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("stream live resource stats");
+        }
         stats::stream(&self.client, id, on_sample).await
     }
 
@@ -590,6 +626,12 @@ impl Host {
     where
         F: FnMut(DockerEvent) -> bool,
     {
+        // Apple publishes no event stream; the UI polls instead. Refusing
+        // keeps this from tailing a *different* daemon's events.
+        #[cfg(target_os = "macos")]
+        if matches!(self.backend(), Backend::Apple(_)) {
+            return refuse("follow the engine's event stream");
+        }
         system::stream_events(&self.client, on_event).await
     }
 
@@ -597,6 +639,13 @@ impl Host {
     where
         F: FnMut(PullProgress),
     {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            // Apple's CLI reports progress only as terminal control codes, so
+            // the transfer is reported as one step rather than faked.
+            apple::images::pull(&cli, reference).await?;
+            return Ok(images::Transfer { ok: true, error: None });
+        }
         images::pull(&self.client, request_id, reference, on).await
     }
 
@@ -604,6 +653,11 @@ impl Host {
     where
         F: FnMut(PushProgress),
     {
+        #[cfg(target_os = "macos")]
+        if let Backend::Apple(cli) = self.backend() {
+            apple::images::push(&cli, reference).await?;
+            return Ok(images::Transfer { ok: true, error: None });
+        }
         images::push(&self.client, request_id, reference, on).await
     }
 
@@ -612,7 +666,9 @@ impl Host {
     /// Compose projects, reconstructed from container labels so stacks show up
     /// with no compose CLI installed.
     pub async fn compose_projects(&self) -> docker::Result<Vec<ComposeProject>> {
-        let list = containers::list(&self.client, true).await?;
+        // Read through `containers()` so stacks regroup from whichever engine
+        // is active, not always the Engine API one.
+        let list = self.containers(true).await?;
         Ok(crate::compose::group(&list))
     }
 
