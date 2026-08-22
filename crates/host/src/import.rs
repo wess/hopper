@@ -8,7 +8,7 @@
 //! The source is always read-only. Nothing here removes anything from Docker.
 
 use docker::Endpoint;
-use model::{MigrationPlan, MigrationProgress, MigrationScan, RuntimeKind};
+use model::{MigrationPhase, MigrationPlan, MigrationProgress, MigrationScan, RuntimeKind};
 
 use crate::facade::Host;
 use crate::runtime::Backend;
@@ -54,6 +54,10 @@ impl Host {
                 let images = migrate::apple::import_images(&source, &cli, plan, report).await;
                 let containers =
                     migrate::apple::import_containers(&source, &cli, plan, report).await;
+                // Apple attaches containers to networks at creation, so there
+                // is nothing to recreate ahead of them.
+                skipped(report, MigrationPhase::Networks, &plan.networks,
+                    "Apple Containers attaches networks when a container is created, so this one was not recreated separately.");
                 (images, 0, containers)
             }
             Backend::EngineApi => {
@@ -61,13 +65,41 @@ impl Host {
                 let networks =
                     migrate::run::migrate_networks(&source, &destination, plan, report).await;
                 let images = migrate::run::migrate_images(&source, &destination, plan, report).await;
+                skipped(report, MigrationPhase::Containers, &plan.containers,
+                    "Recreating containers on an Engine API engine is not implemented yet — the image came across, so `docker run` it.");
                 (images, networks, 0)
             }
         };
 
+        // Volume *contents* need a helper container on both sides and are not
+        // copied yet. Saying so is the difference between a missing feature
+        // and a silent data loss the user only notices later.
+        skipped(report, MigrationPhase::Volumes, &plan.volumes,
+            "Volume contents are not copied yet. Create the volume on this engine and move the data yourself before starting the container that needs it.");
+
         let summary = summarize(images, networks, containers);
         report(migrate::run::finished(summary.clone()));
         summary
+    }
+}
+
+/// Report every item of a kind as skipped, with the reason.
+///
+/// A selection that quietly does nothing is worse than one that refuses: the
+/// user ticked these, and the summary would otherwise imply they arrived.
+fn skipped(report: Report<'_>, phase: MigrationPhase, items: &[String], why: &str) {
+    let total = items.len();
+    for (i, item) in items.iter().enumerate() {
+        report(MigrationProgress {
+            phase,
+            item: item.clone(),
+            done: i,
+            total,
+            message: "Skipped".into(),
+            error: None,
+            warning: Some(why.to_string()),
+            finished: false,
+        });
     }
 }
 
@@ -107,6 +139,33 @@ fn join(parts: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn frames(items: &[&str], phase: MigrationPhase) -> Vec<MigrationProgress> {
+        let owned: Vec<String> = items.iter().map(|s| s.to_string()).collect();
+        let mut out = Vec::new();
+        {
+            let mut sink = |p: MigrationProgress| out.push(p);
+            skipped(&mut sink, phase, &owned, "because reasons");
+        }
+        out
+    }
+
+    #[test]
+    fn every_skipped_item_is_reported_with_a_reason() {
+        // Silence here would read as success for something that never moved.
+        let f = frames(&["pgdata", "cache"], MigrationPhase::Volumes);
+        assert_eq!(f.len(), 2);
+        assert_eq!(f[0].item, "pgdata");
+        assert_eq!(f[0].message, "Skipped");
+        assert_eq!(f[0].warning.as_deref(), Some("because reasons"));
+        assert!(f[0].error.is_none(), "skipping is not a failure");
+        assert!(!f[1].finished);
+    }
+
+    #[test]
+    fn nothing_selected_reports_nothing() {
+        assert!(frames(&[], MigrationPhase::Volumes).is_empty());
+    }
 
     #[test]
     fn a_summary_names_only_what_actually_moved() {
