@@ -1,7 +1,7 @@
 //! Choosing a provider and pointing the Docker client at it.
 
 use crate::provider::{candidates_for, is_explicit, preferred, Provider};
-use crate::providers::{Existing, Linux};
+use crate::providers::{Existing, Linux, Named};
 use docker::client::Client;
 use model::{EngineChoice, EngineState, EngineStatus, RuntimeKind};
 use std::sync::Arc;
@@ -36,8 +36,21 @@ impl Registry {
         #[cfg(target_os = "macos")]
         providers.push(Arc::new(crate::providers::AppleContainers::new()));
 
+        // Every Docker-compatible daemon Hopper can name, so a machine with
+        // more than one installed offers a choice instead of one opaque
+        // "existing engine". Registered whether or not they are installed:
+        // `available()` re-checks the socket, so one installed later shows up
+        // without a restart, and one that is missing can say so.
+        let env = crate::daemons::Env::current();
+        providers.extend(
+            crate::daemons::known(std::env::consts::OS, &env)
+                .into_iter()
+                .map(|d| Arc::new(Named::new(d, client.clone())) as Arc<dyn Provider>),
+        );
+
         providers.extend([
-            // Linux uses whichever of Docker or Podman is installed.
+            // Kept registered but off the candidate list: a settings file that
+            // still says `linux` has to resolve to something.
             Arc::new(Linux::new(client.clone())) as Arc<dyn Provider>,
             Arc::new(Existing::new(client.clone())),
         ]);
@@ -73,7 +86,7 @@ impl Registry {
 
     /// The engines this machine could be pointed at, for the settings picker.
     ///
-    /// Platform candidates only — the Linux daemons are not a choice on a Mac,
+    /// Platform candidates only — Rancher Desktop is not a choice on a server,
     /// and a row saying so would be noise. Unavailable candidates *are* listed,
     /// with the reason: "not installed yet" is a thing to act on, where an
     /// absent row is a thing to wonder about.
@@ -89,12 +102,17 @@ impl Registry {
                 // The provider's own status says why far better than we could.
                 Some(p.status().await.message)
             };
+            // `None` for Apple's runtime, which answers no socket at all. The
+            // picker says so in words rather than repeating the engine's name
+            // back at itself.
+            let endpoint = p.endpoint().await.map(|ep| ep.describe());
             out.push(EngineChoice {
                 id: p.id().to_string(),
                 label: p.label().to_string(),
                 available,
                 managed: p.managed(),
                 reason,
+                endpoint,
             });
         }
         out
@@ -327,6 +345,41 @@ mod tests {
         let choices = registry().choices().await;
         assert!(!choices.iter().any(|c| c.id == "linux"));
         assert!(choices.iter().any(|c| c.id == "apple" && c.managed));
+    }
+
+    #[tokio::test]
+    async fn every_named_daemon_is_offered_so_a_machine_with_several_can_choose() {
+        // The point of the whole picker: Docker Desktop and Podman installed
+        // side by side must be two rows, not one "existing engine".
+        let ids: Vec<String> = registry()
+            .choices()
+            .await
+            .into_iter()
+            .map(|c| c.id)
+            .collect();
+        for named in crate::daemons::ids(std::env::consts::OS) {
+            assert!(ids.iter().any(|i| i == named), "{named} was not offered");
+        }
+        assert!(ids.iter().any(|i| i == "existing"));
+    }
+
+    #[tokio::test]
+    async fn an_engine_that_is_there_says_where_it_listens() {
+        // Two Docker-compatible rows both reading "Connected." would not be a
+        // choice; the socket is what tells them apart. Apple's runtime is
+        // exempt because it answers no socket and is never ambiguous.
+        for c in registry()
+            .choices()
+            .await
+            .iter()
+            .filter(|c| c.available && !c.managed)
+        {
+            assert!(
+                c.endpoint.is_some(),
+                "{} is available but says nothing about where",
+                c.id
+            );
+        }
     }
 
     #[tokio::test]

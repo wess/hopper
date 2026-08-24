@@ -62,14 +62,19 @@ pub trait Provider: Send + Sync {
 
 /// The candidate order for a platform.
 ///
-/// `existing` is always the tail so Hopper keeps working against an engine
-/// someone else runs, whatever else fails.
+/// The engine Hopper supplies comes first where there is one, then every
+/// Docker-compatible daemon it can name, then `existing` — always the tail, so
+/// Hopper keeps working against an engine someone else runs, whatever else
+/// fails. Naming the daemons is what lets a machine with Docker Desktop *and*
+/// Podman installed offer a choice rather than one opaque "existing engine".
 pub fn candidates_for(os: &str) -> Vec<&'static str> {
-    match os {
-        "macos" => vec!["apple", "existing"],
-        "linux" => vec!["linux", "existing"],
-        _ => vec!["existing"],
+    let mut out: Vec<&'static str> = Vec::new();
+    if os == "macos" {
+        out.push("apple");
     }
+    out.extend(crate::daemons::ids(os));
+    out.push("existing");
+    out
 }
 
 fn clean(s: Option<&str>) -> Option<&str> {
@@ -116,8 +121,21 @@ mod tests {
     }
 
     #[test]
-    fn linux_prefers_the_native_daemon() {
-        assert_eq!(candidates_for("linux"), vec!["linux", "existing"]);
+    fn linux_prefers_the_native_daemons_and_keeps_podman_ahead_of_docker() {
+        // The order `providers::linux` has always auto-detected in. Upgrading
+        // must not move a rootless Podman user onto Docker without asking.
+        assert_eq!(
+            candidates_for("linux"),
+            vec!["podman", "docker", "colima", "existing"]
+        );
+    }
+
+    #[test]
+    fn a_mac_is_offered_the_engines_that_run_there_led_by_apples() {
+        assert_eq!(
+            candidates_for("macos"),
+            vec!["apple", "docker", "podman", "colima", "rancher", "existing"]
+        );
     }
 
     #[test]
@@ -139,7 +157,7 @@ mod tests {
     #[test]
     fn with_no_preference_the_platform_default_wins() {
         assert_eq!(preferred(None, None, "macos"), "apple");
-        assert_eq!(preferred(None, None, "linux"), "linux");
+        assert_eq!(preferred(None, None, "linux"), "podman");
     }
 
     #[test]
@@ -158,6 +176,6 @@ mod tests {
     #[test]
     fn blank_preferences_are_ignored_rather_than_selecting_nothing() {
         assert_eq!(preferred(Some("  "), None, "macos"), "apple");
-        assert_eq!(preferred(Some(""), Some("   "), "linux"), "linux");
+        assert_eq!(preferred(Some(""), Some("   "), "linux"), "podman");
     }
 }

@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{div, Context, SharedString, Window};
+use gpui::{div, px, Context, SharedString, Window};
 use guise::prelude::*;
 
 use crate::bridge;
@@ -280,12 +280,35 @@ impl Render for Settings {
             .dimmed(),
         );
 
-        // Say why an engine cannot be picked, rather than leaving a dead
-        // button with no explanation. The provider's own message names itself,
-        // so it needs no label in front of it.
-        for reason in self.choices.iter().filter(|c| !c.available).filter_map(|c| c.reason.clone()) {
-            choice_body = choice_body.child(Text::new(reason).size(Size::Xs).dimmed());
+        // One row per engine: where it listens, or why it cannot be picked.
+        // A machine with Docker Desktop and Podman both installed shows two
+        // buttons that would otherwise say nothing but "Connected." — the
+        // socket is what tells them apart. And an engine that is missing says
+        // so, rather than leaving a dead button with no explanation.
+        let mut rows = Stack::new().gap(Size::Xs);
+        for choice in &self.choices {
+            let detail = match (&choice.endpoint, &choice.reason) {
+                (Some(endpoint), _) if choice.available => endpoint.clone(),
+                // Apple's runtime is the one engine with nowhere to point.
+                (None, _) if choice.available => {
+                    "No Docker socket; Hopper drives this engine directly.".to_string()
+                }
+                (_, Some(reason)) => reason.clone(),
+                _ => continue,
+            };
+            rows = rows.child(
+                Group::new()
+                    .gap(Size::Sm)
+                    .align(Align::Center)
+                    .child(
+                        div()
+                            .min_w(px(150.0))
+                            .child(Text::new(choice.label.clone()).size(Size::Xs)),
+                    )
+                    .child(Text::new(detail).size(Size::Xs).dimmed()),
+            );
         }
+        choice_body = choice_body.child(rows);
 
         // The way off Docker Desktop, offered while Docker is still working.
         // Gated on the Mac being able to run it: an install cannot fix macOS 25.

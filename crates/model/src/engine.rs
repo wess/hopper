@@ -137,6 +137,11 @@ pub struct EngineChoice {
     /// Why it cannot be chosen, when it cannot.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub reason: Option<String>,
+    /// Where it listens, when it is there to listen. A machine with several
+    /// Docker-compatible engines installed needs the socket to tell them
+    /// apart — two rows both saying "Connected." are not a choice.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub endpoint: Option<String>,
 }
 
 /// Configurable VM resources for a managed engine. CPU and memory apply when

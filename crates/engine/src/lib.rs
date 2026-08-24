@@ -1,5 +1,6 @@
 //! Engine providers: attaching to an engine, or supplying one.
 
+pub mod daemons;
 pub mod provider;
 pub mod providers;
 pub mod registry;
