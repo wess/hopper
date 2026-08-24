@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings — Hopper</title>
+  <meta name="description" content="Engine selection and lifecycle, CLI integration, and appearance.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html" class="active">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Settings</h1>
+      <p class="lede-sm">Engine selection and lifecycle, CLI integration, and appearance.</p>
+<h2>Engine</h2>
+<p>What the engine that is answering has to say for itself, and — when it is one
+Hopper manages — buttons to start and stop it. An engine that is not installed
+yet has nothing to start, so those buttons stay off and the install is offered
+below instead.</p>
+<h2>Which engine</h2>
+<p><strong>Automatic</strong> is the default: Apple Containers on a Mac, Docker or Podman on
+Linux, and whatever is already running as the fallback. When nothing is running,
+automatic lands on the engine Hopper can supply rather than reporting a missing
+Docker — Docker is not a requirement on macOS.</p>
+<p>Pin one instead and Hopper stays on it. That includes an engine that is not
+installed yet: pinning the one you are moving <em>to</em> is the point, and its status
+then says what is left to do about it. A Mac without Apple's <code>container</code> is also
+offered the install here — reachable while Docker is still connected and
+working, which is the only moment someone happy on Docker Desktop would think
+to look.</p>
+<p><code>HOPPER_ENGINE</code> in the environment overrides the saved setting, which is handy
+for testing without changing what is saved.</p>
+<h2>Docker CLI</h2>
+<p>On an Engine API engine, the <code>DOCKER_HOST</code> line that points <code>docker</code> and
+<code>docker compose</code> at whatever Hopper is showing.</p>
+<p>On Apple Containers there is no such line. That runtime publishes no Docker
+socket, so <code>docker</code> cannot be pointed at it at all — Apple's own <code>container</code>
+command drives the same runtime Hopper is showing.</p>
+<h2>Appearance</h2>
+<p>Dark and light, following the system by default.</p>
+<h2>What is not here any more</h2>
+<p>Hopper used to offer a <strong>Resources</strong> section — CPUs, memory, disk — and a
+<strong>File sharing</strong> list. Both belonged to the Linux VM it used to run.</p>
+<p>Apple sizes each container's VM when it runs it, and bind-mounts host paths
+directly, so a global budget has nothing to apply to and there is no share list
+to keep. Numbers that change nothing are worse than no numbers: they invite you
+to tune them and then wonder why nothing happened. Both sections are gone.</p>
+<h2>Where settings live</h2>
+<p>JSON under <code>~/.hopper/</code>, written atomically, with a corrupt file backed up
+rather than silently replaced. Credentials go to the OS keychain instead, one
+single-line JSON blob per key — the macOS keychain corrupts values containing a
+newline.</p>
+<p><code>HOPPER_DIR</code> overrides the root, which is what the test suite uses.</p>
+      <nav class="pager">
+        <a class="prev" href="cli.html"><span>Previous</span>Docker CLI</a>
+        <a class="next" href="firstcontainer.html"><span>Next</span>Run your first container</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

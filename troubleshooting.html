@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Troubleshooting — Hopper</title>
+  <meta name="description" content="The failures people actually hit, and what they mean.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html" class="active">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Troubleshooting</h1>
+      <p class="lede-sm">The failures people actually hit, and what they mean.</p>
+<h2>"Apple Containers can't run on this Mac"</h2>
+<p>It needs macOS 26. The vmnet APIs that give containers their own addresses do not
+exist earlier. Use a Docker engine instead — Hopper still works as a client.</p>
+<h2>The engine says "stopped" and Start does nothing</h2>
+<p>Check what Apple's own services think:</p>
+<pre><code class="language-sh">container system status
+container system start
+</code></pre>
+<p>If <code>system start</code> complains about a kernel, let it install one:</p>
+<pre><code class="language-sh">container system start --enable-kernel-install
+</code></pre>
+<p>Hopper always passes that flag, because the command otherwise prompts on stdin
+and Hopper has no terminal to answer with.</p>
+<h2>Postgres exits immediately on Apple Containers</h2>
+<p>Its data directory is not empty. Apple's named volumes are real ext4
+filesystems and arrive with a <code>lost+found</code>, which Postgres refuses to initialise
+into. Point <code>PGDATA</code> at a subdirectory:</p>
+<pre><code class="language-yaml">environment:
+  PGDATA: /var/lib/postgresql/data/pgdata
+</code></pre>
+<h2>Something bind-mounts /var/run/docker.sock and fails</h2>
+<p>Portainer, Traefik's Docker provider, and most CI-in-a-container setups do this.
+Apple publishes no Docker socket, so there is nothing to mount. These need a
+Docker engine.</p>
+<h2>"no matching manifest for linux/arm64"</h2>
+<p>An x86-only image. Ask for it explicitly:</p>
+<pre><code class="language-sh">container run --platform linux/amd64 someimage
+</code></pre>
+<h2>The Stacks tab disappeared</h2>
+<p>You are on Apple Containers, which has no Compose. See <a href="stacks.html">Stacks</a>.</p>
+<h2>Permission denied on the socket (Linux)</h2>
+<p>You are not in the <code>docker</code> group:</p>
+<pre><code class="language-sh">sudo usermod -aG docker "$USER"   # then log out and back in
+</code></pre>
+<p>For rootless Podman, the socket needs starting:</p>
+<pre><code class="language-sh">systemctl --user start podman.socket
+</code></pre>
+<h2>Hopper connects to the wrong daemon</h2>
+<p><code>DOCKER_HOST</code> wins over everything when it is set. Unset it, or set
+<code>HOPPER_ENGINE</code> to pick a provider explicitly:</p>
+<pre><code class="language-sh">HOPPER_ENGINE=apple /Applications/Hopper.app/Contents/MacOS/hopper
+</code></pre>
+<h2>Checking the app is really notarized</h2>
+<pre><code class="language-sh">spctl -a -t exec -vv /Applications/Hopper.app
+# accepted / source=Notarized Developer ID
+</code></pre>
+<p>Checking the <code>.dmg</code> instead will report <em>no usable signature</em> even on a perfectly
+good release — the DMG is not codesigned, the ticket is stapled to it, and the
+signature lives on the app inside.</p>
+      <nav class="pager">
+        <a class="prev" href="architecture.html"><span>Previous</span>Architecture</a>
+        <a class="next" href="contributing.html"><span>Next</span>From source</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

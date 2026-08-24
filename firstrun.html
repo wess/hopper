@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>First run — Hopper</title>
+  <meta name="description" content="What happens when you open Hopper, and what to do if no engine answers.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html" class="active">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>First run</h1>
+      <p class="lede-sm">What happens when you open Hopper, and what to do if no engine answers.</p>
+<p>On launch Hopper picks an engine, points itself at it, and starts polling. The
+status footer in the sidebar tells you where it got to.</p>
+<h2>If Apple Containers is not installed</h2>
+<p>You get an offer rather than an error:</p>
+<blockquote>
+<p><strong>Run containers natively on this Mac</strong>
+Apple Containers is not installed yet.
+<em>Hopper can download Apple's signed installer for you; macOS will ask you to
+approve it.</em></p>
+</blockquote>
+<p>Clicking <strong>Install Apple Containers</strong> resolves Apple's current release, downloads
+the signed <code>.pkg</code>, and opens it. macOS takes over from there and asks for your
+administrator password — Hopper never asks for it and never elevates.</p>
+<p>Once the package is in, Hopper starts the services itself. That first start
+fetches a kernel image, so give it a moment.</p>
+<h2>If you already run Docker</h2>
+<p>Nothing to do. Hopper finds the socket and connects, and the footer says which
+daemon answered — <code>Connected to Docker 29.7.2.</code> or similar.</p>
+<p>You can still switch to Apple Containers later, and
+<a href="import.html">Import from Docker</a> will bring your images across when you do.</p>
+<h2>The states you might see</h2>
+<table><thead><tr><th>State</th><th>What it means</th></tr></thead><tbody>
+<tr><td><strong>connected</strong></td><td>An engine answered. Everything works.</td></tr>
+<tr><td><strong>starting</strong></td><td>Hopper is bringing the engine up, or the first probe is in flight.</td></tr>
+<tr><td><strong>stopped</strong></td><td>The engine is installed but not running. There is a Start button.</td></tr>
+<tr><td><strong>not installed</strong></td><td>No engine here, and one can be offered or installed.</td></tr>
+<tr><td><strong>needs permission</strong></td><td>The socket exists but Hopper is not allowed to open it. On Linux, usually the <code>docker</code> group.</td></tr>
+<tr><td><strong>unreachable</strong></td><td>Something is listening but not answering properly.</td></tr>
+<tr><td><strong>unsupported</strong></td><td>This engine cannot run on this machine — for example Apple Containers on macOS 15.</td></tr>
+</tbody></table>
+<p>Only the states Hopper can actually act on offer a button. A stopped engine that
+Hopper manages gets <strong>Start</strong>; a missing Docker does not, because starting it is
+not Hopper's to do.</p>
+<h2>Autostart</h2>
+<p>On by default: if the selected engine is one Hopper manages and it is not
+running, Hopper starts it in the background. Turn it off under
+<strong>Settings → Engine</strong>.</p>
+      <nav class="pager">
+        <a class="prev" href="engines.html"><span>Previous</span>Engines</a>
+        <a class="next" href="containers.html"><span>Next</span>Containers</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

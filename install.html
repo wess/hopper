@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Install — Hopper</title>
+  <meta name="description" content="Download the signed app, or install it with Homebrew.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html" class="active">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Install</h1>
+      <p class="lede-sm">Download the signed app, or install it with Homebrew.</p>
+<h2>Homebrew</h2>
+<pre><code class="language-sh">brew install --cask wess/packages/hopper
+</code></pre>
+<h2>Download</h2>
+<p>Grab <code>Hopper.dmg</code> from the <a href="https://github.com/wess/hopper/releases/latest">latest release</a>,
+open it, and drag <strong>Hopper.app</strong> to Applications.</p>
+<p>The build is signed with a Developer ID and notarized, so Gatekeeper opens it
+without complaint. If you want to confirm that yourself:</p>
+<pre><code class="language-sh">spctl -a -t exec -vv /Applications/Hopper.app
+# accepted
+# source=Notarized Developer ID
+</code></pre>
+<h2>What Hopper needs</h2>
+<table><thead><tr><th></th><th></th></tr></thead><tbody>
+<tr><td><strong>Architecture</strong></td><td>Apple Silicon (arm64)</td></tr>
+<tr><td><strong>macOS</strong></td><td>Sonoma or later to run the app</td></tr>
+<tr><td><strong>For Apple Containers</strong></td><td>macOS 26 or later</td></tr>
+</tbody></table>
+<p>The split matters. Hopper itself runs on Sonoma quite happily as a client for an
+engine you already have — Docker Desktop, Colima, Rancher Desktop, or a remote
+daemon. What needs macOS 26 is <em>Apple's</em> container runtime, because the vmnet
+APIs that give containers their own addresses only exist there.</p>
+<p>Hopper does not block the install over that. It tells you in-app which engines
+this machine can actually run.</p>
+<h2>Hopper asks for very little</h2>
+<p>Three entitlements, and no more:</p>
+<ul>
+<li><code>files.user-selected.read-write</code> — bind-mounted directories, and the tars an
+import stages on disk</li>
+<li><code>network.client</code> and <code>network.server</code> — registry pulls and published ports</li>
+</ul>
+<p>Notably <strong>not</strong> <code>com.apple.security.virtualization</code>. Hopper used to run a Linux
+VM of its own and needed it; Apple's runtime does its own virtualizing under its
+own privileged helpers, so the entitlement is gone and the release build asserts
+it has not come back.</p>
+      <nav class="pager">
+        <span></span>
+        <a class="next" href="engines.html"><span>Next</span>Engines</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

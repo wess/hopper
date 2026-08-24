@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Import from Docker — Hopper</title>
+  <meta name="description" content="Copy images, networks and containers out of Docker Desktop into whichever engine Hopper runs.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html" class="active">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Import from Docker</h1>
+      <p class="lede-sm">Copy images, networks and containers out of Docker Desktop into whichever engine Hopper runs.</p>
+<p>Hopper's pitch on macOS is that you stop running Docker Desktop, and that is only
+true if what you already have comes with you.</p>
+<p><strong>Import</strong> scans for another engine, lists what it holds, and copies your
+selection across. <strong>Nothing is removed from the source.</strong> If the import goes
+wrong, Docker is exactly where it was.</p>
+<h2>What it finds</h2>
+<p>Docker Desktop, Colima and Rancher Desktop, in that order, plus the classic
+system socket:</p>
+<ul>
+<li><code>~/.docker/run/docker.sock</code></li>
+<li><code>~/.colima/default/docker.sock</code></li>
+<li><code>~/.rd/docker.sock</code></li>
+<li><code>/var/run/docker.sock</code></li>
+</ul>
+<p>Whichever engine Hopper is currently running is excluded, so it never offers to
+copy an engine onto itself.</p>
+<h2>How it copies</h2>
+<p><strong>Images.</strong> Into an Engine API engine, a tar streams straight from <code>/images/get</code>
+to <code>/images/load</code>. Into Apple's runtime there is no socket to load into, so the
+tar lands on disk first and <code>container image load</code> reads it back — slower, and
+the only way in.</p>
+<p><strong>Containers</strong> are recreated, not moved. The image, ports, mounts and labels
+travel; the writable layer does not, because it is by definition scratch. That is
+what makes a stack come back up.</p>
+<p><strong>Networks</strong> are recreated on Engine API engines. On Apple they are not, because
+Apple attaches a container to its networks when it creates it.</p>
+<h2>What it does not copy yet</h2>
+<p><strong>Volume contents.</strong> The volume is listed and you can select it, and Hopper will
+tell you plainly that the data did not move:</p>
+<blockquote>
+<p>Volume contents are not copied yet. Create the volume on this engine and move
+the data yourself before starting the container that needs it.</p>
+</blockquote>
+<p>That warning matters more than it looks. A user who assumes their database volume
+came across finds out when the container starts empty, which is exactly the
+failure worth being loud about.</p>
+<h2>Safety</h2>
+<p>The source engine is <strong>pinned when you scan</strong>, so a daemon coming up or down
+mid-import cannot quietly redirect it somewhere else. Per-item failures are
+reported against that item and the run continues — one unreadable image should
+not cost you the other nineteen.</p>
+<p>Bind mounts are called out too: a container that mounts a host path gets a
+warning, because that path has to exist on the destination for the mount to mean
+anything.</p>
+      <nav class="pager">
+        <a class="prev" href="stacks.html"><span>Previous</span>Compose stacks</a>
+        <a class="next" href="cli.html"><span>Next</span>Docker CLI</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

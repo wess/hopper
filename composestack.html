@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Run a Compose stack — Hopper</title>
+  <meta name="description" content="A web service and a database, brought up together from the Stacks view — on any engine.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html" class="active">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Run a Compose stack</h1>
+      <p class="lede-sm">A web service and a database, brought up together from the Stacks view — on any engine.</p>
+<p>Hopper reads the compose file and runs the services itself, so this works on
+Apple Containers with no Docker and no Compose binary anywhere on the machine.</p>
+<h2>1. A stack to run</h2>
+<pre><code class="language-yaml"># compose.yaml
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_PASSWORD: example
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  web:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
+</code></pre>
+<p>The <code>PGDATA</code> line is not decoration. A named volume can arrive with a
+<code>lost+found</code> in it, and Postgres refuses to initialise into a non-empty
+directory. Pointing at a subdirectory sidesteps it, and costs nothing when the
+volume is empty.</p>
+<h2>2. Bring it up</h2>
+<p>Open <strong>Stacks</strong>, then <strong>Open compose file…</strong>, and pick the file or the directory
+it is in.</p>
+<p>Hopper reads it, creates the network and the <code>pgdata</code> volume, pulls both images,
+and starts <code>db</code> before <code>web</code> because <code>depends_on</code> says so. Every line of that
+appears in the panel as it happens.</p>
+<h2>3. Watch it in Hopper</h2>
+<p>The project appears in the list with both services under it.</p>
+<p>The grouping is read from the <code>com.docker.compose.*</code> labels on the containers,
+not from the YAML — which means a stack someone else started with
+<code>docker compose up</code>, or one started before Hopper was open, shows up just the
+same. It works the other way too: <code>docker compose ls</code> on a machine that has it
+will list the project Hopper just created.</p>
+<p>Click into <strong>Containers</strong> and select <code>db</code>. The <strong>Logs</strong> tab shows Postgres
+initialising. If you got <code>PGDATA</code> wrong, this is where you will see it say so.</p>
+<h2>4. Drive it</h2>
+<p>Start and stop the whole project from the Stacks view, or individual services
+from Containers. Both are the same containers; there is no separate state.</p>
+<h2>5. Tear it down</h2>
+<p><strong>Down</strong> on the project row stops and removes both containers and the network.
+The volume outlives it — which is the point of a volume, and the reason the
+database survives a rebuild.</p>
+<p>Press <strong>Up</strong> again and the stack comes back with its data. Press <strong>Up</strong> on a
+stack that is already running and nothing is disturbed: each container carries a
+hash of the service it came from, and one that still matches is left alone.</p>
+      <nav class="pager">
+        <a class="prev" href="offdockerdesktop.html"><span>Previous</span>Move off Docker Desktop</a>
+        <a class="next" href="mcp.html"><span>Next</span>MCP server</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

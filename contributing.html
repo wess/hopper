@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>From source — Hopper</title>
+  <meta name="description" content="Build it, test it, and how a release is cut.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html" class="active">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>From source</h1>
+      <p class="lede-sm">Build it, test it, and how a release is cut.</p>
+<p>Rust throughout. No Bun, no npm.</p>
+<pre><code class="language-sh">cargo run -p app                 # launch the app (dev binary: hopperdev)
+cargo build --workspace          # build everything
+cargo test                       # the whole suite
+cargo clippy --all-targets       # lint
+cargo run -p mcp                 # the stdio MCP server
+cargo run -p site                # rebuild this documentation site
+</code></pre>
+<p>A source build behaves exactly like the shipped one. Hopper runs no VM of its
+own, so it needs no entitlement and no code-signing dance to reach its engine —
+Apple's <code>container</code> does the virtualizing under its own privileged helpers.</p>
+<p>That was not always true: the VM needed a Developer ID to boot, which meant a
+<code>cargo run</code> build could never exercise the engine. Removing it removed the
+problem.</p>
+<h2>Conventions</h2>
+<ul>
+<li>Functional style; a free function and plain data over a class.</li>
+<li>The gpui-free core (<code>model</code>, <code>store</code>, <code>docker</code>, <code>apple</code>, <code>engine</code>, <code>migrate</code>,
+<code>host</code>, <code>mcp</code>) never imports gpui. The boundary is <code>app</code>.</li>
+<li>File names lowercase, no separators; split by directory, not compound names.</li>
+<li>Pure logic carries the unit coverage — parsers, arg builders, framing,
+reducers. Integration seams are where the real bugs hide, so verify those
+against a live engine.</li>
+</ul>
+<h2>This site</h2>
+<p>Markdown in <code>site/content/</code>, a small Rust generator in <code>crates/site</code>, output
+committed to <code>docs/</code>, which is what the Pages workflow publishes. The generated
+HTML is committed rather than built in CI so the site stays reviewable in the
+diff and a broken generator cannot take it down.</p>
+<pre><code class="language-sh">cargo run -p site
+</code></pre>
+<p>The landing page is hand-authored and left alone.</p>
+<h2>Cutting a release</h2>
+<p>Bump the workspace version in the root <code>Cargo.toml</code> and push to <code>main</code>. That is
+the whole trigger. CI runs the gate (tests, <code>clippy -D warnings</code>, a release
+build), produces a signed and notarized <code>Hopper.dmg</code>, publishes the GitHub
+release, and updates the Homebrew cask.</p>
+<p>The release job also asserts the app carries <strong>no</strong> virtualization entitlement.
+Nothing virtualizes any more, and carrying it would quietly widen the sandbox.</p>
+      <nav class="pager">
+        <a class="prev" href="troubleshooting.html"><span>Previous</span>Troubleshooting</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

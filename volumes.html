@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Volumes and networks — Hopper</title>
+  <meta name="description" content="Named volumes, bind mounts, and how Apple's networking differs.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html" class="active">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Volumes and networks</h1>
+      <p class="lede-sm">Named volumes, bind mounts, and how Apple's networking differs.</p>
+<h2>Volumes</h2>
+<p>Create, inspect, remove and prune. Sizes come from the engine's disk-usage report
+where it has one.</p>
+<p>Two things about volumes on <strong>Apple Containers</strong> are worth knowing before they
+bite you:</p>
+<ul>
+<li>
+<p><strong>A named volume is a real ext4 filesystem</strong>, so it arrives with a
+<code>lost+found</code> directory in it. Postgres refuses to initialise into a non-empty
+directory, so point <code>PGDATA</code> at a subdirectory:</p>
+<pre><code class="language-yaml">environment:
+  PGDATA: /var/lib/postgresql/data/pgdata
+</code></pre>
+</li>
+<li>
+<p><strong>Anonymous volumes are not removed with their container.</strong> Docker cleans them
+up on <code>--rm</code>; Apple does not. Prune them from this view.</p>
+</li>
+</ul>
+<h2>Bind mounts</h2>
+<p>Apple's runtime bind-mounts host directories directly, so there is no share list
+to maintain — which is a simplification over the VM Hopper used to run, where a
+path outside the shared set silently showed the container an empty directory.</p>
+<p>Two caveats:</p>
+<ul>
+<li>only <code>ro</code> is honoured as a mount option</li>
+<li>a bind mount performs worse than a named volume, so put databases on volumes</li>
+</ul>
+<h2>Networks</h2>
+<p>Create, inspect, remove and prune. On macOS 26 Apple gives each container an
+address on its network, reachable from the host and from other containers on the
+same network, with DNS by container name. Separate networks are genuinely
+isolated from one another.</p>
+<p>Attaching a <em>running</em> container to a network is an Engine API feature. Apple
+attaches containers to their networks when it creates them, so Hopper refuses
+rather than pretending.</p>
+      <nav class="pager">
+        <a class="prev" href="images.html"><span>Previous</span>Images</a>
+        <a class="next" href="stacks.html"><span>Next</span>Compose stacks</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

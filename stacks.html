@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Compose stacks — Hopper</title>
+  <meta name="description" content="Reading a compose file and running it, on any engine, with no Compose binary installed.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html" class="active">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Compose stacks</h1>
+      <p class="lede-sm">Reading a compose file and running it, on any engine, with no Compose binary installed.</p>
+<p>Hopper implements Compose rather than shelling out to it. It reads your
+<code>compose.yaml</code>, resolves every service down to a container, and creates them
+itself — so a stack comes up on <strong>Apple Containers with no Docker on the
+machine at all</strong>.</p>
+<p>It also groups containers into projects using the <code>com.docker.compose.*</code> labels,
+which is what the real Compose CLI writes. Both directions work: a stack
+<code>docker compose up</code> started appears in Hopper, and a stack Hopper started
+appears in <code>docker compose ls</code> on a machine that has it.</p>
+<h2>Bringing one up</h2>
+<p><strong>Open compose file…</strong> takes a <code>compose.yaml</code> or the directory holding one.
+Hopper looks for <code>compose.yaml</code>, <code>compose.yml</code>, <code>docker-compose.yaml</code> and
+<code>docker-compose.yml</code>, and layers a <code>.override.</code> file over the base if there is
+one.</p>
+<p>A project already in the list has <strong>Up</strong>, which re-reads the file its containers
+remember — Compose writes the path onto every container it creates, and so does
+Hopper, so a stack can be brought back up without finding the file again.</p>
+<p><strong>Up</strong> is safe to run on a stack that is already up. Every container carries a
+hash of the service it was created from; one that still matches is left running
+untouched, and only a service you actually edited is recreated. Running <strong>Up</strong>
+to check on a stack will not restart your database.</p>
+<p><strong>Down</strong> stops and removes the project's containers and the networks it created.
+Named volumes are kept — that is the point of a volume.</p>
+<h2>What it reads</h2>
+<p>Services: <code>image</code>, <code>command</code>, <code>environment</code>, <code>env_file</code>, <code>ports</code>, <code>volumes</code>,
+<code>networks</code>, <code>depends_on</code>, <code>labels</code>, <code>restart</code>, <code>working_dir</code>, <code>user</code>,
+<code>hostname</code>, <code>tty</code>, <code>profiles</code>, <code>container_name</code>, <code>deploy.resources.limits</code>, and
+the older <code>mem_limit</code> / <code>cpus</code>. Top level: <code>name</code>, <code>services</code>, <code>networks</code>,
+<code>volumes</code>.</p>
+<p>Variables expand the way Compose expands them — <code>${VAR}</code>, <code>${VAR:-default}</code>,
+<code>${VAR:?message}</code>, <code>$$</code> for a literal dollar — from the process environment
+overlaid on a <code>.env</code> beside the file.</p>
+<p>Relative paths resolve against the compose file's directory, not the one Hopper
+was launched from. Running Hopper from somewhere else must not change what gets
+mounted.</p>
+<h2>What it does not</h2>
+<p>Every one of these is <em>reported</em> on the service it was written on, never
+silently dropped:</p>
+<ul>
+<li><strong><code>build:</code>.</strong> Hopper does not build images. A service with a <code>build</code> and no
+<code>image</code> is refused with the reason rather than half-started; one with both
+runs from the <code>image</code>.</li>
+<li><strong><code>healthcheck:</code>.</strong> Containers are created without one, on either engine. A
+<code>depends_on</code> with <code>condition: service_healthy</code> is honoured as ordering only —
+the service it names is started first, not waited on until healthy.</li>
+<li><strong>A second network.</strong> A container is created on one network; the others are
+named in the output.</li>
+<li><strong><code>deploy.replicas</code>.</strong> One container per service.</li>
+<li><strong><code>entrypoint:</code>.</strong> Containers get the image's own.</li>
+<li><strong>Port ranges</strong> like <code>8000-8010:8000-8010</code>.</li>
+<li><strong>Anonymous volumes</strong> — a mount with no source or name.</li>
+<li>Anything else the file declares that Hopper has no implementation for, listed
+by key.</li>
+</ul>
+<p>On Apple Containers, <code>restart:</code> is reported too, since that runtime has no
+restart policy.</p>
+<h2>Where the names come from</h2>
+<p>Compose's own, because the two have to agree on them: containers are
+<code>project-service-1</code>, networks and volumes are <code>project_name</code>, and the project
+is the <code>name:</code> in the file, else the directory it sits in.</p>
+      <nav class="pager">
+        <a class="prev" href="volumes.html"><span>Previous</span>Volumes and networks</a>
+        <a class="next" href="import.html"><span>Next</span>Import from Docker</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

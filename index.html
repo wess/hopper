@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hopper — Docker, without the Desktop</title>
+  <meta name="description" content="A native Rust desktop app for containers. On macOS it runs them on Apple Containers, so Docker Desktop is not required — and imports your images across when you switch. On Linux it drives the Docker or Podman you already have.">
+  <meta name="theme-color" content="#0c1018">
+  <meta property="og:title" content="Hopper — Docker, without the Desktop">
+  <meta property="og:description" content="Containers on macOS without Docker Desktop. Native Rust on Apple's container runtime, with an import that brings your Docker images across.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="aurora" aria-hidden="true"></div>
+  <div class="grid-floor" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/>
+        <rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/>
+      </svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="#workflow">Workflow</a>
+      <a href="#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <main id="main">
+    <section class="hero wrap">
+      <p class="eyebrow" data-reveal><span class="dot"></span>Native Rust · gpui + guise · Apple Containers</p>
+      <h1 class="title" data-reveal data-delay="1">Docker,<br>without the <em>Desktop.</em></h1>
+      <p class="lede" data-reveal data-delay="2">
+        On macOS, Hopper runs your containers on <strong>Apple Containers</strong> — the
+        runtime Apple ships with macOS 26, where every container is its own lightweight VM.
+        On Linux it uses the <strong>Docker or Podman</strong> you already have. Either way,
+        <strong>Import from Docker</strong> brings your images across first.
+      </p>
+      <div class="actions" data-reveal data-delay="3">
+        <a class="button primary" href="install.html">Install Hopper →</a>
+        <a class="button ghost" href="#workflow">See it work</a>
+        <span class="install"><b>brew</b> install --cask <code>wess/packages/hopper</code></span>
+      </div>
+
+      <figure class="stage" data-reveal data-delay="4">
+        <div class="halo" aria-hidden="true"></div>
+        <div class="window"><img src="assets/shots/dashboard.png" alt="Hopper dashboard showing running containers, image and CPU counts, and disk usage with a one-click cleanup." width="1760" loading="eager"></div>
+        <figcaption>Hopper v0.7.0 · connected to its own engine</figcaption>
+      </figure>
+    </section>
+
+    <div class="strip wrap" data-reveal>
+      <span><b>One binary.</b> No Electron, no browser.</span>
+      <span><b>Apple's runtime.</b> No Docker Desktop.</span>
+      <span><b>Zero telemetry.</b> Local by design.</span>
+      <span><b>Docker or Podman</b> on Linux.</span>
+    </div>
+
+    <!-- workflow / features -->
+    <section id="workflow" class="wrap">
+      <div class="section-head" data-reveal>
+        <p class="kicker">The daily loop</p>
+        <h2>Everything you reach for, <em>rendered natively.</em></h2>
+        <p>Containers, images, volumes, networks, and compose stacks — with a detail pane that
+          streams logs and stats, browses the filesystem, and opens a real shell.</p>
+      </div>
+
+      <div style="margin-top: clamp(3rem, 7vh, 5rem)">
+        <div class="feature">
+          <div class="copy" data-reveal>
+            <span class="tag">Files</span>
+            <h3>Pull a file out of a container.</h3>
+            <p>Browse a container's filesystem in a real tree — sizes, modes, symlinks — and copy
+              files out. The operation you reach for daily, that no Docker GUI made simple.</p>
+            <a class="more" href="containers.html">How the detail pane works →</a>
+          </div>
+          <div class="shot" data-reveal data-delay="1"><img src="assets/shots/files.png" alt="The Files tab showing a container's root filesystem with directories, permissions, and file sizes." width="1760" loading="lazy"></div>
+        </div>
+
+        <div class="feature">
+          <div class="copy" data-reveal>
+            <span class="tag">Terminal</span>
+            <h3>A shell that's actually a shell.</h3>
+            <p>Interactive exec over a hijacked socket, with a real terminal model that interprets
+              escape sequences — <code>top</code>, <code>vim</code>, and colour render, not garble.</p>
+            <a class="more" href="containers.html">Exec &amp; terminal →</a>
+          </div>
+          <div class="shot" data-reveal data-delay="1"><img src="assets/shots/terminal.png" alt="The Terminal tab with a live bash prompt inside a running container." width="1760" loading="lazy"></div>
+        </div>
+
+        <div class="feature">
+          <div class="copy" data-reveal>
+            <span class="tag">Stats</span>
+            <h3>Live meters, not spinners.</h3>
+            <p>CPU, memory (page-cache excluded, like Docker Desktop), network, block-IO, and PID
+              counts stream in as fast as the daemon samples them.</p>
+            <a class="more" href="containers.html">Streaming internals →</a>
+          </div>
+          <div class="shot" data-reveal data-delay="1"><img src="assets/shots/stats.png" alt="The Stats tab showing live CPU, memory, network, block-IO, and PID meters." width="1760" loading="lazy"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- the engine — the differentiator -->
+    <section id="engine" class="engine">
+      <div class="wrap">
+        <div class="section-head" data-reveal style="grid-column: 1 / -1; margin-bottom: 2.5rem">
+          <p class="kicker">The engine</p>
+          <h2>Apple's runtime, <em>driven properly.</em></h2>
+          <p>macOS 26 ships a container runtime Apple maintains. Hopper installs it, starts it,
+            and speaks to it — and is honest about the parts of Docker it does not have.</p>
+        </div>
+
+        <ol class="pipeline" data-reveal>
+          <li><span class="n"></span><div><h4>Installs it for you</h4><p>If Apple's <code>container</code> is missing, Hopper fetches the package Apple signed and hands it to the system installer. Hopper never elevates.</p></div></li>
+          <li><span class="n"></span><div><h4>A VM per container</h4><p>Stronger isolation than a shared kernel, and on macOS 26 containers reach each other by name across isolated networks.</p></div></li>
+          <li><span class="n"></span><div><h4>Imports from Docker</h4><p>Copies your images, networks and containers out of Docker Desktop, Colima or Rancher Desktop. Nothing is removed from the source.</p></div></li>
+          <li><span class="n"></span><div><h4>Says what it cannot do</h4><p>Apple's runtime has no pause, rename, restart policy or healthchecks. Hopper hides those rather than offering a button that fails.</p></div></li>
+        </ol>
+
+        <div class="termcard" data-reveal data-delay="1">
+          <div class="bar"><i></i><i></i><i></i><b>zsh — no Docker Desktop installed</b></div>
+<pre><span class="c"># Hopper is serving its own engine</span>
+<span class="p">$</span> <span class="o">docker version --format '{{.Server.Version}} ({{.Server.Os}}/{{.Server.Arch}})'</span>
+27.5.1 (linux/arm64)
+
+<span class="p">$</span> <span class="o">docker run --rm -p 18080:80 nginx:alpine &amp;</span>
+<span class="p">$</span> <span class="o">curl -s localhost:18080 | head -1</span>
+<span class="g">HTTP/1.1 200 OK</span>
+
+<span class="p">$</span> <span class="o">docker run --rm -v /opt/data:/data alpine ls /data</span>
+<span class="g">your-actual-files.txt</span></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- capabilities -->
+    <section class="wrap">
+      <div class="section-head" data-reveal>
+        <p class="kicker">Parity, and then some</p>
+        <h2>A real replacement — <em>not a viewer.</em></h2>
+      </div>
+      <div class="caps" data-reveal data-delay="1">
+        <div><h4>Build with BuildKit</h4><p>Dockerfiles with <code>--mount=cache</code>, secrets, and <code>--platform</code>, plus honest <code>.dockerignore</code> negations.</p></div>
+        <div><h4>Registries, signed in</h4><p>Push and pull with keychain-stored credentials; authenticated pulls lift Hub rate limits.</p></div>
+        <div><h4>Compose stacks</h4><p>Reconstructed from labels — stacks appear with no CLI, and start and stop label-driven.</p></div>
+        <div><h4>Migrate in</h4><p>Scan Docker Desktop, Colima, or Rancher and copy images, volumes, and networks over.</p></div>
+        <div><h4>MCP server</h4><p>A stdio Model Context Protocol server exposes Docker tools to AI clients.</p></div>
+      </div>
+    </section>
+
+    <section class="closing wrap">
+      <p class="kicker" data-reveal>Ship it</p>
+      <h2 data-reveal data-delay="1">Keep Docker.<br>Lose the Desktop.</h2>
+      <div class="actions" data-reveal data-delay="2">
+        <a class="button primary" href="install.html">Read the install guide →</a>
+        <a class="button ghost" href="https://github.com/wess/hopper">Explore the source</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <a class="brand" href="index.html">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+        Hopper
+      </a>
+      <nav>
+        <a href="docs.html">Documentation</a>
+        <a href="tutorials.html">Tutorials</a>
+        <a href="https://github.com/wess/hopper">GitHub ↗</a>
+        <a href="https://github.com/sponsors/wess">♥ Sponsor</a>
+      </nav>
+      <p>Open source under MIT · the engine inside is Apache-2.0 · your containers stay on your machine.</p>
+    </div>
+  </footer>
+</body>
+</html>
