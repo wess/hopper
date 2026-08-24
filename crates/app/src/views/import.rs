@@ -365,8 +365,13 @@ impl Render for Import {
             body = body.child(notes);
         }
 
+        // The pane is bounded by the window, and "Worth knowing" grows with
+        // whatever the scan could not copy exactly — an import with a lot to
+        // say ran off the bottom with no way to reach it.
         div()
+            .id("import-scroll")
             .size_full()
+            .overflow_y_scroll()
             .p_6()
             .child(
                 div()

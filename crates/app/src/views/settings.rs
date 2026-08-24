@@ -364,7 +364,7 @@ impl Render for Settings {
                     .child(Text::new("Settings").size(Size::Xl).bold()),
             )
             .child(
-                div().flex_1().overflow_hidden().p_4().child(
+                div().id("settings-scroll").flex_1().overflow_y_scroll().p_4().child(
                     Stack::new()
                         .gap(Size::Md)
                         .child(self.section("Engine", engine_body, cx))
