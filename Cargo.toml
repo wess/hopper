@@ -29,7 +29,7 @@ repository = "https://github.com/wess/hopper"
 # forces the zed-rev gpui pin that Sinclair needs. `default-features = false`
 # drops guise's `webview` feature — Hopper draws no web content.
 gpui = "0.2.2"
-guise-ui = { version = "1.2.1", default-features = false }
+guise-ui = { version = "1.4.0", default-features = false }
 
 # Async runtime. Every Docker call, stream, and engine process runs here; the
 # gpui app reaches it through the one bridge seam in `app::bridge`.

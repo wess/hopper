@@ -368,12 +368,8 @@ impl Render for Import {
         // The pane is bounded by the window, and "Worth knowing" grows with
         // whatever the scan could not copy exactly — an import with a lot to
         // say ran off the bottom with no way to reach it.
-        div()
-            .id("import-scroll")
-            .size_full()
-            .overflow_y_scroll()
-            .p_6()
-            .child(
+        ScrollArea::new("import-scroll").fill().child(
+            div().p_6().child(
                 div()
                     .max_w(px(680.0))
                     .p_6()
@@ -382,7 +378,8 @@ impl Render for Import {
                     .border_1()
                     .border_color(palette.border_subtle)
                     .child(body),
-            )
+            ),
+        )
     }
 }
 

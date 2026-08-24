@@ -387,13 +387,15 @@ impl Render for Settings {
                     .child(Text::new("Settings").size(Size::Xl).bold()),
             )
             .child(
-                div().id("settings-scroll").flex_1().overflow_y_scroll().p_4().child(
-                    Stack::new()
-                        .gap(Size::Md)
-                        .child(self.section("Engine", engine_body, cx))
-                        .child(self.section("Which engine", choice_body, cx))
-                        .child(self.section("Docker CLI", cli_body, cx))
-                        .child(self.section("Appearance", theme_body, cx)),
+                ScrollArea::new("settings-scroll").fill().child(
+                    div().p_4().child(
+                        Stack::new()
+                            .gap(Size::Md)
+                            .child(self.section("Engine", engine_body, cx))
+                            .child(self.section("Which engine", choice_body, cx))
+                            .child(self.section("Docker CLI", cli_body, cx))
+                            .child(self.section("Appearance", theme_body, cx)),
+                    ),
                 ),
             )
     }
