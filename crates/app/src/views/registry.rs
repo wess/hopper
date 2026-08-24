@@ -376,6 +376,7 @@ impl Render for Registry {
                             .gap_2()
                             .child(self.source_button(RegistrySource::DockerHub, cx))
                             .child(self.source_button(RegistrySource::Ghcr, cx))
+                            .child(self.source_button(RegistrySource::Quay, cx))
                             .child(div().flex_1().child(self.query.clone())),
                     ),
             )

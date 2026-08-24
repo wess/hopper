@@ -11,6 +11,9 @@ use serde::Deserialize;
 
 const HUB_SEARCH: &str = "https://hub.docker.com/v2/search/repositories/";
 const GITHUB_SEARCH: &str = "https://api.github.com/search/repositories";
+// Quay takes no page size: it returns ten a page and reports the rest in
+// `has_additional`, so asking for more is ignored rather than honoured.
+const QUAY_SEARCH: &str = "https://quay.io/api/v1/find/repositories";
 const PAGE: &str = "25";
 
 /// One HTTP client per search. A `User-Agent` is not optional: GitHub rejects
@@ -31,9 +34,7 @@ pub async fn search(source: RegistrySource, query: &str) -> anyhow::Result<Vec<R
     match source {
         RegistrySource::DockerHub => docker_hub(query).await,
         RegistrySource::Ghcr => github(query).await,
-        // Quay's search API is modelled but not wired up yet; offering it in the
-        // UI before it returns real results would be worse than leaving it out.
-        RegistrySource::Quay => Ok(Vec::new()),
+        RegistrySource::Quay => quay(query).await,
     }
 }
 
@@ -135,4 +136,156 @@ async fn github(query: &str) -> anyhow::Result<Vec<RegistryResult>> {
             updated: None,
         })
         .collect())
+}
+
+#[derive(Deserialize)]
+struct QuayResponse {
+    #[serde(default)]
+    results: Vec<QuayItem>,
+}
+
+#[derive(Deserialize)]
+struct QuayItem {
+    name: String,
+    namespace: QuayNamespace,
+    /// Null on plenty of repositories, not just empty.
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    is_public: bool,
+    /// `/repository/org/name`, relative to quay.io.
+    #[serde(default)]
+    href: String,
+    /// `find/repositories` also answers with organisations and applications.
+    #[serde(default)]
+    kind: String,
+}
+
+#[derive(Deserialize)]
+struct QuayNamespace {
+    #[serde(default)]
+    name: String,
+}
+
+async fn quay(query: &str) -> anyhow::Result<Vec<RegistryResult>> {
+    let resp: QuayResponse = client()?
+        .get(QUAY_SEARCH)
+        .query(&[("query", query)])
+        .send()
+        .await
+        .context("searching Quay")?
+        .error_for_status()
+        .context("Quay search failed")?
+        .json()
+        .await
+        .context("reading the Quay response")?;
+
+    Ok(quay_results(resp))
+}
+
+/// Quay hits as pullable references.
+///
+/// Two things are dropped rather than shown: a hit that is not a repository
+/// (the endpoint also answers with organisations), and a private one, which
+/// nobody browsing anonymously can pull.
+fn quay_results(resp: QuayResponse) -> Vec<RegistryResult> {
+    resp.results
+        .into_iter()
+        .filter(|it| it.kind == "repository" && it.is_public)
+        .map(|it| {
+            let path = format!("{}/{}", it.namespace.name, it.name);
+            RegistryResult {
+                source: RegistrySource::Quay,
+                reference: format!("quay.io/{path}"),
+                description: it.description.unwrap_or_default(),
+                url: if it.href.is_empty() {
+                    format!("https://quay.io/repository/{path}")
+                } else {
+                    format!("https://quay.io{}", it.href)
+                },
+                name: path,
+                // Quay publishes no star count, and its `score` is search
+                // relevance rather than popularity — showing it as stars would
+                // be inventing a number. -1 is what hides the badge.
+                stars: -1,
+                // No official-image programme to mark.
+                official: false,
+                updated: None,
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Trimmed from a real `find/repositories?query=nginx` response.
+    const NGINX: &str = r#"{"results":[
+      {"kind":"repository","title":"repo","name":"nginx-unprivileged",
+       "namespace":{"title":"org","kind":"organization","name":"nginx"},
+       "description":"","is_public":true,"score":4,
+       "href":"/repository/nginx/nginx-unprivileged"},
+      {"kind":"repository","title":"repo","name":"nginxolm-operator-bundle",
+       "namespace":{"title":"org","kind":"organization","name":"openshifttest"},
+       "description":null,"is_public":true,"score":4,
+       "href":"/repository/openshifttest/nginxolm-operator-bundle"}
+    ]}"#;
+
+    fn parsed(json: &str) -> Vec<RegistryResult> {
+        quay_results(serde_json::from_str(json).expect("quay response parses"))
+    }
+
+    #[test]
+    fn a_quay_hit_becomes_a_reference_docker_pull_would_take() {
+        let hits = parsed(NGINX);
+        assert_eq!(hits[0].reference, "quay.io/nginx/nginx-unprivileged");
+        assert_eq!(hits[0].name, "nginx/nginx-unprivileged");
+        assert_eq!(
+            hits[0].url,
+            "https://quay.io/repository/nginx/nginx-unprivileged"
+        );
+        assert_eq!(hits[0].source, RegistrySource::Quay);
+    }
+
+    #[test]
+    fn a_null_description_reads_as_empty_rather_than_failing_the_search() {
+        // Quay sends `null`, not `""`, on plenty of repositories.
+        let hits = parsed(NGINX);
+        assert_eq!(hits[1].description, "");
+        assert_eq!(hits[1].reference, "quay.io/openshifttest/nginxolm-operator-bundle");
+    }
+
+    #[test]
+    fn quay_reports_no_stars_rather_than_passing_off_its_relevance_score() {
+        // `score` is how well the hit matched, not how popular it is. -1 is
+        // what keeps the star badge off the row.
+        let hits = parsed(NGINX);
+        assert!(hits.iter().all(|h| h.stars == -1));
+        assert!(hits.iter().all(|h| !h.official));
+    }
+
+    #[test]
+    fn private_repositories_and_non_repositories_are_left_out() {
+        // The endpoint also answers with organisations, and a private repo is
+        // one nobody browsing anonymously could pull.
+        let hits = parsed(
+            r#"{"results":[
+              {"kind":"organization","name":"redhat","namespace":{"name":"redhat"},
+               "is_public":true,"href":"/organization/redhat"},
+              {"kind":"repository","name":"secret","namespace":{"name":"acme"},
+               "is_public":false,"href":"/repository/acme/secret"},
+              {"kind":"repository","name":"open","namespace":{"name":"acme"},
+               "is_public":true,"href":"/repository/acme/open"}
+            ]}"#,
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].reference, "quay.io/acme/open");
+    }
+
+    #[test]
+    fn a_response_with_nothing_in_it_is_no_results_rather_than_an_error() {
+        assert!(parsed(r#"{"results":[]}"#).is_empty());
+        assert!(parsed("{}").is_empty());
+    }
 }
