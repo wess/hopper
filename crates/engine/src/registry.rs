@@ -355,11 +355,23 @@ mod tests {
     async fn a_mac_falls_forward_to_the_engine_hopper_can_supply() {
         // Docker is not a requirement on macOS, so a fallback with nothing
         // behind it has to lead to Apple's runtime — installed or not.
+        //
+        // A Mac too old for that runtime is the one case with nowhere to go,
+        // and declining is the documented answer. CI runs macOS 14 and a dev
+        // machine runs 26, so both halves have to be asserted — but `None` is
+        // only allowed for that reason, or a real regression would pass here.
         let r = registry();
-        let status = r.fall_forward().await.expect("macOS has an engine of its own");
-        assert_eq!(status.provider, "apple");
-        assert!(status.managed);
-        assert_eq!(r.active_id(), "apple", "and it becomes the active provider");
+        match r.fall_forward().await {
+            Some(status) => {
+                assert_eq!(status.provider, "apple");
+                assert!(status.managed);
+                assert_eq!(r.active_id(), "apple", "and it becomes the active provider");
+            }
+            None => assert!(
+                apple::system::too_old().is_some(),
+                "a Mac new enough for Apple's runtime must not refuse to fall forward"
+            ),
+        }
     }
 
     #[tokio::test]
