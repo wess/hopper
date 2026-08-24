@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn a_missing_socket_on_a_managed_engine_offers_to_start_it() {
         let err = DockerError::transport("no such file");
-        let s = classify(&err, "vz", true, "unix:/x.sock");
+        let s = classify(&err, "apple", true, "unix:/x.sock");
         assert_eq!(s.state, EngineState::Stopped);
         assert!(s.managed, "a managed engine is one the UI can start");
         assert!(s.message.contains("Hopper's engine"));
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn connected_status_reports_the_daemon_version() {
-        let s = connected("vz", true, "unix:/x.sock", "27.5.1");
+        let s = connected("apple", true, "unix:/x.sock", "27.5.1");
         assert_eq!(s.state, EngineState::Connected);
         assert!(s.connected);
         assert!(s.message.contains("27.5.1"));

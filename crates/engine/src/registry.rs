@@ -123,7 +123,7 @@ impl Registry {
     pub async fn select(&self, setting: Option<&str>) -> EngineStatus {
         let env = std::env::var("HOPPER_ENGINE").ok();
         let want = preferred(env.as_deref(), setting, std::env::consts::OS);
-        let chosen_by_user = is_explicit(env.as_deref(), setting);
+        let chosen_by_user = self.honours_preference(env.as_deref(), setting, &want);
 
         let mut order: Vec<String> = vec![want];
         for id in candidates_for(std::env::consts::OS) {
@@ -173,6 +173,17 @@ impl Registry {
         };
         let status = active.status().await;
         self.enrich(status).await
+    }
+
+    /// Whether a preference names an engine this machine actually has.
+    ///
+    /// An explicit setting that resolves to no provider is not a choice Hopper
+    /// can honour: `vz` was retired in v0.11.0 and is still sitting in settings
+    /// files. Counting it as a choice suppressed the fall-forward, so the very
+    /// people it exists for — a Mac with no Docker — were told "no Docker
+    /// engine is running" rather than being offered the engine Hopper supplies.
+    fn honours_preference(&self, env: Option<&str>, setting: Option<&str>, want: &str) -> bool {
+        is_explicit(env, setting) && self.get(want).is_some()
     }
 
     /// Point the Docker client at a provider and record it as the active one.
@@ -401,6 +412,33 @@ mod tests {
         let status = r.select(Some("apple")).await;
         assert_eq!(status.provider, "apple");
         assert_eq!(r.active_id(), "apple");
+    }
+
+    #[test]
+    fn a_pin_on_a_retired_engine_reads_as_no_preference() {
+        // `vz` was deleted in v0.11.0 and is still in settings files. It is an
+        // explicit setting that names nothing, and counting it as a choice is
+        // what suppressed the fall-forward on a Mac with no Docker.
+        let r = registry();
+        assert!(r.get("vz").is_none(), "the retired engine really is gone");
+        assert!(
+            is_explicit(None, Some("vz")),
+            "it is still an explicitly written setting"
+        );
+        assert!(!r.honours_preference(None, Some("vz"), "vz"));
+    }
+
+    #[test]
+    fn a_pin_on_an_engine_that_is_here_is_still_honoured() {
+        let r = registry();
+        assert!(r.honours_preference(None, Some("existing"), "existing"));
+        assert!(r.honours_preference(Some("existing"), None, "existing"));
+    }
+
+    #[test]
+    fn taking_the_default_is_not_a_preference_to_honour() {
+        let r = registry();
+        assert!(!r.honours_preference(None, None, "existing"));
     }
 
     #[tokio::test]

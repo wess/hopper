@@ -73,7 +73,7 @@ pub struct EngineStatus {
     pub connected: bool,
     /// Human one-liner; also feeds the activity banner.
     pub message: String,
-    /// Active provider id ("vz" | "linux" | "existing" | …).
+    /// Active provider id ("apple" | "docker" | "podman" | "existing" | …).
     pub provider: String,
     /// Does Hopper own this engine's lifecycle?
     pub managed: bool,
