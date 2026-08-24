@@ -5,11 +5,9 @@
 //! without a project directory on disk. It is pure over a container list, so
 //! it tests without a daemon.
 
+use compose::names::{CONFIG_FILES, WORKING_DIR};
 use model::{ComposeProject, ComposeService, Container, ContainerState};
 use std::collections::BTreeMap;
-
-const CONFIG_FILES: &str = "com.docker.compose.project.config_files";
-const WORKING_DIR: &str = "com.docker.compose.project.working_dir";
 
 /// Group containers into the compose projects they belong to.
 ///
@@ -97,12 +95,13 @@ pub fn can_start_from_files(project: &ComposeProject) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use compose::names::PROJECT;
     use model::{ComposeStackStatus, Health};
 
     fn container(name: &str, project: Option<&str>, service: Option<&str>, state: ContainerState) -> Container {
         let mut labels = BTreeMap::new();
         if let Some(p) = project {
-            labels.insert("com.docker.compose.project".to_string(), p.to_string());
+            labels.insert(PROJECT.to_string(), p.to_string());
             labels.insert(
                 CONFIG_FILES.to_string(),
                 "/srv/app/compose.yaml,/srv/app/compose.override.yaml".to_string(),

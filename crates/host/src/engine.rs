@@ -5,7 +5,7 @@
 //! actually driven, rather than existing and never being called.
 
 use engine::Registry;
-use model::{EngineResources, EngineStatus};
+use model::{EngineChoice, EngineResources, EngineStatus};
 use std::sync::Arc;
 
 pub struct Engines {
@@ -26,6 +26,11 @@ impl Engines {
     /// Choose a provider and point the Docker client at it.
     pub async fn select(&self, preference: Option<&str>) -> EngineStatus {
         self.registry.select(preference).await
+    }
+
+    /// Every engine this machine could be pointed at.
+    pub async fn choices(&self) -> Vec<EngineChoice> {
+        self.registry.choices().await
     }
 
     pub async fn status(&self) -> EngineStatus {

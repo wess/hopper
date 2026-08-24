@@ -80,6 +80,15 @@ you mean it.</p>
 <h2>Anywhere — an engine you already run</h2>
 <p>Docker Desktop, Colima, Rancher Desktop, or a daemon over TCP. This one is
 always available and always last, so Hopper stays useful whatever else fails.</p>
+<h2>When nothing is running</h2>
+<p>The fallback never disqualifies itself, so landing on it proves nothing is
+listening. On a platform with an engine of its own, that is exactly when Hopper
+offers <em>that</em> engine instead of reporting a missing Docker. A Mac with neither
+Docker nor Apple's runtime gets the install offer, not a dead end about the
+thing Hopper exists to replace.</p>
+<p>It keeps looking, too. An engine that appears after launch — Docker Desktop
+started by hand, Apple's runtime finishing its install — is picked up by the
+status poll without restarting Hopper.</p>
 <h2>What each engine can do</h2>
 <p>Apple's runtime is not the Docker Engine API, and Hopper does not pretend
 otherwise. It publishes no Docker socket — <a href="https://github.com/apple/container/issues/636">the request for one was closed as
@@ -97,11 +106,15 @@ to it through the <code>container</code> command instead. Some things are simply
 <tr><td>Live stats</td><td>yes</td><td>not yet</td></tr>
 <tr><td>Shell into a container</td><td>yes</td><td>not yet</td></tr>
 <tr><td>Browse the filesystem</td><td>yes</td><td>not yet</td></tr>
-<tr><td>Compose</td><td>yes</td><td><strong>no</strong></td></tr>
+<tr><td>Compose</td><td>yes</td><td>yes, Hopper's own</td></tr>
 </tbody></table>
 <p>Hopper hides what an engine cannot do rather than offering a button that always
 fails. On Apple Containers the detail pane shows Logs and Inspect instead of five
-tabs where three cannot load, and Stacks leaves the sidebar entirely.</p>
+tabs where three cannot load.</p>
+<p>Compose is the exception, and deliberately so. Apple ships none and publishes no
+socket for the real one to reach, so rather than hide the feature Hopper reads
+the compose file and creates the containers itself — see
+<a href="stacks.html">Stacks</a>.</p>
 <p>If you need any of it, switch engines under <strong>Settings → Engine</strong>.</p>
 <h2>Choosing one yourself</h2>
 <p><code>HOPPER_ENGINE</code> overrides everything, then the saved setting, then the platform
@@ -109,6 +122,9 @@ default:</p>
 <pre><code class="language-sh">HOPPER_ENGINE=existing /Applications/Hopper.app/Contents/MacOS/hopper
 </code></pre>
 <p>Valid ids are <code>apple</code>, <code>linux</code>, and <code>existing</code>.</p>
+<p>An engine you name is honoured even when it cannot run yet — Hopper reports on
+the one you asked for and what it needs, rather than quietly answering about a
+different one.</p>
       <nav class="pager">
         <a class="prev" href="install.html"><span>Previous</span>Install</a>
         <a class="next" href="firstrun.html"><span>Next</span>First run</a>

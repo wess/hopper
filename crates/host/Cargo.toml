@@ -9,6 +9,7 @@ authors.workspace = true
 model = { workspace = true }
 store = { workspace = true }
 docker = { workspace = true }
+compose = { workspace = true }
 engine = { workspace = true }
 migrate = { workspace = true }
 

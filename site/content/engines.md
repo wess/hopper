@@ -39,6 +39,18 @@ you mean it.
 Docker Desktop, Colima, Rancher Desktop, or a daemon over TCP. This one is
 always available and always last, so Hopper stays useful whatever else fails.
 
+## When nothing is running
+
+The fallback never disqualifies itself, so landing on it proves nothing is
+listening. On a platform with an engine of its own, that is exactly when Hopper
+offers *that* engine instead of reporting a missing Docker. A Mac with neither
+Docker nor Apple's runtime gets the install offer, not a dead end about the
+thing Hopper exists to replace.
+
+It keeps looking, too. An engine that appears after launch — Docker Desktop
+started by hand, Apple's runtime finishing its install — is picked up by the
+status poll without restarting Hopper.
+
 ## What each engine can do
 
 Apple's runtime is not the Docker Engine API, and Hopper does not pretend
@@ -59,11 +71,16 @@ to it through the `container` command instead. Some things are simply not there:
 | Live stats | yes | not yet |
 | Shell into a container | yes | not yet |
 | Browse the filesystem | yes | not yet |
-| Compose | yes | **no** |
+| Compose | yes | yes, Hopper's own |
 
 Hopper hides what an engine cannot do rather than offering a button that always
 fails. On Apple Containers the detail pane shows Logs and Inspect instead of five
-tabs where three cannot load, and Stacks leaves the sidebar entirely.
+tabs where three cannot load.
+
+Compose is the exception, and deliberately so. Apple ships none and publishes no
+socket for the real one to reach, so rather than hide the feature Hopper reads
+the compose file and creates the containers itself — see
+[Stacks](stacks.html).
 
 If you need any of it, switch engines under **Settings → Engine**.
 
@@ -77,3 +94,7 @@ HOPPER_ENGINE=existing /Applications/Hopper.app/Contents/MacOS/hopper
 ```
 
 Valid ids are `apple`, `linux`, and `existing`.
+
+An engine you name is honoured even when it cannot run yet — Hopper reports on
+the one you asked for and what it needs, rather than quietly answering about a
+different one.

@@ -1,7 +1,8 @@
 //! Compose stacks: projects reconstructed from container labels, lifecycle
-//! actions, and the streamed output of a `docker compose` run.
+//! actions, the plan a compose file resolves to, and the output a run streams
+//! back.
 
-use super::container::{ContainerState, Port};
+use super::container::{ContainerState, Port, RunInput};
 use serde::{Deserialize, Serialize};
 
 /// One line of output from a compose run, streamed to the UI. `done` marks the
@@ -88,6 +89,102 @@ impl ComposeProject {
         }
         seen
     }
+}
+
+/// A compose file turned into something an engine can actually run.
+///
+/// Hopper implements Compose itself rather than shelling out to it — on macOS
+/// the engine publishes no Docker socket, so there is nothing for the real
+/// `docker compose` to talk to. This is the handover: everything resolved,
+/// ordered, and named the way Compose names it, so a stack Hopper brings up is
+/// the same stack `docker compose` would find.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposePlan {
+    pub project: String,
+    /// Where relative paths in the file resolved against.
+    pub working_dir: String,
+    pub config_files: Vec<String>,
+    pub networks: Vec<ComposeNetwork>,
+    pub volumes: Vec<ComposeVolume>,
+    /// Services in the order they have to start.
+    pub services: Vec<ComposePlanService>,
+    /// File-level notes: an unset variable, a key Hopper does not implement.
+    #[serde(default)]
+    pub warnings: Vec<String>,
+}
+
+impl ComposePlan {
+    /// The services that will actually be started, given the active profiles.
+    ///
+    /// A service in a profile nobody asked for is not part of this run, and a
+    /// blocked one cannot be part of any.
+    pub fn runnable(&self) -> Vec<&ComposePlanService> {
+        self.services
+            .iter()
+            .filter(|s| s.blocked.is_none() && s.selected)
+            .collect()
+    }
+
+    /// Every warning in the plan, file-level and per-service, ready to show.
+    pub fn all_warnings(&self) -> Vec<String> {
+        let mut out = self.warnings.clone();
+        for s in &self.services {
+            for w in &s.warnings {
+                out.push(format!("{}: {w}", s.service));
+            }
+            if let Some(blocked) = &s.blocked {
+                out.push(format!("{}: {blocked}", s.service));
+            }
+        }
+        out
+    }
+}
+
+/// A network the stack needs. `external` ones are expected to exist already.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposeNetwork {
+    pub name: String,
+    #[serde(default)]
+    pub external: bool,
+    #[serde(default)]
+    pub internal: bool,
+}
+
+/// A named volume the stack needs.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposeVolume {
+    pub name: String,
+    #[serde(default)]
+    pub external: bool,
+}
+
+/// One service, resolved down to a container Hopper knows how to create.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposePlanService {
+    pub service: String,
+    pub run: RunInput,
+    /// Services that must be up first, already resolved to real names.
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub profiles: Vec<String>,
+    /// Whether the active profiles select this service for the run.
+    #[serde(default)]
+    pub selected: bool,
+    /// Networks beyond the one the container is created on. An engine that
+    /// attaches only one at create time reports the rest here.
+    #[serde(default)]
+    pub extra_networks: Vec<String>,
+    /// Why this service cannot start here at all, if it cannot.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub blocked: Option<String>,
+    /// What was asked for that this engine will not do.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 /// A lifecycle action over a whole stack. `Remove` is a full teardown

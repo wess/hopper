@@ -1,15 +1,24 @@
 //! Choosing a provider and pointing the Docker client at it.
 
-use crate::provider::{candidates_for, preferred, Provider};
+use crate::provider::{candidates_for, is_explicit, preferred, Provider};
 use crate::providers::{Existing, Linux};
 use docker::client::Client;
-use model::{EngineState, EngineStatus, RuntimeKind};
+use model::{EngineChoice, EngineState, EngineStatus, RuntimeKind};
 use std::sync::Arc;
 
 pub struct Registry {
     client: Client,
     providers: Vec<Arc<dyn Provider>>,
     active: std::sync::RwLock<String>,
+}
+
+/// Whether landing on this provider should be second-guessed.
+///
+/// Three ways to answer no: it connected, so it is a real engine; it is the
+/// managed one already; or the user named it themselves, and selection does
+/// not overrule a person.
+fn should_fall_forward(status: &EngineStatus, managed: bool, chosen_by_user: bool) -> bool {
+    !status.connected && !managed && !chosen_by_user
 }
 
 impl Registry {
@@ -62,11 +71,41 @@ impl Registry {
         self.active().map(|p| p.runtime()).unwrap_or_default()
     }
 
+    /// The engines this machine could be pointed at, for the settings picker.
+    ///
+    /// Platform candidates only — the Linux daemons are not a choice on a Mac,
+    /// and a row saying so would be noise. Unavailable candidates *are* listed,
+    /// with the reason: "not installed yet" is a thing to act on, where an
+    /// absent row is a thing to wonder about.
+    pub async fn choices(&self) -> Vec<EngineChoice> {
+        let ids = candidates_for(std::env::consts::OS);
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            let Some(p) = self.get(id) else { continue };
+            let available = p.available().await;
+            let reason = if available {
+                None
+            } else {
+                // The provider's own status says why far better than we could.
+                Some(p.status().await.message)
+            };
+            out.push(EngineChoice {
+                id: p.id().to_string(),
+                label: p.label().to_string(),
+                available,
+                managed: p.managed(),
+                reason,
+            });
+        }
+        out
+    }
+
     /// Pick the first available provider in preference order, and point the
     /// Docker client at whatever it says.
     pub async fn select(&self, setting: Option<&str>) -> EngineStatus {
         let env = std::env::var("HOPPER_ENGINE").ok();
         let want = preferred(env.as_deref(), setting, std::env::consts::OS);
+        let chosen_by_user = is_explicit(env.as_deref(), setting);
 
         let mut order: Vec<String> = vec![want];
         for id in candidates_for(std::env::consts::OS) {
@@ -75,16 +114,27 @@ impl Registry {
             }
         }
 
-        for id in &order {
+        for (rank, id) in order.iter().enumerate() {
             let Some(provider) = self.get(id) else { continue };
-            if !provider.available().await {
+            // The engine the user named is selected even when it cannot run:
+            // its own status says why, and that is the answer they asked for.
+            // Falling through would report on some other engine entirely —
+            // "no Docker engine is running" to someone who asked for Apple's.
+            let named = chosen_by_user && rank == 0;
+            if !named && !provider.available().await {
                 continue;
             }
-            if let Some(ep) = provider.endpoint().await {
-                self.client.set_endpoint(ep);
-            }
-            *self.active.write().unwrap() = provider.id().to_string();
+            self.activate(&provider).await;
             let status = provider.status().await;
+            // The tail fallback is always "available" — it never disqualifies
+            // itself — so landing on it proves nothing is listening. On a
+            // platform with an engine of its own, that is the moment to offer
+            // that engine rather than report a missing Docker.
+            if should_fall_forward(&status, provider.managed(), chosen_by_user) {
+                if let Some(managed) = self.fall_forward().await {
+                    return managed;
+                }
+            }
             return self.enrich(status).await;
         }
 
@@ -107,16 +157,49 @@ impl Registry {
         self.enrich(status).await
     }
 
+    /// Point the Docker client at a provider and record it as the active one.
+    ///
+    /// One place, so a provider can never become active by half: `select` and
+    /// `fall_forward` both land here.
+    async fn activate(&self, provider: &Arc<dyn Provider>) {
+        if let Some(ep) = provider.endpoint().await {
+            self.client.set_endpoint(ep);
+        }
+        *self.active.write().unwrap() = provider.id().to_string();
+    }
+
+    /// The engine Hopper supplies on this platform, if it supplies one.
+    fn managed_provider(&self) -> Option<&Arc<dyn Provider>> {
+        self.providers.iter().find(|p| p.managed())
+    }
+
     /// The managed provider's own status, if this platform has one — reported
     /// even when it is not the active provider, so the UI can speak to the
     /// engine Hopper could run rather than only the one currently selected.
     async fn managed_status(&self) -> Option<EngineStatus> {
-        for p in &self.providers {
-            if p.managed() {
-                return Some(p.status().await);
-            }
+        Some(self.managed_provider()?.status().await)
+    }
+
+    /// Select the managed engine when the engine someone else runs is not
+    /// there to be attached to.
+    ///
+    /// Without this, a Mac with neither Docker nor Apple's runtime is told
+    /// "no Docker engine found" — an answer about the very thing Hopper exists
+    /// to replace, and one with no button on it. Docker is not a requirement
+    /// on macOS, so the absence of Docker must lead to Hopper's own engine.
+    ///
+    /// Only reached when the fallback is down, so a working Docker is never
+    /// taken out from under the user.
+    async fn fall_forward(&self) -> Option<EngineStatus> {
+        let provider = self.managed_provider()?;
+        let status = provider.status().await;
+        // Hardware that cannot run it has nothing to fall forward to; the
+        // fallback's own status, enriched with the reason, reads better.
+        if status.state == EngineState::Unsupported {
+            return None;
         }
-        None
+        self.activate(provider).await;
+        Some(status)
     }
 
     /// Fold in guidance about the managed engine when an *unmanaged* engine is
@@ -197,6 +280,93 @@ mod tests {
             r.ids().iter().any(|id| *id == active),
             "the active provider must be a registered one"
         );
+    }
+
+    fn down() -> EngineStatus {
+        EngineStatus::new(EngineState::NotInstalled, "existing", "nothing listening")
+    }
+
+    #[test]
+    fn a_dead_fallback_on_a_platform_with_its_own_engine_is_second_guessed() {
+        assert!(should_fall_forward(&down(), false, false));
+    }
+
+    #[test]
+    fn a_connected_engine_is_left_alone() {
+        let up = EngineStatus::new(EngineState::Connected, "existing", "Connected.");
+        assert!(!should_fall_forward(&up, false, false));
+    }
+
+    #[test]
+    fn the_managed_engine_being_down_is_its_own_business() {
+        // It is already the engine we would fall forward to.
+        assert!(!should_fall_forward(&down(), true, false));
+    }
+
+    #[test]
+    fn an_engine_the_user_named_is_never_swapped_out_from_under_them() {
+        // Someone who set HOPPER_ENGINE=existing wants to see it fail.
+        assert!(!should_fall_forward(&down(), false, true));
+    }
+
+    #[tokio::test]
+    async fn the_picker_offers_this_platforms_engines() {
+        let choices = registry().choices().await;
+        let ids: Vec<&str> = choices.iter().map(|c| c.id.as_str()).collect();
+        assert_eq!(ids, candidates_for(std::env::consts::OS));
+        // The engine someone else runs is always choosable — that is what
+        // keeps Docker usable for anyone who still wants it.
+        let existing = choices.iter().find(|c| c.id == "existing").unwrap();
+        assert!(existing.available);
+        assert!(!existing.managed);
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "macos")]
+    async fn a_mac_is_not_offered_the_linux_daemons() {
+        let choices = registry().choices().await;
+        assert!(!choices.iter().any(|c| c.id == "linux"));
+        assert!(choices.iter().any(|c| c.id == "apple" && c.managed));
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_engine_says_why_rather_than_vanishing() {
+        // On Linux that is Apple's runtime; on macOS, the Linux daemons.
+        let choices = registry().choices().await;
+        for c in choices.iter().filter(|c| !c.available) {
+            assert!(c.reason.is_some(), "{} gave no reason", c.id);
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "macos")]
+    async fn an_engine_the_user_named_is_selected_even_when_it_cannot_run_yet() {
+        // Pinning the engine you are moving *to* has to answer about that
+        // engine. Falling through would report "no Docker engine is running"
+        // to someone who just asked for Apple's runtime.
+        let r = registry();
+        let status = r.select(Some("apple")).await;
+        assert_eq!(status.provider, "apple");
+        assert_eq!(r.active_id(), "apple");
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "macos")]
+    async fn a_mac_falls_forward_to_the_engine_hopper_can_supply() {
+        // Docker is not a requirement on macOS, so a fallback with nothing
+        // behind it has to lead to Apple's runtime — installed or not.
+        let r = registry();
+        let status = r.fall_forward().await.expect("macOS has an engine of its own");
+        assert_eq!(status.provider, "apple");
+        assert!(status.managed);
+        assert_eq!(r.active_id(), "apple", "and it becomes the active provider");
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "macos"))]
+    async fn a_platform_with_no_engine_of_its_own_has_nowhere_to_fall_forward_to() {
+        // Docker and Podman on Linux are the user's to install, not Hopper's.
+        assert!(registry().fall_forward().await.is_none());
     }
 
     #[tokio::test]

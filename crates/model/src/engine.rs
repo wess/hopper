@@ -119,6 +119,26 @@ impl Default for EngineStatus {
     }
 }
 
+/// One engine the user can pick in Settings.
+///
+/// Hopper does not require Docker on macOS, but plenty of people have it — and
+/// someone mid-move keeps both for a while. The picker is how they choose, and
+/// how the "switch to Docker" refusals from Apple's runtime become an action
+/// rather than an instruction with nowhere to go.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineChoice {
+    pub id: String,
+    pub label: String,
+    /// Present and usable on this machine right now.
+    pub available: bool,
+    /// Hopper owns its lifecycle, so it can be installed and started here.
+    pub managed: bool,
+    /// Why it cannot be chosen, when it cannot.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub reason: Option<String>,
+}
+
 /// Configurable VM resources for a managed engine. CPU and memory apply when
 /// the engine restarts; disk size applies to a freshly created data disk.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -286,8 +306,10 @@ impl EngineCapabilities {
             stats: false,
             // Each container is its own VM; there is no healthcheck runner.
             health: false,
-            // Apple ships no compose.
-            compose: false,
+            // Apple ships no compose, and there is no Docker socket for the
+            // real one to talk to. Hopper reads the file and runs the services
+            // itself, so stacks work here.
+            compose: true,
             // `container build` exists, but Hopper's build path is Engine API.
             build: false,
             restart_policy: false,

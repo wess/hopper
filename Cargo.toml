@@ -4,6 +4,7 @@ members = [
     "crates/model",
     "crates/store",
     "crates/docker",
+    "crates/compose",
     "crates/apple",
     "crates/engine",
     "crates/host",
@@ -98,6 +99,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 model = { path = "crates/model" }
 store = { path = "crates/store" }
 docker = { path = "crates/docker" }
+compose = { path = "crates/compose" }
 apple = { path = "crates/apple" }
 engine = { path = "crates/engine" }
 migrate = { path = "crates/migrate" }

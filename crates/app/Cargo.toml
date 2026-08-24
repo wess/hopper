@@ -16,6 +16,7 @@ model = { workspace = true }
 store = { workspace = true }
 docker = { workspace = true }
 host = { workspace = true }
+compose = { workspace = true }
 
 gpui = { workspace = true }
 guise-ui = { workspace = true }

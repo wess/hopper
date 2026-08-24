@@ -16,7 +16,9 @@
 //! - restart policies and `--hostname`
 //! - an event stream (Hopper polls instead)
 //! - healthchecks, so every container reports `Health::None`
-//! - Compose, which Hopper supplies itself on top of `container run`
+//! - Compose. Apple ships none, and there is no Docker socket for the real
+//!   one to reach — so Hopper reads the compose file and runs the services
+//!   itself, through `container run`. See the `compose` crate.
 
 pub mod cli;
 pub mod containers;

@@ -82,6 +82,7 @@ dependencies = [
  "anyhow",
  "apple",
  "chrono",
+ "compose",
  "docker",
  "futures",
  "gpui",
@@ -981,6 +982,16 @@ checksum = "1b60b5124979fccd9addd89d8b97a1d6eebb4950694520c75ddd722535ea443f"
 dependencies = [
  "nix 0.31.3",
  "thiserror 2.0.19",
+]
+
+[[package]]
+name = "compose"
+version = "0.11.1"
+dependencies = [
+ "model",
+ "serde",
+ "serde_yaml",
+ "tracing",
 ]
 
 [[package]]
@@ -2591,6 +2602,7 @@ version = "0.11.1"
 dependencies = [
  "anyhow",
  "apple",
+ "compose",
  "docker",
  "engine",
  "futures",

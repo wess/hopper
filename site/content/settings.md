@@ -7,20 +7,36 @@ summary: Engine selection and lifecycle, CLI integration, and appearance.
 
 ## Engine
 
-Which engine to prefer, whether to start it automatically, and buttons to start
-and stop it when it is one Hopper manages.
+What the engine that is answering has to say for itself, and — when it is one
+Hopper manages — buttons to start and stop it. An engine that is not installed
+yet has nothing to start, so those buttons stay off and the install is offered
+below instead.
 
-The picker lists only what this machine can run. On a Mac without Apple's
-`container`, the Apple option explains what it needs rather than failing when
-selected.
+## Which engine
 
-`HOPPER_ENGINE` in the environment overrides this setting, which is handy for
-testing without changing what is saved.
+**Automatic** is the default: Apple Containers on a Mac, Docker or Podman on
+Linux, and whatever is already running as the fallback. When nothing is running,
+automatic lands on the engine Hopper can supply rather than reporting a missing
+Docker — Docker is not a requirement on macOS.
+
+Pin one instead and Hopper stays on it. That includes an engine that is not
+installed yet: pinning the one you are moving *to* is the point, and its status
+then says what is left to do about it. A Mac without Apple's `container` is also
+offered the install here — reachable while Docker is still connected and
+working, which is the only moment someone happy on Docker Desktop would think
+to look.
+
+`HOPPER_ENGINE` in the environment overrides the saved setting, which is handy
+for testing without changing what is saved.
 
 ## Docker CLI
 
-The `DOCKER_HOST` line for the active engine, and an option to expose the bundled
-`docker` and `docker compose` binaries on your `PATH`.
+On an Engine API engine, the `DOCKER_HOST` line that points `docker` and
+`docker compose` at whatever Hopper is showing.
+
+On Apple Containers there is no such line. That runtime publishes no Docker
+socket, so `docker` cannot be pointed at it at all — Apple's own `container`
+command drives the same runtime Hopper is showing.
 
 ## Appearance
 

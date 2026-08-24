@@ -72,12 +72,22 @@ pub fn candidates_for(os: &str) -> Vec<&'static str> {
     }
 }
 
+fn clean(s: Option<&str>) -> Option<&str> {
+    s.map(str::trim).filter(|v| !v.is_empty())
+}
+
+/// Whether the user named an engine themselves rather than taking the platform
+/// default.
+///
+/// Selection is allowed to second-guess the default; it is not allowed to
+/// second-guess a person, so this gates the fall-forward in [`crate::Registry`].
+pub fn is_explicit(env: Option<&str>, setting: Option<&str>) -> bool {
+    clean(env).or_else(|| clean(setting)).is_some()
+}
+
 /// Resolve the preferred provider id: the `HOPPER_ENGINE` environment variable
 /// wins, then a saved setting, then the platform default.
 pub fn preferred(env: Option<&str>, setting: Option<&str>, os: &str) -> String {
-    fn clean(s: Option<&str>) -> Option<&str> {
-        s.map(str::trim).filter(|v| !v.is_empty())
-    }
     clean(env)
         .or_else(|| clean(setting))
         .map(str::to_string)
@@ -130,6 +140,19 @@ mod tests {
     fn with_no_preference_the_platform_default_wins() {
         assert_eq!(preferred(None, None, "macos"), "apple");
         assert_eq!(preferred(None, None, "linux"), "linux");
+    }
+
+    #[test]
+    fn a_named_engine_is_recognized_as_the_users_own_choice() {
+        assert!(is_explicit(Some("existing"), None));
+        assert!(is_explicit(None, Some("apple")));
+    }
+
+    #[test]
+    fn taking_the_platform_default_is_not_an_explicit_choice() {
+        assert!(!is_explicit(None, None));
+        // A blank is what an unset setting deserializes to, not a choice.
+        assert!(!is_explicit(Some("  "), Some("")));
     }
 
     #[test]

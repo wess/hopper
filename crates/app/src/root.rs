@@ -99,10 +99,12 @@ impl Root {
             let Some(status) = status else { return };
             let _ = cx.update(|cx| engine.set(cx, status.clone()));
 
-            // Start the managed engine if it is selected, idle, and autostart
-            // is on. An engine someone else runs is left alone.
+            // Start the managed engine if it is selected, installed but idle,
+            // and autostart is on. An engine someone else runs is left alone,
+            // and one that is not installed has nothing to start — the setup
+            // panel offers the install instead.
             let autostart = host.settings().autostart_engine;
-            if autostart && status.managed && !status.connected {
+            if autostart && status.managed && status.state == model::EngineState::Stopped {
                 let host = Arc::clone(&host);
                 let (tx, rx) = futures::channel::oneshot::channel();
                 bridge::runtime().spawn(async move {
@@ -117,14 +119,15 @@ impl Root {
     }
 
     /// Probe the engine on a timer so a daemon starting or stopping outside
-    /// Hopper is reflected without the user reloading anything.
+    /// Hopper is reflected without the user reloading anything — and so an
+    /// engine that appears after launch is selected without a restart.
     fn poll_engine(&self, cx: &mut Context<Self>) {
         let state = self.state.clone();
         cx.spawn(async move |_, cx| loop {
             let host = Arc::clone(&state.host);
             let (tx, rx) = futures::channel::oneshot::channel();
             bridge::runtime().spawn(async move {
-                let _ = tx.send(host.engine_status().await);
+                let _ = tx.send(host.poll_engine().await);
             });
             if let Ok(status) = rx.await {
                 if cx.update(|cx| state.engine.set(cx, status)).is_err() {

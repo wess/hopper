@@ -55,8 +55,9 @@ impl Route {
 
     /// Whether the active engine can serve this route.
     ///
-    /// Apple's runtime ships no compose, so Stacks would be a permanently
-    /// empty list rather than a feature.
+    /// Stacks is gated on compose. Hopper supplies compose itself now, on both
+    /// backends, so nothing is hidden today — the gate stays because an engine
+    /// that cannot run a stack should not offer the list.
     pub fn supported(&self, caps: &model::EngineCapabilities) -> bool {
         match self {
             Route::Stacks => caps.compose,
@@ -224,15 +225,26 @@ mod route_tests {
     }
 
     #[test]
-    fn apple_hides_stacks_because_it_has_no_compose() {
+    fn apple_keeps_stacks_because_hopper_supplies_compose_itself() {
+        // Apple ships no compose and publishes no socket for the real one, so
+        // this route used to be hidden. Hopper reads the file and runs the
+        // services now, which is the whole point of the compose crate.
         let caps = model::EngineCapabilities::apple();
         let routes = Route::available(&caps);
-        assert!(!routes.contains(&Route::Stacks));
-        // Everything else survives — Import especially, since it is how you
-        // get your Docker world onto this engine in the first place.
+        assert!(routes.contains(&Route::Stacks));
+        // Import especially: it is how you get your Docker world onto this
+        // engine in the first place.
         assert!(routes.contains(&Route::Import));
-        assert!(routes.contains(&Route::Containers));
-        assert_eq!(routes.len(), Route::all().len() - 1);
+        assert_eq!(routes.len(), Route::all().len());
+    }
+
+    #[test]
+    fn an_engine_that_cannot_run_a_stack_is_not_offered_the_list() {
+        let caps = model::EngineCapabilities {
+            compose: false,
+            ..model::EngineCapabilities::engine_api()
+        };
+        assert!(!Route::available(&caps).contains(&Route::Stacks));
     }
 }
 

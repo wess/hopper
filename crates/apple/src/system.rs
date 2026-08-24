@@ -139,13 +139,19 @@ pub fn unsupported_reason() -> Option<String> {
 
 /// Confirm the machine is new enough. Apple requires macOS 26 for the vmnet
 /// APIs that container-to-container networking depends on.
+///
+/// Read once and kept: the OS cannot change under a running process, and the
+/// engine poll would otherwise fork `sw_vers` several times a tick forever.
 pub fn macos_major() -> Option<u32> {
-    let out = std::process::Command::new("sw_vers")
-        .arg("-productVersion")
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    text.trim().split('.').next()?.parse().ok()
+    static MAJOR: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    *MAJOR.get_or_init(|| {
+        let out = std::process::Command::new("sw_vers")
+            .arg("-productVersion")
+            .output()
+            .ok()?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        text.trim().split('.').next()?.parse().ok()
+    })
 }
 
 pub fn too_old() -> Option<DockerError> {

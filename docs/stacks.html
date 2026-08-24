@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Compose stacks — Hopper</title>
-  <meta name="description" content="Stacks reconstructed from container labels, and why the view hides itself on Apple Containers.">
+  <meta name="description" content="Reading a compose file and running it, on any engine, with no Compose binary installed.">
   <meta name="theme-color" content="#0c1018">
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
@@ -53,24 +53,66 @@
 
     <article class="docs-body">
       <h1>Compose stacks</h1>
-      <p class="lede-sm">Stacks reconstructed from container labels, and why the view hides itself on Apple Containers.</p>
-<p>Hopper groups containers into projects using the <code>com.docker.compose.*</code> labels
-the Compose CLI writes. That means stacks show up whether or not a Compose
-binary is installed — the grouping is read from what is already running.</p>
-<p>Each project lists its services with their states, and the whole project can be
-started or stopped together.</p>
-<h2>On Apple Containers</h2>
-<p>Apple ships no Compose, so <strong>the Stacks view is not shown</strong> when that engine is
-active. It is not an empty list or a broken button; the route leaves the sidebar.</p>
-<p>This is the biggest single gap between the two backends, and it is worth being
-plain about: if your workflow is <code>docker compose up</code>, Apple Containers is not
-there yet. Switch to a Docker engine under <strong>Settings → Engine</strong> and everything
-works as before.</p>
-<h2>What Hopper ships</h2>
-<p>The release bundles a standalone Compose binary and the Docker CLI, found at
-runtime beside the executable. Docker Desktop's uninstaller takes <code>docker</code> with
-it, so shipping one is what makes Hopper a replacement rather than a client that
-depends on the thing it replaces.</p>
+      <p class="lede-sm">Reading a compose file and running it, on any engine, with no Compose binary installed.</p>
+<p>Hopper implements Compose rather than shelling out to it. It reads your
+<code>compose.yaml</code>, resolves every service down to a container, and creates them
+itself — so a stack comes up on <strong>Apple Containers with no Docker on the
+machine at all</strong>.</p>
+<p>It also groups containers into projects using the <code>com.docker.compose.*</code> labels,
+which is what the real Compose CLI writes. Both directions work: a stack
+<code>docker compose up</code> started appears in Hopper, and a stack Hopper started
+appears in <code>docker compose ls</code> on a machine that has it.</p>
+<h2>Bringing one up</h2>
+<p><strong>Open compose file…</strong> takes a <code>compose.yaml</code> or the directory holding one.
+Hopper looks for <code>compose.yaml</code>, <code>compose.yml</code>, <code>docker-compose.yaml</code> and
+<code>docker-compose.yml</code>, and layers a <code>.override.</code> file over the base if there is
+one.</p>
+<p>A project already in the list has <strong>Up</strong>, which re-reads the file its containers
+remember — Compose writes the path onto every container it creates, and so does
+Hopper, so a stack can be brought back up without finding the file again.</p>
+<p><strong>Up</strong> is safe to run on a stack that is already up. Every container carries a
+hash of the service it was created from; one that still matches is left running
+untouched, and only a service you actually edited is recreated. Running <strong>Up</strong>
+to check on a stack will not restart your database.</p>
+<p><strong>Down</strong> stops and removes the project's containers and the networks it created.
+Named volumes are kept — that is the point of a volume.</p>
+<h2>What it reads</h2>
+<p>Services: <code>image</code>, <code>command</code>, <code>environment</code>, <code>env_file</code>, <code>ports</code>, <code>volumes</code>,
+<code>networks</code>, <code>depends_on</code>, <code>labels</code>, <code>restart</code>, <code>working_dir</code>, <code>user</code>,
+<code>hostname</code>, <code>tty</code>, <code>profiles</code>, <code>container_name</code>, <code>deploy.resources.limits</code>, and
+the older <code>mem_limit</code> / <code>cpus</code>. Top level: <code>name</code>, <code>services</code>, <code>networks</code>,
+<code>volumes</code>.</p>
+<p>Variables expand the way Compose expands them — <code>${VAR}</code>, <code>${VAR:-default}</code>,
+<code>${VAR:?message}</code>, <code>$$</code> for a literal dollar — from the process environment
+overlaid on a <code>.env</code> beside the file.</p>
+<p>Relative paths resolve against the compose file's directory, not the one Hopper
+was launched from. Running Hopper from somewhere else must not change what gets
+mounted.</p>
+<h2>What it does not</h2>
+<p>Every one of these is <em>reported</em> on the service it was written on, never
+silently dropped:</p>
+<ul>
+<li><strong><code>build:</code>.</strong> Hopper does not build images. A service with a <code>build</code> and no
+<code>image</code> is refused with the reason rather than half-started; one with both
+runs from the <code>image</code>.</li>
+<li><strong><code>healthcheck:</code>.</strong> Containers are created without one, on either engine. A
+<code>depends_on</code> with <code>condition: service_healthy</code> is honoured as ordering only —
+the service it names is started first, not waited on until healthy.</li>
+<li><strong>A second network.</strong> A container is created on one network; the others are
+named in the output.</li>
+<li><strong><code>deploy.replicas</code>.</strong> One container per service.</li>
+<li><strong><code>entrypoint:</code>.</strong> Containers get the image's own.</li>
+<li><strong>Port ranges</strong> like <code>8000-8010:8000-8010</code>.</li>
+<li><strong>Anonymous volumes</strong> — a mount with no source or name.</li>
+<li>Anything else the file declares that Hopper has no implementation for, listed
+by key.</li>
+</ul>
+<p>On Apple Containers, <code>restart:</code> is reported too, since that runtime has no
+restart policy.</p>
+<h2>Where the names come from</h2>
+<p>Compose's own, because the two have to agree on them: containers are
+<code>project-service-1</code>, networks and volumes are <code>project_name</code>, and the project
+is the <code>name:</code> in the file, else the directory it sits in.</p>
       <nav class="pager">
         <a class="prev" href="volumes.html"><span>Previous</span>Volumes and networks</a>
         <a class="next" href="import.html"><span>Next</span>Import from Docker</a>

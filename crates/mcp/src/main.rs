@@ -1,4 +1,4 @@
-//! `hoppermcp` — the stdio MCP server exposing Docker tools to AI clients.
+//! `hoppermcp` — the stdio MCP server exposing container tools to AI clients.
 //!
 //! Logs go to stderr: stdout is the protocol transport, and a stray line there
 //! corrupts every frame after it.
@@ -16,5 +16,11 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let host = Host::from_env();
+    // Pick an engine the way the app does. Without this the server only ever
+    // holds the default Docker socket, so on a Mac running Apple Containers
+    // every tool would answer "no engine" — Docker is not a requirement here.
+    let status = host.select_engine().await;
+    tracing::info!("engine: {} ({})", status.provider, status.message);
+
     mcp::serve::run(host).await
 }

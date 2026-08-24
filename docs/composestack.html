@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Run a Compose stack — Hopper</title>
-  <meta name="description" content="A web service and a database, brought up together and managed from the Stacks view.">
+  <meta name="description" content="A web service and a database, brought up together from the Stacks view — on any engine.">
   <meta name="theme-color" content="#0c1018">
   <link rel="stylesheet" href="styles.css">
   <script src="app.js" defer></script>
@@ -53,10 +53,9 @@
 
     <article class="docs-body">
       <h1>Run a Compose stack</h1>
-      <p class="lede-sm">A web service and a database, brought up together and managed from the Stacks view.</p>
-<p>Compose needs an engine that has Compose, which means <strong>a Docker or Podman
-engine, not Apple Containers</strong>. See <a href="stacks.html">Stacks</a> for why.</p>
-<p>Switch under <strong>Settings → Engine</strong> if you are on Apple's runtime.</p>
+      <p class="lede-sm">A web service and a database, brought up together from the Stacks view — on any engine.</p>
+<p>Hopper reads the compose file and runs the services itself, so this works on
+Apple Containers with no Docker and no Compose binary anywhere on the machine.</p>
 <h2>1. A stack to run</h2>
 <pre><code class="language-yaml"># compose.yaml
 services:
@@ -82,27 +81,30 @@ volumes:
 directory. Pointing at a subdirectory sidesteps it, and costs nothing when the
 volume is empty.</p>
 <h2>2. Bring it up</h2>
-<pre><code class="language-sh">docker compose up -d
-</code></pre>
-<p>Hopper bundles Compose, so this works even after Docker Desktop is gone — see
-<a href="cli.html">Docker CLI</a> for putting it on your <code>PATH</code>.</p>
+<p>Open <strong>Stacks</strong>, then <strong>Open compose file…</strong>, and pick the file or the directory
+it is in.</p>
+<p>Hopper reads it, creates the network and the <code>pgdata</code> volume, pulls both images,
+and starts <code>db</code> before <code>web</code> because <code>depends_on</code> says so. Every line of that
+appears in the panel as it happens.</p>
 <h2>3. Watch it in Hopper</h2>
-<p>Open <strong>Stacks</strong>. The project appears with both services under it.</p>
-<p>Hopper reconstructs this grouping from the <code>com.docker.compose.*</code> labels Compose
-writes onto each container — it is reading what is actually running, not parsing
-your YAML. Which means a stack someone else started, or one started before Hopper
-was open, shows up just the same.</p>
+<p>The project appears in the list with both services under it.</p>
+<p>The grouping is read from the <code>com.docker.compose.*</code> labels on the containers,
+not from the YAML — which means a stack someone else started with
+<code>docker compose up</code>, or one started before Hopper was open, shows up just the
+same. It works the other way too: <code>docker compose ls</code> on a machine that has it
+will list the project Hopper just created.</p>
 <p>Click into <strong>Containers</strong> and select <code>db</code>. The <strong>Logs</strong> tab shows Postgres
 initialising. If you got <code>PGDATA</code> wrong, this is where you will see it say so.</p>
 <h2>4. Drive it</h2>
 <p>Start and stop the whole project from the Stacks view, or individual services
 from Containers. Both are the same containers; there is no separate state.</p>
 <h2>5. Tear it down</h2>
-<pre><code class="language-sh">docker compose down          # keeps the volume
-docker compose down -v       # takes it too
-</code></pre>
-<p>The volume outlives <code>down</code> unless you ask otherwise — which is the point of a
-volume, and the reason a database survives a rebuild.</p>
+<p><strong>Down</strong> on the project row stops and removes both containers and the network.
+The volume outlives it — which is the point of a volume, and the reason the
+database survives a rebuild.</p>
+<p>Press <strong>Up</strong> again and the stack comes back with its data. Press <strong>Up</strong> on a
+stack that is already running and nothing is disturbed: each container carries a
+hash of the service it came from, and one that still matches is left alone.</p>
       <nav class="pager">
         <a class="prev" href="offdockerdesktop.html"><span>Previous</span>Move off Docker Desktop</a>
         <a class="next" href="mcp.html"><span>Next</span>MCP server</a>

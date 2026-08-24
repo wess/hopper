@@ -107,8 +107,12 @@ own — <strong>Settings → Docker CLI</strong> puts it on your <code>PATH</cod
 <h2>Before you commit</h2>
 <p>Some things do not survive the move, and it is better to know now:</p>
 <ul>
-<li><strong>Compose stacks.</strong> Apple ships no Compose. If <code>docker compose up</code> is your
-daily driver, stay on a Docker engine — see <a href="stacks.html">Stacks</a>.</li>
+<li><strong>Building images.</strong> Hopper does not build. A compose service with a <code>build:</code>
+and no <code>image:</code> will not start, and there is no replacement for
+<code>docker build</code> — see <a href="stacks.html">Stacks</a>. Compose stacks themselves do run:
+Hopper reads the file and creates the containers itself.</li>
+<li><strong>Healthchecks.</strong> Neither engine gets one from Hopper, so a <code>depends_on</code> with
+<code>condition: service_healthy</code> only orders the start.</li>
 <li><strong>Anything that bind-mounts <code>/var/run/docker.sock</code></strong> — Portainer, Traefik's
 Docker provider, most CI-in-a-container setups. Apple publishes no such socket.</li>
 <li><strong>Containers needing <code>NET_ADMIN</code> or host kernel modules</strong>, WireGuard being the

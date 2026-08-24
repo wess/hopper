@@ -9,6 +9,9 @@ use model::*;
 use std::sync::{Arc, RwLock};
 
 use crate::runtime::{refuse, Backend};
+// `model::*` below brings a `compose` module of its own into scope, so the
+// crate of the same name needs the leading `::` to be reachable.
+use ::compose::{plan_dir, plan_files, PlanOptions};
 
 pub struct Host {
     client: Client,
@@ -80,6 +83,23 @@ impl Host {
         status
     }
 
+    /// The engines the user can choose between in Settings.
+    pub async fn engine_choices(&self) -> Vec<EngineChoice> {
+        self.engines.choices().await
+    }
+
+    /// Pin the engine to one provider, or hand selection back to Hopper.
+    ///
+    /// Persisted before re-selecting, because `select_engine` reads the saved
+    /// setting — and returns the new status so the caller does not have to
+    /// wait for the next poll to see what it got.
+    pub async fn set_engine_preference(&self, id: Option<String>) -> EngineStatus {
+        let mut settings = self.settings();
+        settings.engine_preference = id;
+        self.save_settings(settings);
+        self.select_engine().await
+    }
+
     pub async fn start_engine(&self) -> anyhow::Result<()> {
         let resources = self.settings().resources;
         self.engines.start(resources).await
@@ -94,6 +114,22 @@ impl Host {
     /// becomes reachable without the user doing anything.
     pub async fn resync_forwards(&self) -> Vec<String> {
         self.engines.resync_forwards().await
+    }
+
+    /// What the UI's status timer calls.
+    ///
+    /// A plain probe is enough while an engine is answering. While none is,
+    /// selection is re-run instead: an engine that appears after launch —
+    /// Docker Desktop started by hand, Apple's runtime finishing its install —
+    /// has to be picked up without restarting Hopper. Selection is also what
+    /// falls forward from a missing Docker to the engine Hopper can supply, so
+    /// re-running it is what keeps that offer current in both directions.
+    pub async fn poll_engine(&self) -> EngineStatus {
+        let status = self.engine_status().await;
+        if status.connected {
+            return status;
+        }
+        self.select_engine().await
     }
 
     /// Probe the engine and describe what we found.
@@ -669,7 +705,50 @@ impl Host {
         // Read through `containers()` so stacks regroup from whichever engine
         // is active, not always the Engine API one.
         let list = self.containers(true).await?;
-        Ok(crate::compose::group(&list))
+        Ok(crate::stacks::group(&list))
+    }
+
+    /// Read a compose file and resolve it against the active engine.
+    ///
+    /// Takes whatever a user picked: the file itself, or a directory Hopper
+    /// should find one in. The directory check lives here rather than in the
+    /// caller so the UI does not touch the filesystem to decide what to call.
+    ///
+    /// The plan carries its own warnings, which differ by engine: the same
+    /// file planned against Apple's runtime and against Docker produces the
+    /// same containers and a different list of what will not be honoured.
+    pub fn compose_plan_path(&self, path: &str, opts: &PlanOptions) -> Result<ComposePlan, String> {
+        let path = std::path::Path::new(path);
+        if path.is_dir() {
+            return plan_dir(path, opts, &self.capabilities());
+        }
+        plan_files(
+            &[path.to_string_lossy().to_string()],
+            None,
+            opts,
+            &self.capabilities(),
+        )
+    }
+
+    /// Re-plan a stack that is already running, from the files its containers
+    /// remember.
+    ///
+    /// Compose writes the file paths onto every container it creates, so a
+    /// stack can be brought back up without the user finding the file again.
+    pub fn compose_plan_project(
+        &self,
+        project: &ComposeProject,
+        opts: &PlanOptions,
+    ) -> Result<ComposePlan, String> {
+        if project.config_files.is_empty() {
+            return Err(format!(
+                "{} does not record which compose file it came from, so it cannot be started again from here.",
+                project.name
+            ));
+        }
+        let mut opts = opts.clone();
+        opts.project.get_or_insert_with(|| project.name.clone());
+        plan_files(&project.config_files, None, &opts, &self.capabilities())
     }
 
     // --- settings / workspaces -------------------------------------------
