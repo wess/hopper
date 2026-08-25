@@ -7,7 +7,7 @@
 //! Nothing is removed from the source. If the import goes wrong, Docker is
 //! still exactly where it was.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use gpui::prelude::*;
@@ -90,6 +90,63 @@ pub fn heading(kind: MigrationKind, n: usize) -> String {
     format!("{n} {word}")
 }
 
+/// One thing the import could not do exactly, kept per item so a partial
+/// import can be explained.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Note {
+    /// What the note is about; empty when it covers the run as a whole.
+    pub item: String,
+    pub text: String,
+}
+
+/// A 64-character id is not an identity anyone recognises.
+pub fn shorten(item: &str) -> String {
+    if item.len() >= 32 && item.chars().all(|c| c.is_ascii_hexdigit()) {
+        item.chars().take(12).collect()
+    } else {
+        item.to_string()
+    }
+}
+
+/// The items a note covers, named while the list is short enough to read.
+fn subjects(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [a] => a.clone(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, c] => format!("{a}, {b}, and {c}"),
+        [a, b, c, rest @ ..] => format!("{a}, {b}, {c}, and {} more", rest.len()),
+    }
+}
+
+/// Collapse notes that say the same thing into one line.
+///
+/// A blanket skip reports once per item so the progress bar still moves, which
+/// meant eight containers produced eight copies of the same paragraph and
+/// buried the one note that was about a single thing. First seen wins the
+/// order, so the panel still reads in the order the import hit them.
+pub fn grouped(notes: &[Note]) -> Vec<String> {
+    let mut order: Vec<&str> = Vec::new();
+    let mut items: HashMap<&str, Vec<String>> = HashMap::new();
+    for note in notes {
+        let covered = items.entry(note.text.as_str()).or_insert_with(|| {
+            order.push(note.text.as_str());
+            Vec::new()
+        });
+        if !note.item.is_empty() && !covered.contains(&note.item) {
+            covered.push(note.item.clone());
+        }
+    }
+    order
+        .into_iter()
+        .map(|text| match items[text].as_slice() {
+            [] => text.to_string(),
+            [one] => format!("{one}: {text}"),
+            many => format!("{text} ({})", subjects(many)),
+        })
+        .collect()
+}
+
 pub struct Import {
     state: AppState,
     stage: Stage,
@@ -97,7 +154,10 @@ pub struct Import {
     /// The most recent progress frame, shown while copying.
     progress: Option<MigrationProgress>,
     /// Per-item problems, kept so a partial import can be explained.
-    notes: Vec<String>,
+    notes: Vec<Note>,
+    /// Item id → the name it was listed under, so a note says `web` rather
+    /// than the hash the plan travels by.
+    labels: HashMap<String, String>,
 }
 
 impl Import {
@@ -110,6 +170,7 @@ impl Import {
             selected: BTreeSet::new(),
             progress: None,
             notes: Vec::new(),
+            labels: HashMap::new(),
         }
     }
 
@@ -139,6 +200,10 @@ impl Import {
             return;
         };
         let plan = plan_from(scan, &self.selected);
+        let labels: HashMap<String, String> = rows(scan)
+            .into_iter()
+            .map(|i| (i.id.clone(), i.name.clone()))
+            .collect();
         if plan.is_empty() {
             return;
         }
@@ -148,6 +213,7 @@ impl Import {
         self.stage = Stage::Importing;
         self.progress = None;
         self.notes.clear();
+        self.labels = labels;
         cx.notify();
 
         // Progress arrives as a stream so a long copy shows movement rather
@@ -163,11 +229,12 @@ impl Import {
             move |frame: MigrationProgress, cx| {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
+                        let item = this.label(&frame.item);
                         if let Some(e) = &frame.error {
-                            this.notes.push(format!("{}: {e}", frame.item));
+                            this.notes.push(Note { item: item.clone(), text: e.clone() });
                         }
                         if let Some(w) = &frame.warning {
-                            this.notes.push(format!("{}: {w}", frame.item));
+                            this.notes.push(Note { item, text: w.clone() });
                         }
                         if frame.finished {
                             this.stage = Stage::Done(frame.message.clone());
@@ -179,6 +246,11 @@ impl Import {
             },
             move |cx| state.bump(cx),
         );
+    }
+
+    /// The name the item was listed under, falling back to a readable id.
+    fn label(&self, item: &str) -> String {
+        self.labels.get(item).cloned().unwrap_or_else(|| shorten(item))
     }
 
     fn toggle(&mut self, k: String, cx: &mut Context<Self>) {
@@ -359,8 +431,8 @@ impl Render for Import {
             let mut notes = Stack::new().gap(Size::Xs).child(
                 Text::new("Worth knowing".to_string()).size(Size::Sm).medium(),
             );
-            for note in &self.notes {
-                notes = notes.child(Text::new(note.clone()).size(Size::Xs).dimmed());
+            for line in grouped(&self.notes) {
+                notes = notes.child(Text::new(line).size(Size::Xs).dimmed());
             }
             body = body.child(notes);
         }
@@ -456,6 +528,57 @@ mod tests {
         s.source_endpoint = Some(model::MigrationEndpoint::Unix { path: "/x.sock".into() });
         let plan = plan_from(&s, &select_all(&s));
         assert_eq!(plan.source, s.source_endpoint);
+    }
+
+    fn note(item: &str, text: &str) -> Note {
+        Note { item: item.into(), text: text.into() }
+    }
+
+    #[test]
+    fn one_reason_repeated_per_item_collapses_to_a_single_line() {
+        // The skip that started this: eight containers, eight identical
+        // paragraphs.
+        let why = "Recreating containers is not implemented yet.";
+        let notes: Vec<Note> = ["web", "api", "db"].iter().map(|n| note(n, why)).collect();
+        let lines = grouped(&notes);
+        assert_eq!(lines, vec![format!("{why} (web, api, and db)")]);
+    }
+
+    #[test]
+    fn a_lone_note_still_names_what_it_is_about() {
+        assert_eq!(grouped(&[note("data", "Volume contents are not copied yet.")]),
+            vec!["data: Volume contents are not copied yet.".to_string()]);
+    }
+
+    #[test]
+    fn a_long_list_counts_the_tail_instead_of_printing_it() {
+        let notes: Vec<Note> = ["a", "b", "c", "d", "e"].iter().map(|n| note(n, "nope")).collect();
+        assert_eq!(grouped(&notes), vec!["nope (a, b, c, and 2 more)".to_string()]);
+    }
+
+    #[test]
+    fn distinct_reasons_stay_apart_in_the_order_they_arrived() {
+        let notes = vec![note("web", "one"), note("data", "two"), note("api", "one")];
+        assert_eq!(grouped(&notes), vec!["one (web and api)".to_string(), "data: two".to_string()]);
+    }
+
+    #[test]
+    fn the_same_item_twice_is_named_once() {
+        let notes = vec![note("web", "one"), note("web", "one")];
+        assert_eq!(grouped(&notes), vec!["web: one".to_string()]);
+    }
+
+    #[test]
+    fn a_note_about_the_whole_run_carries_no_item() {
+        assert_eq!(grouped(&[note("", "Docker went away.")]), vec!["Docker went away.".to_string()]);
+    }
+
+    #[test]
+    fn ids_shorten_but_names_do_not() {
+        let id = "9a397e615c022f5b5ca396fee869656bc83c61882311a4a310f4a9972933a22d";
+        assert_eq!(shorten(id), "9a397e615c02");
+        assert_eq!(shorten("shop_default"), "shop_default");
+        assert_eq!(shorten("nginx:latest"), "nginx:latest");
     }
 
     #[test]
