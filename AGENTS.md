@@ -1,6 +1,6 @@
-# AGENTS.md
+# Hopper
 
-Guidance for AI agents working in this repository (mirrors CLAUDE.md).
+Repository guidance for agent sessions.
 
 ## What this is
 

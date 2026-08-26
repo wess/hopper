@@ -77,7 +77,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "apple",
@@ -99,7 +99,7 @@ dependencies = [
 
 [[package]]
 name = "apple"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "chrono",
  "docker",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "compose"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "model",
  "serde",
@@ -1461,7 +1461,7 @@ dependencies = [
 
 [[package]]
 name = "docker"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "base64",
@@ -1571,7 +1571,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "apple",
@@ -2469,9 +2469,9 @@ checksum = "12101ecc8225ea6d675bc70263074eab6169079621c2186fe0c66590b2df9681"
 
 [[package]]
 name = "guise-ui"
-version = "1.5.0"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "788c2576146eee7babd706d8294e20b147ef04ae0e735addb67fc5783fcc04f0"
+checksum = "f008377e60bb12b80219c647e79bb35fed3c8ea383077338c678ffb80067e5f4"
 dependencies = [
  "gpui",
 ]
@@ -2598,7 +2598,7 @@ dependencies = [
 
 [[package]]
 name = "host"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "apple",
@@ -3328,7 +3328,7 @@ dependencies = [
 
 [[package]]
 name = "mcp"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "docker",
@@ -3392,7 +3392,7 @@ dependencies = [
 
 [[package]]
 name = "migrate"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "anyhow",
  "apple",
@@ -3456,7 +3456,7 @@ dependencies = [
 
 [[package]]
 name = "model"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "regex",
  "serde",
@@ -5330,7 +5330,7 @@ checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "site"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "pulldown-cmark",
 ]
@@ -5465,7 +5465,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.12.2"
+version = "0.12.3"
 dependencies = [
  "dirs 6.0.0",
  "keyring",
