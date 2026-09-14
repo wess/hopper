@@ -41,19 +41,30 @@ pub fn render(state: &AppState, cx: &mut gpui::App) -> impl IntoElement {
         let go = route;
 
         let entry = if collapsed {
-            let accent = if selected { ColorName::Blue } else { ColorName::Gray };
-            let variant = if selected { Variant::Light } else { Variant::Subtle };
-            div().flex().justify_center().child(
-                ActionIcon::new(
-                    SharedString::from(format!("nav-{}", route.label())),
-                    route.icon(),
+            let accent = if selected {
+                ColorName::Blue
+            } else {
+                ColorName::Gray
+            };
+            let variant = if selected {
+                Variant::Light
+            } else {
+                Variant::Subtle
+            };
+            div()
+                .flex()
+                .justify_center()
+                .child(
+                    ActionIcon::new(
+                        SharedString::from(format!("nav-{}", route.label())),
+                        route.icon(),
+                    )
+                    .variant(variant)
+                    .color(accent)
+                    .size(Size::Md)
+                    .on_click(move |_, _, cx| signal.set(cx, go)),
                 )
-                .variant(variant)
-                .color(accent)
-                .size(Size::Md)
-                .on_click(move |_, _, cx| signal.set(cx, go)),
-            )
-            .into_any_element()
+                .into_any_element()
         } else {
             // A nav row reads better left-aligned than a centered button.
             let fg = if selected { blue } else { label_color };
@@ -108,13 +119,10 @@ pub fn render(state: &AppState, cx: &mut gpui::App) -> impl IntoElement {
     let footer = if collapsed {
         let t = guise::theme::theme(cx);
         let dot = t.color(engine_accent(engine.state), 4).hsla();
-        div().flex().justify_center().child(
-            div()
-                .w(px(9.0))
-                .h(px(9.0))
-                .rounded_full()
-                .bg(dot),
-        )
+        div()
+            .flex()
+            .justify_center()
+            .child(div().w(px(9.0)).h(px(9.0)).rounded_full().bg(dot))
     } else {
         div().child(
             Stack::new()

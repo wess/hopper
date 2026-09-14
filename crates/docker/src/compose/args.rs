@@ -262,10 +262,14 @@ mod tests {
 
     #[test]
     fn pull_and_build_are_their_own_verbs() {
-        assert!(build(ComposeAction::Pull, &target(), &ComposeOptions::default())
-            .contains(&"pull".to_string()));
-        assert!(build(ComposeAction::Build, &target(), &ComposeOptions::default())
-            .contains(&"build".to_string()));
+        assert!(
+            build(ComposeAction::Pull, &target(), &ComposeOptions::default())
+                .contains(&"pull".to_string())
+        );
+        assert!(
+            build(ComposeAction::Build, &target(), &ComposeOptions::default())
+                .contains(&"build".to_string())
+        );
     }
 
     #[test]

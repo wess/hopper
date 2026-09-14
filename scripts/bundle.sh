@@ -6,10 +6,11 @@
 # CODESIGN_IDENTITY when set (a real Developer ID for a notarizable build),
 # otherwise ad-hoc ("-") so it still runs locally.
 #
-# There is no sidecar and no VM: on macOS the engine is Apple's `container`,
-# installed separately and running under its own privileged helpers. So the app
-# asks for no virtualization entitlement, and an ad-hoc build behaves like the
-# signed one.
+# There is no always-running sidecar or VM: on macOS the engine is Apple's
+# `container`, installed separately and running under its own privileged
+# helpers. The bundled CLI and Compose binaries are invoked only on demand.
+# Hopper asks for no virtualization entitlement, and an ad-hoc build behaves
+# like the signed one.
 #
 # Usage: scripts/bundle.sh
 set -euo pipefail
@@ -27,8 +28,8 @@ version="$(sed -n 's/^version = "\([0-9][^"]*\)".*/\1/p' Cargo.toml | head -1)"
 [ -n "$version" ] || { echo "error: could not read version from Cargo.toml" >&2; exit 1; }
 echo "[bundle] $app_name $version"
 
-echo "[bundle] cargo build --release -p app"
-cargo build --release -p app
+echo "[bundle] cargo build --release -p app -p mcp --locked"
+cargo build --release -p app -p mcp --locked
 
 app="dist/$app_name.app"
 contents="$app/Contents"
@@ -51,6 +52,34 @@ fi
 if [ -f native/build/docker ]; then
   mkdir -p "$contents/MacOS/sidecars"
   cp native/build/docker "$contents/MacOS/sidecars/docker"
+fi
+
+# The MCP server is part of the release, too. Keeping it beside the app gives
+# AI clients a stable executable path without requiring a global install.
+mkdir -p "$contents/MacOS/sidecars"
+cp target/release/hoppermcp "$contents/MacOS/sidecars/hoppermcp"
+
+# Never let a stale sidecar from another checkout or host architecture make it
+# into a signed app. `macos-14` is arm64 today, but this also keeps an eventual
+# Intel build honest; universal binaries pass when they contain the host arch.
+if [ -d "$contents/MacOS/sidecars" ]; then
+  case "$(uname -m)" in
+    arm64 | aarch64) required_arch=arm64 ;;
+    x86_64) required_arch=x86_64 ;;
+    *) echo "error: unsupported macOS architecture: $(uname -m)" >&2; exit 1 ;;
+  esac
+  for sidecar in "$contents/MacOS/sidecars/"*; do
+    [ -e "$sidecar" ] || continue
+    [ -x "$sidecar" ] || {
+      echo "error: sidecar is not executable: $sidecar" >&2
+      exit 1
+    }
+    arches="$(lipo -archs "$sidecar" 2>/dev/null || true)"
+    printf '%s\n' "$arches" | tr ' ' '\n' | grep -Fxq "$required_arch" || {
+      echo "error: sidecar $sidecar does not contain host architecture $required_arch (has: ${arches:-unknown})" >&2
+      exit 1
+    }
+  done
 fi
 
 cat > "$contents/Info.plist" << PLIST
@@ -104,5 +133,5 @@ codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
   --entitlements assets/hopper.entitlements \
   --sign "$identity" "$app"
 
-codesign --verify --strict --verbose=2 "$app" || true
+codesign --verify --strict --verbose=2 "$app"
 echo "[bundle] -> $app"

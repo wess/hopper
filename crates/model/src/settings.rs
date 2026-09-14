@@ -95,7 +95,8 @@ pub struct Settings {
     /// Keep the engine running after the window closes.
     #[serde(default)]
     pub keep_engine_on_quit: bool,
-    /// Maintain `/var/run/docker.sock` pointing at Hopper's socket.
+    /// Reserved compatibility setting for a future opt-in socket bridge.
+    /// The current app does not modify `/var/run/docker.sock`.
     #[serde(default)]
     pub socket_compat: bool,
     /// The active workspace id, or `None` for the built-in "all" scope.

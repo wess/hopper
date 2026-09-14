@@ -80,7 +80,11 @@ pub fn parse(line: &str) -> Result<Request, Box<Response>> {
         // An unparseable frame has no id to correlate with, so the spec says
         // to answer with a null id rather than staying silent. Boxed because
         // the error is a full Response, far larger than the parsed Request.
-        Box::new(err(Value::Null, codes::PARSE_ERROR, format!("Invalid JSON: {e}")))
+        Box::new(err(
+            Value::Null,
+            codes::PARSE_ERROR,
+            format!("Invalid JSON: {e}"),
+        ))
     })
 }
 

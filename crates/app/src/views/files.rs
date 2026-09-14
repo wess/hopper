@@ -38,6 +38,8 @@ pub struct Files {
     entries: Vec<FileEntry>,
     error: Option<String>,
     loading: bool,
+    /// Invalidates a directory response when navigation or container changes.
+    generation: u64,
 }
 
 impl Files {
@@ -49,6 +51,7 @@ impl Files {
             entries: Vec::new(),
             error: None,
             loading: true,
+            generation: 0,
         };
         view.load(cx);
         view
@@ -78,6 +81,8 @@ impl Files {
     }
 
     fn load(&mut self, cx: &mut Context<Self>) {
+        self.generation += 1;
+        let generation = self.generation;
         let host = Arc::clone(&self.state.host);
         let id = self.container.clone();
         let dir = self.cwd.clone();
@@ -88,6 +93,9 @@ impl Files {
             async move { host.container_ls(&id, &dir).await },
             move |result, cx| {
                 let _ = entity.update(cx, |this: &mut Self, cx| {
+                    if this.generation != generation {
+                        return;
+                    }
                     this.loading = false;
                     match result {
                         Ok(entries) => {
@@ -107,18 +115,20 @@ impl Files {
         let is_dir = entry.dir;
         let path = entry.path.clone();
 
-        let name = div()
-            .flex_1()
-            .child(
-                Group::new()
-                    .gap(Size::Xs)
-                    .align(Align::Center)
-                    .child(
-                        Text::new(if is_dir { "📁" } else { "📄" }.to_string())
-                            .size(Size::Xs),
-                    )
-                    .child(Text::new(entry.name.clone()).size(Size::Xs)),
-            );
+        let name = div().flex_1().child(
+            Group::new()
+                .gap(Size::Xs)
+                .align(Align::Center)
+                .child(
+                    Icon::new(if is_dir {
+                        IconName::Folder
+                    } else {
+                        IconName::File
+                    })
+                    .size(Size::Xs),
+                )
+                .child(Text::new(entry.name.clone()).size(Size::Xs)),
+        );
 
         let meta = Text::new(if is_dir {
             entry.mode.clone()
@@ -156,14 +166,16 @@ impl Render for Files {
         let palette = theme::palette(cx);
 
         // Breadcrumb: the current path, with an "up" affordance.
-        let mut breadcrumb = Group::new().gap(Size::Xs).align(Align::Center).child(
-            Text::new(self.cwd.clone()).size(Size::Xs).dimmed(),
-        );
+        let mut breadcrumb = Group::new()
+            .gap(Size::Xs)
+            .align(Align::Center)
+            .child(Text::new(self.cwd.clone()).size(Size::Xs).dimmed());
         if let Some(parent) = self.parent() {
             breadcrumb = breadcrumb.child(
-                Button::new("files-up", "↑ up")
+                Button::new("files-up", "Up")
                     .size(Size::Xs)
                     .variant(Variant::Subtle)
+                    .left_section(Icon::new(IconName::ArrowUp).size(Size::Xs))
                     .on_click(cx.listener(move |this, _, _, cx| this.navigate(parent.clone(), cx))),
             );
         }

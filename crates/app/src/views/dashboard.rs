@@ -17,8 +17,10 @@ pub struct Dashboard {
     last_epoch: u64,
     info: Option<SystemInfo>,
     usage: Option<DiskUsage>,
+    usage_error: Option<String>,
     error: Option<String>,
     pruning: bool,
+    confirm_cleanup: bool,
 }
 
 impl Dashboard {
@@ -32,23 +34,33 @@ impl Dashboard {
             last_epoch: 0,
             info: None,
             usage: None,
+            usage_error: None,
             error: None,
             pruning: false,
+            confirm_cleanup: false,
         };
         view.reload(cx);
         view
     }
 
     fn reload(&self, cx: &mut Context<Self>) {
+        if !self.state.host.selection_ready() {
+            return;
+        }
         let host = Arc::clone(&self.state.host);
+        let request_generation = host.selection_generation();
+        let check_host = Arc::clone(&host);
         cx.spawn(async move |this, cx| {
             let (tx, rx) = futures::channel::oneshot::channel();
-            bridge::runtime().spawn(async move {
+            let _task = bridge::abort_on_drop(bridge::runtime().spawn(async move {
                 let info = host.info().await;
                 let usage = host.disk_usage().await;
                 let _ = tx.send((info, usage));
-            });
+            }));
             if let Ok((info, usage)) = rx.await {
+                if check_host.selection_generation() != request_generation {
+                    return;
+                }
                 let _ = this.update(cx, |this: &mut Self, cx| {
                     match info {
                         Ok(i) => {
@@ -57,7 +69,16 @@ impl Dashboard {
                         }
                         Err(e) => this.error = Some(e.message),
                     }
-                    this.usage = usage.ok();
+                    this.usage = match usage {
+                        Ok(usage) => {
+                            this.usage_error = None;
+                            Some(usage)
+                        }
+                        Err(error) => {
+                            this.usage_error = Some(error.message);
+                            None
+                        }
+                    };
                     cx.notify();
                 });
             }
@@ -65,19 +86,64 @@ impl Dashboard {
         .detach();
     }
 
+    fn ask_prune(&mut self, cx: &mut Context<Self>) {
+        self.confirm_cleanup = true;
+        cx.notify();
+    }
+
+    fn cancel_prune(&mut self, cx: &mut Context<Self>) {
+        self.confirm_cleanup = false;
+        cx.notify();
+    }
+
     fn prune(&mut self, cx: &mut Context<Self>) {
+        self.confirm_cleanup = false;
         let host = Arc::clone(&self.state.host);
         let state = self.state.clone();
         self.pruning = true;
         cx.notify();
-        bridge::run(cx, async move { host.prune_all().await }, move |reports, cx| {
-            let freed: i64 = reports.iter().map(|r| r.reclaimed).sum();
-            tracing::info!("cleanup reclaimed {}", format::bytes(freed));
-            state.bump(cx);
-        });
+        bridge::run(
+            cx,
+            async move { host.prune_all().await },
+            move |reports, cx| {
+                let freed: i64 = reports.iter().map(|r| r.reclaimed).sum();
+                tracing::info!("cleanup reclaimed {}", format::bytes(freed));
+                let failures = reports
+                    .iter()
+                    .filter_map(|report| {
+                        report
+                            .error
+                            .as_ref()
+                            .map(|error| format!("{}: {error}", report.kind))
+                    })
+                    .collect::<Vec<_>>();
+                if failures.is_empty() {
+                    state.toast_titled(
+                        cx,
+                        "Cleanup complete",
+                        format!("Freed {}", format::bytes(freed)),
+                        ColorName::Green,
+                    );
+                } else {
+                    state.toast_titled(
+                        cx,
+                        "Cleanup partially completed",
+                        failures.join("; "),
+                        ColorName::Yellow,
+                    );
+                }
+                state.bump(cx);
+            },
+        );
     }
 
-    fn stat(&self, label: &str, value: String, hint: Option<String>, cx: &gpui::App) -> impl IntoElement {
+    fn stat(
+        &self,
+        label: &str,
+        value: String,
+        hint: Option<String>,
+        cx: &gpui::App,
+    ) -> impl IntoElement {
         let palette = theme::palette(cx);
         let mut stack = Stack::new()
             .gap(Size::Xs)
@@ -114,6 +180,7 @@ impl Render for Dashboard {
         } else if let Some(info) = self.info.clone() {
             let usage = self.usage;
             let reclaimable = usage.map(|u| u.total_reclaimable()).unwrap_or(0);
+            let host_memory = (info.mem_total > 0).then(|| format::bytes(info.mem_total));
 
             let counts = div()
                 .flex()
@@ -125,12 +192,7 @@ impl Render for Dashboard {
                     cx,
                 ))
                 .child(self.stat("Images", info.images.to_string(), None, cx))
-                .child(self.stat(
-                    "CPUs",
-                    info.ncpu.to_string(),
-                    Some(format::bytes(info.mem_total)),
-                    cx,
-                ));
+                .child(self.stat("CPUs", info.ncpu.to_string(), host_memory, cx));
 
             let disk = usage.map(|u| {
                 div()
@@ -138,12 +200,7 @@ impl Render for Dashboard {
                     .gap_3()
                     .child(self.stat("Images on disk", format::bytes(u.images.size), None, cx))
                     .child(self.stat("Volumes", format::bytes(u.volumes.size), None, cx))
-                    .child(self.stat(
-                        "Build cache",
-                        format::bytes(u.build_cache.size),
-                        None,
-                        cx,
-                    ))
+                    .child(self.stat("Build cache", format::bytes(u.build_cache.size), None, cx))
             });
 
             let cleanup = Button::new(
@@ -160,12 +217,19 @@ impl Render for Dashboard {
             // Nothing to reclaim means nothing to do; a live button would just
             // report "freed 0 B".
             .disabled(self.pruning || reclaimable <= 0)
-            .on_click(cx.listener(|this, _, _, cx| this.prune(cx)));
+            .on_click(cx.listener(|this, _, _, cx| this.ask_prune(cx)));
 
             let mut stack = Stack::new()
                 .gap(Size::Md)
                 .child(Text::new(info.name.clone()).size(Size::Sm).medium())
                 .child(counts);
+            if let Some(error) = &self.usage_error {
+                stack = stack.child(
+                    Text::new(format!("Disk usage unavailable: {error}"))
+                        .size(Size::Xs)
+                        .color(guise::theme::theme(cx).color(ColorName::Yellow, 6)),
+                );
+            }
             if let Some(disk) = disk {
                 stack = stack.child(disk).child(cleanup);
             }
@@ -174,7 +238,7 @@ impl Render for Dashboard {
             crate::views::message("Loading…")
         };
 
-        div()
+        let mut root = div()
             .flex()
             .flex_col()
             .size_full()
@@ -198,6 +262,22 @@ impl Render for Dashboard {
                             .size(Size::Xs),
                     ),
             )
-            .child(div().flex_1().overflow_hidden().child(body))
+            .child(div().flex_1().overflow_hidden().child(body));
+
+        if self.confirm_cleanup {
+            root = root.child(
+                ConfirmModal::new()
+                    .title("Clean up unused resources?")
+                    .message(
+                        "This removes stopped containers, unused images, volumes, networks, and build cache. It cannot be undone.",
+                    )
+                    .confirm_label("Clean up")
+                    .danger()
+                    .on_confirm(cx.listener(|this, _, _, cx| this.prune(cx)))
+                    .on_cancel(cx.listener(|this, _, _, cx| this.cancel_prune(cx))),
+            );
+        }
+
+        root
     }
 }

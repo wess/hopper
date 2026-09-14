@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use futures::SinkExt;
 use gpui::prelude::*;
 use gpui::{div, px, Context, Entity, SharedString, Window};
 use guise::prelude::*;
@@ -124,7 +125,8 @@ impl Registry {
             },
         );
         self.layers.remove(&reference);
-        self.state.toast_titled(cx, "Pulling", reference.clone(), ColorName::Blue);
+        self.state
+            .toast_titled(cx, "Pulling", reference.clone(), ColorName::Blue);
         cx.notify();
 
         let host = Arc::clone(&self.state.host);
@@ -136,11 +138,11 @@ impl Registry {
         // then report the terminal result as one final message.
         bridge::stream(
             cx,
-            move |tx| async move {
-                let frames = tx.clone();
+            move |mut tx| async move {
+                let mut frames = tx.clone();
                 let result = host
                     .pull(&id, &id, move |p| {
-                        let _ = frames.unbounded_send(PullMsg::Frame(p));
+                        let _ = frames.try_send(PullMsg::Frame(p));
                     })
                     .await;
                 let outcome = match result {
@@ -148,7 +150,9 @@ impl Registry {
                     Ok(t) => Err(t.error.unwrap_or_else(|| "pull failed".into())),
                     Err(e) => Err(e.message),
                 };
-                let _ = tx.unbounded_send(PullMsg::Done(outcome));
+                // Never drop the terminal result behind a full progress
+                // queue; the UI needs it to leave the pull in a final state.
+                let _ = tx.send(PullMsg::Done(outcome)).await;
             },
             move |msg, cx| {
                 let Some(this) = this.upgrade() else { return };
@@ -163,7 +167,8 @@ impl Registry {
                         cx.notify();
                     }
                     PullMsg::Done(Err(e)) => {
-                        this.pulls.insert(reference.clone(), Pull::Failed(e.clone()));
+                        this.pulls
+                            .insert(reference.clone(), Pull::Failed(e.clone()));
                         this.layers.remove(&reference);
                         state.toast_titled(cx, "Pull failed", e, ColorName::Red);
                         cx.notify();
@@ -209,8 +214,16 @@ impl Registry {
             source.label(),
         )
         .size(Size::Xs)
-        .variant(if active { Variant::Light } else { Variant::Subtle })
-        .color(if active { ColorName::Blue } else { ColorName::Gray })
+        .variant(if active {
+            Variant::Light
+        } else {
+            Variant::Subtle
+        })
+        .color(if active {
+            ColorName::Blue
+        } else {
+            ColorName::Gray
+        })
         .on_click(cx.listener(move |this, _, _, cx| this.set_source(source, cx)))
     }
 
@@ -267,7 +280,11 @@ impl Registry {
                 )
                 .size(Size::Xs)
                 .variant(Variant::Light)
-                .color(if failed { ColorName::Orange } else { ColorName::Green })
+                .color(if failed {
+                    ColorName::Orange
+                } else {
+                    ColorName::Green
+                })
                 .on_click(cx.listener(move |this, _, _, cx| this.pull(reference.clone(), cx)))
                 .into_any_element()
             }
@@ -308,8 +325,7 @@ impl Registry {
                 }
             }
             Some(Pull::Done) => {
-                left = left
-                    .child(Text::new("Pulled — ready to run").size(Size::Xs).dimmed());
+                left = left.child(Text::new("Pulled — ready to run").size(Size::Xs).dimmed());
             }
             Some(Pull::Failed(e)) => {
                 left = left.child(Text::new(e.clone()).size(Size::Xs).dimmed());

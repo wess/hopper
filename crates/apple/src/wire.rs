@@ -136,10 +136,7 @@ impl Filesystem {
         let serde_json::Value::Object(m) = &self.kind else {
             return None;
         };
-        m.get("volume")?
-            .get("name")?
-            .as_str()
-            .map(str::to_string)
+        m.get("volume")?.get("name")?.as_str().map(str::to_string)
     }
 
     fn readonly(&self) -> bool {
@@ -274,7 +271,11 @@ impl ManagedContainer {
         let cfg = self.configuration;
         // Apple containers carry no separate name: the id the user chose with
         // `--name` *is* the id.
-        let id = if self.id.is_empty() { cfg.id.clone() } else { self.id };
+        let id = if self.id.is_empty() {
+            cfg.id.clone()
+        } else {
+            self.id
+        };
 
         let mut command = cfg.init_process.executable.clone();
         for arg in &cfg.init_process.arguments {
@@ -319,7 +320,11 @@ impl ManagedContainer {
                     kind: kind.to_string(),
                     source: m.source.clone(),
                     destination: m.destination.clone(),
-                    mode: if m.readonly() { "ro".into() } else { "rw".into() },
+                    mode: if m.readonly() {
+                        "ro".into()
+                    } else {
+                        "rw".into()
+                    },
                     rw: !m.readonly(),
                     name,
                 }
@@ -398,7 +403,11 @@ impl ImageResource {
 impl VolumeResource {
     pub fn into_model(self) -> Volume {
         let cfg = self.configuration;
-        let name = if cfg.name.is_empty() { self.id } else { cfg.name };
+        let name = if cfg.name.is_empty() {
+            self.id
+        } else {
+            cfg.name
+        };
         Volume {
             name,
             driver: cfg.format.unwrap_or_else(|| "local".into()),
@@ -417,7 +426,11 @@ impl VolumeResource {
 impl NetworkResource {
     pub fn into_model(self) -> Network {
         let cfg = self.configuration;
-        let name = if cfg.name.is_empty() { self.id.clone() } else { cfg.name };
+        let name = if cfg.name.is_empty() {
+            self.id.clone()
+        } else {
+            cfg.name
+        };
         let subnet = cfg
             .subnet
             .or_else(|| self.status.get("address")?.as_str().map(str::to_string));

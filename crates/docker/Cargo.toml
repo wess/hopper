@@ -15,8 +15,10 @@ hyper = { workspace = true }
 hyper-util = { workspace = true }
 http-body-util = { workspace = true }
 bytes = { workspace = true }
-tokio-native-tls = { workspace = true }
-native-tls = { workspace = true }
+rustls = { workspace = true }
+rustls-pki-types = { workspace = true }
+rustls-native-certs = { workspace = true }
+tokio-rustls = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -32,3 +34,6 @@ tar = { workspace = true }
 ignore = { workspace = true }
 keyring = { workspace = true }
 dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

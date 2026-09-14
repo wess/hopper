@@ -16,6 +16,7 @@ pub struct Images {
     state: AppState,
     last_epoch: u64,
     busy: Option<String>,
+    confirm_remove: Option<String>,
 }
 
 impl Images {
@@ -29,18 +30,27 @@ impl Images {
             state,
             last_epoch: 0,
             busy: None,
+            confirm_remove: None,
         };
         view.reload(cx);
         view
     }
 
     fn reload(&self, cx: &mut Context<Self>) {
+        if !self.state.host.selection_ready() {
+            return;
+        }
         let host = Arc::clone(&self.state.host);
+        let request_generation = host.selection_generation();
+        let check_host = Arc::clone(&host);
         let signal = self.state.images.clone();
         bridge::run(
             cx,
             async move { host.images(false).await },
             move |result, cx| {
+                if check_host.selection_generation() != request_generation {
+                    return;
+                }
                 signal.set(
                     cx,
                     match result {
@@ -65,10 +75,21 @@ impl Images {
                     // In use by a container is the common case; the daemon's
                     // own message says which one.
                     tracing::warn!("image remove failed: {}", e.message);
+                    state.toast_titled(cx, "Could not remove image", e.message, ColorName::Red);
                 }
                 state.bump(cx);
             },
         );
+    }
+
+    fn ask_remove(&mut self, id: String, cx: &mut Context<Self>) {
+        self.confirm_remove = Some(id);
+        cx.notify();
+    }
+
+    fn cancel_remove(&mut self, cx: &mut Context<Self>) {
+        self.confirm_remove = None;
+        cx.notify();
     }
 
     fn row(&self, img: &Image, cx: &mut Context<Self>) -> impl IntoElement {
@@ -150,7 +171,9 @@ impl Images {
                             .variant(Variant::Subtle)
                             .color(ColorName::Red)
                             .disabled(busy)
-                            .on_click(cx.listener(move |this, _, _, cx| this.remove(id.clone(), cx))),
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.ask_remove(id.clone(), cx)),
+                            ),
                     ),
             )
     }
@@ -220,7 +243,7 @@ impl Render for Images {
             .map(|l| l.iter().map(|i| i.size).sum())
             .unwrap_or(0);
 
-        div()
+        let mut root = div()
             .flex()
             .flex_col()
             .size_full()
@@ -246,6 +269,25 @@ impl Render for Images {
                     )
                     .child(Text::new(format::bytes(total)).size(Size::Xs).dimmed()),
             )
-            .child(div().flex_1().overflow_hidden().child(body))
+            .child(div().flex_1().overflow_hidden().child(body));
+
+        if let Some(id) = self.confirm_remove.clone() {
+            root = root.child(
+                ConfirmModal::new()
+                    .title("Remove image?")
+                    .message(format!(
+                        "Remove {id}? Containers using it will keep running, but the image cannot be recovered from Hopper."
+                    ))
+                    .confirm_label("Remove image")
+                    .danger()
+                    .on_confirm(cx.listener(move |this, _, _, cx| {
+                        this.confirm_remove = None;
+                        this.remove(id.clone(), cx);
+                    }))
+                    .on_cancel(cx.listener(|this, _, _, cx| this.cancel_remove(cx))),
+            );
+        }
+
+        root
     }
 }

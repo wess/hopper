@@ -38,7 +38,12 @@ impl Containers {
     }
 
     fn reload(&self, cx: &mut Context<Self>) {
+        if !self.state.host.selection_ready() {
+            return;
+        }
         let host = Arc::clone(&self.state.host);
+        let request_generation = host.selection_generation();
+        let check_host = Arc::clone(&host);
         let all = self.state.show_all.get(cx);
         let signal = self.state.containers.clone();
         let state = self.state.clone();
@@ -46,12 +51,19 @@ impl Containers {
             cx,
             async move { host.containers(all).await },
             move |result, cx| {
+                if check_host.selection_generation() != request_generation {
+                    return;
+                }
                 let next = match result {
                     Ok(list) => {
                         // Dev-only: auto-open the first running container's
                         // detail pane, so the detail tabs can be screenshotted.
                         if std::env::var("HOPPER_SELECT").is_ok() {
-                            if let Some(c) = list.iter().find(|c| c.state.is_up()).or_else(|| list.first()) {
+                            if let Some(c) = list
+                                .iter()
+                                .find(|c| c.state.is_up())
+                                .or_else(|| list.first())
+                            {
                                 if state.selected.get(cx).is_none() {
                                     state.selected.set(cx, Some(c.clone()));
                                 }
@@ -85,6 +97,12 @@ impl Containers {
             move |result, cx| {
                 if let Err(e) = result {
                     tracing::warn!("container action failed: {}", e.message);
+                    let title = match action {
+                        Action::Start => "Could not start container",
+                        Action::Stop => "Could not stop container",
+                        Action::Restart => "Could not restart container",
+                    };
+                    state.toast_titled(cx, title, e.message, ColorName::Red);
                 }
                 // Refetch either way: a failure still may have changed state.
                 state.bump(cx);
@@ -129,7 +147,10 @@ impl Containers {
         let ports = c
             .ports
             .iter()
-            .filter_map(|p| p.public_port.map(|pub_port| format!("{pub_port}→{}", p.private_port)))
+            .filter_map(|p| {
+                p.public_port
+                    .map(|pub_port| format!("{pub_port}→{}", p.private_port))
+            })
             .collect::<Vec<_>>()
             .join(", ");
 
@@ -243,7 +264,11 @@ impl Containers {
                     }
                     return div()
                         .p_6()
-                        .child(Text::new("No containers match your search.").size(Size::Sm).dimmed())
+                        .child(
+                            Text::new("No containers match your search.")
+                                .size(Size::Sm)
+                                .dimmed(),
+                        )
                         .into_any_element();
                 }
                 let mut rows = div().flex().flex_col();
@@ -307,7 +332,11 @@ impl Render for Containers {
             .child(
                 Button::new(
                     "toggle-all",
-                    if show_all { "Showing all" } else { "Running only" },
+                    if show_all {
+                        "Showing all"
+                    } else {
+                        "Running only"
+                    },
                 )
                 .size(Size::Xs)
                 .variant(Variant::Subtle)

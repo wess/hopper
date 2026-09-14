@@ -40,9 +40,9 @@ pub struct Found {
 
 /// Every socket worth trying, most specific first.
 ///
-/// `DOCKER_HOST` wins outright when set — a user pointing at a remote or
-/// non-standard daemon means it, and probing local paths would quietly ignore
-/// them.
+/// An explicit Docker or Podman endpoint wins outright — a user pointing at a
+/// remote or non-standard daemon means it, and probing local paths would
+/// quietly ignore them.
 pub fn candidates(env: &Env) -> Vec<Found> {
     let mut out = Vec::new();
 
@@ -82,6 +82,7 @@ pub struct Env {
     pub xdg_runtime_dir: Option<String>,
     pub home: Option<String>,
     pub docker_host: Option<String>,
+    pub container_host: Option<String>,
 }
 
 impl Env {
@@ -89,7 +90,12 @@ impl Env {
         Self {
             xdg_runtime_dir: std::env::var("XDG_RUNTIME_DIR").ok(),
             home: std::env::var("HOME").ok(),
-            docker_host: std::env::var("DOCKER_HOST").ok(),
+            docker_host: std::env::var("DOCKER_HOST")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
+            container_host: std::env::var("CONTAINER_HOST")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
         }
     }
 }
@@ -113,7 +119,7 @@ impl Linux {
 
     fn found(&self) -> Option<Found> {
         let env = Env::from_process();
-        if env.docker_host.is_some() {
+        if env.docker_host.is_some() || env.container_host.is_some() {
             return None;
         }
         detect(&env, &|p| std::path::Path::new(p).exists())
@@ -156,8 +162,12 @@ impl Provider for Linux {
 
         let name = found.flavour.label();
         match self.client.ping().await {
-            Ok(()) => EngineStatus::new(EngineState::Connected, "linux", format!("Connected to {name}."))
-                .endpoint(found.path),
+            Ok(()) => EngineStatus::new(
+                EngineState::Connected,
+                "linux",
+                format!("Connected to {name}."),
+            )
+            .endpoint(found.path),
             Err(e) => {
                 let mut status = crate::status_from(&e, "linux", false, &found.path);
                 if status.state == EngineState::Stopped {
@@ -183,6 +193,7 @@ mod tests {
             xdg_runtime_dir: Some("/run/user/1000".into()),
             home: Some("/home/wess".into()),
             docker_host: None,
+            container_host: None,
         }
     }
 
@@ -226,16 +237,25 @@ mod tests {
 
     #[test]
     fn without_a_runtime_dir_the_system_paths_still_work() {
-        let bare = Env { xdg_runtime_dir: None, home: None, docker_host: None };
+        let bare = Env {
+            xdg_runtime_dir: None,
+            home: None,
+            docker_host: None,
+            container_host: None,
+        };
         let found = detect(&bare, &|p| p == "/var/run/docker.sock").unwrap();
         assert_eq!(found.flavour, Flavour::Docker);
         // And nothing panics or produces a `/podman.sock` from a missing var.
-        assert!(!candidates(&bare).iter().any(|c| c.path.starts_with("/podman")));
+        assert!(!candidates(&bare)
+            .iter()
+            .any(|c| c.path.starts_with("/podman")));
     }
 
     #[tokio::test]
     async fn it_is_never_available_off_linux() {
-        let p = Linux::new(Client::new(Endpoint::Unix { path: "/nope.sock".into() }));
+        let p = Linux::new(Client::new(Endpoint::Unix {
+            path: "/nope.sock".into(),
+        }));
         if !cfg!(target_os = "linux") {
             assert!(!p.available().await);
         }

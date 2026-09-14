@@ -9,6 +9,7 @@
 
 use docker::Endpoint;
 use model::{MigrationPhase, MigrationPlan, MigrationProgress, MigrationScan, RuntimeKind};
+use std::time::Duration;
 
 use crate::facade::Host;
 use crate::runtime::Backend;
@@ -32,7 +33,15 @@ fn destination_endpoint(host: &Host) -> Endpoint {
 impl Host {
     /// What the other engine holds, ready for the user to choose from.
     pub async fn import_scan(&self) -> MigrationScan {
-        let home = std::env::var("HOME").unwrap_or_default();
+        let home = if cfg!(windows) {
+            std::env::var("USERPROFILE")
+                .or_else(|_| std::env::var("HOME"))
+                .unwrap_or_default()
+        } else {
+            std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .unwrap_or_default()
+        };
         migrate::scan(&destination_endpoint(self), &home).await
     }
 
@@ -42,32 +51,35 @@ impl Host {
     /// start without its image; networks before containers for the same
     /// reason.
     pub async fn import_run(&self, plan: &MigrationPlan, report: Report<'_>) -> String {
+        // A migration is one destination-bound operation. Hold selection
+        // stable so a Settings change cannot move the second half of it onto
+        // another engine after images or networks have already arrived.
+        let _selection = self.lock_selection().await;
         let Some(source_endpoint) = plan.source.clone() else {
             return "No source engine was pinned for this import.".into();
         };
         let source = docker::client::Client::new(source_endpoint.into());
+        source.set_timeout(Duration::from_secs(10));
 
         // (images, networks, containers)
         let (images, networks, containers) = match self.backend() {
             #[cfg(target_os = "macos")]
             Backend::Apple(cli) => {
                 let images = migrate::apple::import_images(&source, &cli, plan, report).await;
+                let networks = migrate::apple::import_networks(&source, &cli, plan, report).await;
                 let containers =
                     migrate::apple::import_containers(&source, &cli, plan, report).await;
-                // Apple attaches containers to networks at creation, so there
-                // is nothing to recreate ahead of them.
-                skipped(report, MigrationPhase::Networks, &plan.networks,
-                    "Apple Containers attaches networks when a container is created, so this one was not recreated separately.");
-                (images, 0, containers)
+                (images, networks, containers)
             }
             Backend::EngineApi => {
                 let destination = self.client();
+                let images =
+                    migrate::run::migrate_images(&source, &destination, plan, report).await;
                 let networks =
                     migrate::run::migrate_networks(&source, &destination, plan, report).await;
-                let images = migrate::run::migrate_images(&source, &destination, plan, report).await;
-                skipped(report, MigrationPhase::Containers, &plan.containers,
-                    "Recreating containers on an Engine API engine is not implemented yet — the image came across, so `docker run` it.");
-                (images, networks, 0)
+                let containers =
+                    migrate::run::migrate_containers(&source, &destination, plan, report).await;
+                (images, networks, containers)
             }
         };
 
@@ -110,7 +122,11 @@ fn skipped(report: Report<'_>, phase: MigrationPhase, items: &[String], why: &st
 pub fn summarize(images: usize, networks: usize, containers: usize) -> String {
     let mut parts = Vec::new();
     let plural = |n: usize, one: &str, many: &str| {
-        if n == 1 { format!("{n} {one}") } else { format!("{n} {many}") }
+        if n == 1 {
+            format!("{n} {one}")
+        } else {
+            format!("{n} {many}")
+        }
     };
     if images > 0 {
         parts.push(plural(images, "image", "images"));
@@ -176,7 +192,10 @@ mod tests {
     #[test]
     fn singulars_read_correctly() {
         assert_eq!(summarize(1, 0, 0), "Imported 1 image.");
-        assert_eq!(summarize(1, 1, 1), "Imported 1 image, 1 network, and 1 container.");
+        assert_eq!(
+            summarize(1, 1, 1),
+            "Imported 1 image, 1 network, and 1 container."
+        );
     }
 
     #[test]
@@ -186,6 +205,9 @@ mod tests {
 
     #[test]
     fn three_kinds_use_a_serial_comma() {
-        assert_eq!(summarize(2, 3, 4), "Imported 2 images, 3 networks, and 4 containers.");
+        assert_eq!(
+            summarize(2, 3, 4),
+            "Imported 2 images, 3 networks, and 4 containers."
+        );
     }
 }

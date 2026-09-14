@@ -24,7 +24,11 @@ pub fn nav(pages: &[Page], current: &str, groups: &[&str]) -> String {
         }
         out.push_str(&format!("      <h5>{}</h5>\n", escape(group)));
         for p in in_group {
-            let here = if p.slug == current { " class=\"active\"" } else { "" };
+            let here = if p.slug == current {
+                " class=\"active\""
+            } else {
+                ""
+            };
             out.push_str(&format!(
                 "      <a href=\"{}.html\"{}>{}</a>\n",
                 p.slug,
@@ -114,7 +118,7 @@ pub fn shell(page: &Page, pages: &[Page], groups: &[&str]) -> String {
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>
@@ -195,7 +199,10 @@ mod tests {
 
     #[test]
     fn html_special_characters_are_escaped() {
-        assert_eq!(escape("a & b < c > \"d\""), "a &amp; b &lt; c &gt; &quot;d&quot;");
+        assert_eq!(
+            escape("a & b < c > \"d\""),
+            "a &amp; b &lt; c &gt; &quot;d&quot;"
+        );
     }
 
     #[test]
@@ -258,7 +265,10 @@ mod tests {
         p.summary = String::new();
         let html = shell(&p, &[p.clone()], &["Start"]);
         assert!(html.contains("Hopper documentation"));
-        assert!(!html.contains("lede-sm"), "no summary means no lede paragraph");
+        assert!(
+            !html.contains("lede-sm"),
+            "no summary means no lede paragraph"
+        );
     }
 
     #[test]
@@ -266,7 +276,13 @@ mod tests {
         // The tutorials index is <h1>Tutorials</h1>; an <h2>Tutorials</h2>
         // under it says the word twice for no reason.
         let all = vec![page("first", "Tutorials", 1)];
-        let html = index(&all, &["Tutorials"], "tutorials", "Tutorials", "walkthroughs");
+        let html = index(
+            &all,
+            &["Tutorials"],
+            "tutorials",
+            "Tutorials",
+            "walkthroughs",
+        );
         assert!(html.contains("<h1>Tutorials</h1>"));
         assert!(!html.contains("<h2>Tutorials</h2>"));
         assert!(html.contains(r#"href="first.html""#));
@@ -275,7 +291,13 @@ mod tests {
     #[test]
     fn several_groups_keep_their_headings() {
         let all = pages();
-        let html = index(&all, &["Start", "Use"], "docs", "Documentation", "everything");
+        let html = index(
+            &all,
+            &["Start", "Use"],
+            "docs",
+            "Documentation",
+            "everything",
+        );
         assert!(html.contains("<h2>Start</h2>"));
         assert!(html.contains("<h2>Use</h2>"));
     }
@@ -283,7 +305,13 @@ mod tests {
     #[test]
     fn the_index_lists_every_page_as_a_card() {
         let all = pages();
-        let html = index(&all, &["Start", "Use"], "docs", "Documentation", "everything");
+        let html = index(
+            &all,
+            &["Start", "Use"],
+            "docs",
+            "Documentation",
+            "everything",
+        );
         for p in &all {
             assert!(html.contains(&format!(r#"href="{}.html""#, p.slug)));
         }

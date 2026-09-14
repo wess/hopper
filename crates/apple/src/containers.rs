@@ -57,15 +57,16 @@ pub async fn remove(cli: &Cli, id: &str, force: bool) -> Result<()> {
 }
 
 pub async fn prune(cli: &Cli) -> Result<PruneReport> {
-    let before = list(cli, true).await.map(|c| c.len()).unwrap_or(0);
+    let before = list(cli, true).await?.len();
     cli.ok(&["prune"]).await?;
-    let after = list(cli, true).await.map(|c| c.len()).unwrap_or(0);
+    let after = list(cli, true).await?.len();
     Ok(PruneReport {
         kind: "containers".into(),
         removed: before.saturating_sub(after) as i64,
         // Apple reports no per-prune byte count; `system df` is the honest
         // place to see space come back.
         reclaimed: 0,
+        error: None,
     })
 }
 
@@ -136,11 +137,23 @@ pub fn run_args(input: &RunInput) -> Vec<String> {
         a.push("--user".into());
         a.push(user.clone());
     }
+    // Apple's `--entrypoint` names a single executable — `--entrypoint "sh -c"`
+    // fails to find one. Docker's entrypoint is a list, so the rest of it goes
+    // ahead of the command, which is where the runtime would have put it.
+    let mut entry_args = Vec::new();
+    if let Some(entrypoint) = &input.entrypoint {
+        let mut words = split_command(entrypoint).into_iter();
+        if let Some(exe) = words.next() {
+            a.push("--entrypoint".into());
+            a.push(exe);
+            entry_args.extend(words);
+        }
+    }
     if let Some(cpus) = input.limits.cpus {
-        // Apple takes whole CPUs; round up so a 0.5 request still gets one
-        // rather than being dropped.
+        // Apple takes whole CPUs (`--cpus 0.5` is a usage error in 1.2.2);
+        // round up so a 0.5 request still gets one.
         a.push("--cpus".into());
-        a.push((cpus.ceil().max(1.0) as i64).to_string());
+        a.push((cpus.ceil().clamp(1.0, 64.0) as i64).to_string());
     }
     if let Some(bytes) = input.limits.memory {
         a.push("--memory".into());
@@ -158,6 +171,7 @@ pub fn run_args(input: &RunInput) -> Vec<String> {
     }
 
     a.push(input.image.clone());
+    a.extend(entry_args);
 
     if let Some(cmd) = &input.command {
         a.extend(split_command(cmd));
@@ -182,7 +196,10 @@ pub fn unsupported(input: &RunInput) -> Vec<String> {
         out.push("Apple Containers sets the hostname from the container name, so the hostname you gave was not applied.".into());
     }
     if input.limits.memory_reservation.is_some() {
-        out.push("Apple Containers has no soft memory reservation, so that limit was not applied.".into());
+        out.push(
+            "Apple Containers has no soft memory reservation, so that limit was not applied."
+                .into(),
+        );
     }
     if input.limits.pids_limit.is_some() {
         out.push("Apple Containers has no PID limit, so that limit was not applied.".into());
@@ -271,11 +288,14 @@ where
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| DockerError::transport(format!("could not read logs: {e}")))?;
 
     let Some(stdout) = child.stdout.take() else {
-        return Err(DockerError::transport("`container logs` produced no output"));
+        return Err(DockerError::transport(
+            "`container logs` produced no output",
+        ));
     };
     let mut lines = tokio::io::BufReader::new(stdout).lines();
 
@@ -341,23 +361,72 @@ mod tests {
     fn a_udp_port_carries_its_protocol_but_tcp_stays_bare() {
         let mut i = input();
         i.ports = vec![
-            PortMapping { host: "53".into(), container: "53".into(), proto: Some("udp".into()) },
-            PortMapping { host: "80".into(), container: "80".into(), proto: Some("tcp".into()) },
+            PortMapping {
+                host: "53".into(),
+                container: "53".into(),
+                proto: Some("udp".into()),
+            },
+            PortMapping {
+                host: "80".into(),
+                container: "80".into(),
+                proto: Some("tcp".into()),
+            },
         ];
         let a = run_args(&i).join(" ");
         assert!(a.contains("--publish 53:53/udp"));
-        assert!(a.contains("--publish 80:80"), "tcp is the default and reads cleaner bare");
+        assert!(
+            a.contains("--publish 80:80"),
+            "tcp is the default and reads cleaner bare"
+        );
         assert!(!a.contains("80:80/tcp"));
     }
 
     #[test]
-    fn a_fractional_cpu_request_rounds_up_rather_than_disappearing() {
-        // Apple allocates whole CPUs. Truncating 0.5 to 0 would ask for a
-        // container with no processor at all.
+    fn a_fractional_cpu_request_rounds_up_to_a_whole_cpu() {
+        // `container run --cpus 0.5` is a usage error in 1.2.2. Truncating
+        // would ask for 0, so round up.
         let mut i = input();
-        i.limits = ResourceLimits { cpus: Some(0.5), ..Default::default() };
+        i.limits = ResourceLimits {
+            cpus: Some(0.5),
+            ..Default::default()
+        };
         let a = run_args(&i).join(" ");
         assert!(a.contains("--cpus 1"), "got {a}");
+        assert!(!a.contains("0.5"), "got {a}");
+    }
+
+    #[test]
+    fn an_entrypoint_override_reaches_the_runtime() {
+        let mut i = input();
+        i.entrypoint = Some("/bin/sh".into());
+        let a = run_args(&i).join(" ");
+        assert!(a.contains("--entrypoint /bin/sh"), "got {a}");
+        assert!(unsupported(&i).is_empty());
+    }
+
+    #[test]
+    fn an_entrypoint_list_puts_its_arguments_ahead_of_the_command() {
+        // Compose `entrypoint: [sh, -c]`. Apple looks for an executable named
+        // "sh -c" when handed the whole thing.
+        let mut i = input();
+        i.entrypoint = Some("sh -c".into());
+        i.command = Some("'echo ok'".into());
+        let a = run_args(&i);
+        let at = a.iter().position(|x| x == "--entrypoint").unwrap();
+        assert_eq!(a[at + 1], "sh");
+        let image = a.iter().position(|x| x == &i.image).unwrap();
+        assert_eq!(&a[image + 1..], ["-c", "echo ok"]);
+    }
+
+    #[test]
+    fn a_migrated_entrypoint_loses_its_shell_quoting() {
+        // Migration renders an inspected entrypoint shell-quoted; the quotes
+        // must not reach the runtime as part of the executable name.
+        let mut i = input();
+        i.entrypoint = Some("'docker-entrypoint.sh'".into());
+        let a = run_args(&i);
+        let at = a.iter().position(|x| x == "--entrypoint").unwrap();
+        assert_eq!(a[at + 1], "docker-entrypoint.sh");
     }
 
     #[test]
@@ -375,13 +444,19 @@ mod tests {
             split_command(r#"sh -c "echo hello world""#),
             vec!["sh", "-c", "echo hello world"]
         );
-        assert_eq!(split_command("  nginx  -g  daemon off;  "), vec!["nginx", "-g", "daemon", "off;"]);
+        assert_eq!(
+            split_command("  nginx  -g  daemon off;  "),
+            vec!["nginx", "-g", "daemon", "off;"]
+        );
     }
 
     #[test]
     fn an_empty_quoted_argument_is_kept() {
         // `--flag ""` means something; dropping it changes the command.
-        assert_eq!(split_command(r#"app --tag "" x"#), vec!["app", "--tag", "", "x"]);
+        assert_eq!(
+            split_command(r#"app --tag "" x"#),
+            vec!["app", "--tag", "", "x"]
+        );
     }
 
     #[test]

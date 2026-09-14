@@ -94,8 +94,8 @@ pub fn load(paths: &[String], env_file: Option<&str>, env: &Vars) -> Result<Load
     let mut config_files = Vec::new();
 
     for path in paths.iter().filter(|p| !p.trim().is_empty()) {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| format!("Could not read {path}: {e}"))?;
+        let text =
+            std::fs::read_to_string(path).map_err(|e| format!("Could not read {path}: {e}"))?;
         let (expanded, unresolved) = interpolate::expand(&text, &vars);
 
         if !unresolved.required.is_empty() {
@@ -144,8 +144,8 @@ pub fn load(paths: &[String], env_file: Option<&str>, env: &Vars) -> Result<Load
     if value.is_null() {
         return Err(format!("{first} has nothing in it."));
     }
-    let file: File = serde_yaml::from_value(value)
-        .map_err(|e| format!("{first} is not a compose file: {e}"))?;
+    let file: File =
+        serde_yaml::from_value(value).map_err(|e| format!("{first} is not a compose file: {e}"))?;
 
     if file.services.is_empty() {
         return Err(format!("{first} declares no services."));
@@ -219,7 +219,11 @@ mod tests {
     #[test]
     fn a_file_loads_with_its_services() {
         let dir = scratch("basic");
-        let p = write(&dir, "compose.yaml", "services:\n  web:\n    image: nginx\n");
+        let p = write(
+            &dir,
+            "compose.yaml",
+            "services:\n  web:\n    image: nginx\n",
+        );
         let loaded = load(&[p], None, &Vars::new()).unwrap();
         assert!(loaded.file.services.contains_key("web"));
         assert_eq!(loaded.project_dir, dir);
@@ -233,7 +237,11 @@ mod tests {
             "compose.yaml",
             "services:\n  web:\n    image: nginx\n    user: root\n",
         );
-        let over = write(&dir, "compose.override.yaml", "services:\n  web:\n    image: caddy\n");
+        let over = write(
+            &dir,
+            "compose.override.yaml",
+            "services:\n  web:\n    image: caddy\n",
+        );
         let loaded = load(&[base, over], None, &Vars::new()).unwrap();
         let web = &loaded.file.services["web"];
         assert_eq!(web.image.as_deref(), Some("caddy"));
@@ -245,16 +253,27 @@ mod tests {
     fn a_dot_env_file_supplies_variables() {
         let dir = scratch("dotenv");
         std::fs::write(dir.join(".env"), "TAG=1.4\n").unwrap();
-        let p = write(&dir, "compose.yaml", "services:\n  web:\n    image: app:${TAG}\n");
+        let p = write(
+            &dir,
+            "compose.yaml",
+            "services:\n  web:\n    image: app:${TAG}\n",
+        );
         let loaded = load(&[p], None, &Vars::new()).unwrap();
-        assert_eq!(loaded.file.services["web"].image.as_deref(), Some("app:1.4"));
+        assert_eq!(
+            loaded.file.services["web"].image.as_deref(),
+            Some("app:1.4")
+        );
     }
 
     #[test]
     fn the_process_environment_beats_the_dot_env_file() {
         let dir = scratch("envwins");
         std::fs::write(dir.join(".env"), "TAG=fromfile\n").unwrap();
-        let p = write(&dir, "compose.yaml", "services:\n  web:\n    image: app:${TAG}\n");
+        let p = write(
+            &dir,
+            "compose.yaml",
+            "services:\n  web:\n    image: app:${TAG}\n",
+        );
         let env: Vars = [("TAG".to_string(), "fromenv".to_string())].into();
         let loaded = load(&[p], None, &env).unwrap();
         assert_eq!(
@@ -267,7 +286,11 @@ mod tests {
     fn an_unset_variable_warns_rather_than_failing() {
         let dir = scratch("unset");
         // Quoted, so expanding to nothing leaves the file parseable.
-        let p = write(&dir, "compose.yaml", "services:\n  web:\n    image: \"app:${TAG}\"\n");
+        let p = write(
+            &dir,
+            "compose.yaml",
+            "services:\n  web:\n    image: \"app:${TAG}\"\n",
+        );
         let loaded = load(&[p], None, &Vars::new()).unwrap();
         assert!(loaded.warnings.iter().any(|w| w.contains("$TAG")));
         assert_eq!(loaded.file.services["web"].image.as_deref(), Some("app:"));
@@ -279,7 +302,11 @@ mod tests {
         // nested mapping. Reporting a YAML error here sends the user to the
         // wrong line entirely.
         let dir = scratch("unsetbreaks");
-        let p = write(&dir, "compose.yaml", "services:\n  web:\n    image: app:${TAG}\n");
+        let p = write(
+            &dir,
+            "compose.yaml",
+            "services:\n  web:\n    image: app:${TAG}\n",
+        );
         let err = load(&[p], None, &Vars::new()).unwrap_err();
         assert!(err.contains("$TAG"), "{err}");
         assert!(err.contains("${TAG:-value}"), "and suggests the fix: {err}");
@@ -301,7 +328,11 @@ mod tests {
     #[test]
     fn broken_yaml_is_refused_by_name() {
         let dir = scratch("broken");
-        let p = write(&dir, "compose.yaml", "services:\n  web:\n   - bad\n  indent\n");
+        let p = write(
+            &dir,
+            "compose.yaml",
+            "services:\n  web:\n   - bad\n  indent\n",
+        );
         let err = load(&[p], None, &Vars::new()).unwrap_err();
         assert!(err.contains("compose.yaml"));
     }
@@ -310,15 +341,26 @@ mod tests {
     fn a_file_with_no_services_is_refused_rather_than_planned_as_empty() {
         let dir = scratch("noservices");
         let p = write(&dir, "compose.yaml", "networks:\n  app:\n");
-        assert!(load(&[p], None, &Vars::new()).unwrap_err().contains("no services"));
+        assert!(load(&[p], None, &Vars::new())
+            .unwrap_err()
+            .contains("no services"));
     }
 
     #[test]
     fn a_named_env_file_that_is_missing_is_an_error_unlike_a_missing_dot_env() {
         let dir = scratch("envfile");
-        let p = write(&dir, "compose.yaml", "services:\n  web:\n    image: nginx\n");
+        let p = write(
+            &dir,
+            "compose.yaml",
+            "services:\n  web:\n    image: nginx\n",
+        );
         // Asking for one by name and not getting it is a mistake worth stopping for.
-        assert!(load(std::slice::from_ref(&p), Some("/nonexistent/.env"), &Vars::new()).is_err());
+        assert!(load(
+            std::slice::from_ref(&p),
+            Some("/nonexistent/.env"),
+            &Vars::new()
+        )
+        .is_err());
         // Not having a `.env` at all is the normal case.
         assert!(load(&[p], None, &Vars::new()).is_ok());
     }

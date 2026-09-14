@@ -55,7 +55,7 @@
       <h1>Troubleshooting</h1>
       <p class="lede-sm">The failures people actually hit, and what they mean.</p>
 <h2>"Apple Containers can't run on this Mac"</h2>
-<p>It needs macOS 26. The vmnet APIs that give containers their own addresses do not
+<p>It needs an Apple silicon Mac running macOS 26. The vmnet APIs that give containers their own addresses do not
 exist earlier. Use a Docker engine instead — Hopper still works as a client.</p>
 <h2>The engine says "stopped" and Start does nothing</h2>
 <p>Check what Apple's own services think:</p>
@@ -112,7 +112,7 @@ signature lives on the app inside.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

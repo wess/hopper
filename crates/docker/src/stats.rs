@@ -67,8 +67,16 @@ pub struct RawStats {
 /// CPU percent from the cumulative counters, the way `docker stats` computes
 /// it: the container's delta over the system's delta, scaled by core count.
 fn cpu_percent(cur: &CpuStats, pre: &CpuStats) -> f64 {
-    let total = cur.cpu_usage.as_ref().and_then(|u| u.total_usage).unwrap_or(0);
-    let pre_total = pre.cpu_usage.as_ref().and_then(|u| u.total_usage).unwrap_or(0);
+    let total = cur
+        .cpu_usage
+        .as_ref()
+        .and_then(|u| u.total_usage)
+        .unwrap_or(0);
+    let pre_total = pre
+        .cpu_usage
+        .as_ref()
+        .and_then(|u| u.total_usage)
+        .unwrap_or(0);
     let system = cur.system_cpu_usage.unwrap_or(0);
     let pre_system = pre.system_cpu_usage.unwrap_or(0);
 
@@ -133,10 +141,7 @@ pub fn reduce(raw: &RawStats) -> ContainerStats {
         .as_ref()
         .map(|nets| {
             nets.values().fold((0u64, 0u64), |(rx, tx), n| {
-                (
-                    rx + n.rx_bytes.unwrap_or(0),
-                    tx + n.tx_bytes.unwrap_or(0),
-                )
+                (rx + n.rx_bytes.unwrap_or(0), tx + n.tx_bytes.unwrap_or(0))
             })
         })
         .unwrap_or((0, 0));
@@ -170,11 +175,7 @@ pub fn reduce(raw: &RawStats) -> ContainerStats {
         net_tx,
         block_read,
         block_write,
-        pids: raw
-            .pids_stats
-            .as_ref()
-            .and_then(|p| p.current)
-            .unwrap_or(0),
+        pids: raw.pids_stats.as_ref().and_then(|p| p.current).unwrap_or(0),
     }
 }
 

@@ -17,6 +17,7 @@ serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+futures = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Apple Containers, the macOS engine. It publishes no socket, so this is a CLI

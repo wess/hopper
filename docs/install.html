@@ -58,8 +58,9 @@
 <pre><code class="language-sh">brew install --cask wess/packages/hopper
 </code></pre>
 <h2>Download</h2>
-<p>Grab <code>Hopper.dmg</code> from the <a href="https://github.com/wess/hopper/releases/latest">latest release</a>,
-open it, and drag <strong>Hopper.app</strong> to Applications.</p>
+<p>Grab the matching macOS asset from the <a href="https://github.com/wess/hopper/releases/latest">latest release</a>:
+<code>Hopper.dmg</code> for Apple silicon, or <code>Hopper-VERSION-intel.dmg</code> for Intel. Open it
+and drag <strong>Hopper.app</strong> to Applications.</p>
 <p>The build is signed with a Developer ID and notarized, so Gatekeeper opens it
 without complaint. If you want to confirm that yourself:</p>
 <pre><code class="language-sh">spctl -a -t exec -vv /Applications/Hopper.app
@@ -68,12 +69,12 @@ without complaint. If you want to confirm that yourself:</p>
 </code></pre>
 <h2>What Hopper needs</h2>
 <table><thead><tr><th></th><th></th></tr></thead><tbody>
-<tr><td><strong>Architecture</strong></td><td>Apple Silicon (arm64)</td></tr>
+<tr><td><strong>Architecture</strong></td><td>Apple Silicon (arm64) or Intel (x86_64)</td></tr>
 <tr><td><strong>macOS</strong></td><td>Sonoma or later to run the app</td></tr>
-<tr><td><strong>For Apple Containers</strong></td><td>macOS 26 or later</td></tr>
+<tr><td><strong>For Apple Containers</strong></td><td>Apple silicon Mac, macOS 26 or later</td></tr>
 </tbody></table>
 <p>The split matters. Hopper itself runs on Sonoma quite happily as a client for an
-engine you already have — Docker Desktop, Colima, Rancher Desktop, or a remote
+engine you already have — Docker Desktop, Podman, Colima, Rancher Desktop, or a remote
 daemon. What needs macOS 26 is <em>Apple's</em> container runtime, because the vmnet
 APIs that give containers their own addresses only exist there.</p>
 <p>Hopper does not block the install over that. It tells you in-app which engines
@@ -98,7 +99,7 @@ it has not come back.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

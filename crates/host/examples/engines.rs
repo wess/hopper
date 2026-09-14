@@ -8,9 +8,9 @@ async fn main() {
     println!("--- offered ---");
     for c in host.engine_choices().await {
         let where_ = c
-            .endpoint
+            .reason
             .clone()
-            .or_else(|| c.reason.clone())
+            .or_else(|| c.endpoint.clone())
             .unwrap_or_default();
         println!(
             "  {:<18} {:<10} {}",
@@ -23,13 +23,19 @@ async fn main() {
     println!("\n--- pinned ---");
     for id in ["apple", "docker", "podman", "colima", "existing"] {
         let status = host.set_engine_preference(Some(id.to_string())).await;
-        println!(
-            "  {:<10} -> provider={:<10} connected={:<5} {}",
-            id, status.provider, status.connected, status.message
-        );
+        match status {
+            Ok(status) => println!(
+                "  {:<10} -> provider={:<10} connected={:<5} {}",
+                id, status.provider, status.connected, status.message
+            ),
+            Err(error) => println!("  {id:<10} -> could not persist preference: {error}"),
+        }
     }
 
     // Hand selection back so the example leaves nothing pinned.
     let status = host.set_engine_preference(None).await;
-    println!("\nautomatic -> {} ({})", status.provider, status.message);
+    match status {
+        Ok(status) => println!("\nautomatic -> {} ({})", status.provider, status.message),
+        Err(error) => println!("\nautomatic -> could not clear preference: {error}"),
+    }
 }

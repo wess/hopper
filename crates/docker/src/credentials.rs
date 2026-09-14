@@ -199,22 +199,29 @@ fn read_config() -> DockerConfig {
 
 /// Ask a credential helper (`docker-credential-<helper> get`) for a secret.
 async fn cred_helper_get(helper: &str, server: &str) -> Option<RegistryAuth> {
+    use std::time::Duration;
     use tokio::io::AsyncWriteExt;
     use tokio::process::Command;
 
     let mut child = Command::new(format!("docker-credential-{helper}"))
         .arg("get")
+        .kill_on_drop(true)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
         .ok()?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(server.as_bytes()).await;
-        let _ = stdin.shutdown().await;
-    }
-    let out = child.wait_with_output().await.ok()?;
+    let out = tokio::time::timeout(Duration::from_secs(10), async {
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(server.as_bytes()).await;
+            let _ = stdin.shutdown().await;
+        }
+        child.wait_with_output().await
+    })
+    .await
+    .ok()?
+    .ok()?;
     if !out.status.success() {
         return None;
     }
@@ -391,7 +398,10 @@ mod tests {
         assert_eq!(with_default_tag("nginx"), "nginx:latest");
         assert_eq!(with_default_tag("nginx:1.25"), "nginx:1.25");
         assert_eq!(with_default_tag("ghcr.io/o/a"), "ghcr.io/o/a:latest");
-        assert_eq!(with_default_tag("localhost:5000/a"), "localhost:5000/a:latest");
+        assert_eq!(
+            with_default_tag("localhost:5000/a"),
+            "localhost:5000/a:latest"
+        );
         // A digest reference is already fully qualified.
         assert_eq!(with_default_tag("nginx@sha256:abc"), "nginx@sha256:abc");
     }
@@ -477,7 +487,10 @@ mod tests {
             }"#,
         );
         assert_eq!(cfg.creds_store.as_deref(), Some("desktop"));
-        assert_eq!(cfg.cred_helpers.get("ghcr.io").map(String::as_str), Some("gh"));
+        assert_eq!(
+            cfg.cred_helpers.get("ghcr.io").map(String::as_str),
+            Some("gh")
+        );
         assert!(cfg.auths.contains_key("https://index.docker.io/v1/"));
     }
 

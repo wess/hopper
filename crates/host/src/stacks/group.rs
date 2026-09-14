@@ -51,10 +51,7 @@ pub fn group(containers: &[Container]) -> Vec<ComposeProject> {
             let mut services: Vec<ComposeService> = members
                 .iter()
                 .map(|c| ComposeService {
-                    service: c
-                        .compose_service
-                        .clone()
-                        .unwrap_or_else(|| c.name.clone()),
+                    service: c.compose_service.clone().unwrap_or_else(|| c.name.clone()),
                     container_id: c.id.clone(),
                     container_name: c.name.clone(),
                     state: c.state,
@@ -98,7 +95,12 @@ mod tests {
     use compose::names::PROJECT;
     use model::{ComposeStackStatus, Health};
 
-    fn container(name: &str, project: Option<&str>, service: Option<&str>, state: ContainerState) -> Container {
+    fn container(
+        name: &str,
+        project: Option<&str>,
+        service: Option<&str>,
+        state: ContainerState,
+    ) -> Container {
         let mut labels = BTreeMap::new();
         if let Some(p) = project {
             labels.insert(PROJECT.to_string(), p.to_string());
@@ -130,9 +132,24 @@ mod tests {
     #[test]
     fn groups_containers_into_their_projects() {
         let list = vec![
-            container("shop-web-1", Some("shop"), Some("web"), ContainerState::Running),
-            container("shop-db-1", Some("shop"), Some("db"), ContainerState::Running),
-            container("blog-web-1", Some("blog"), Some("web"), ContainerState::Exited),
+            container(
+                "shop-web-1",
+                Some("shop"),
+                Some("web"),
+                ContainerState::Running,
+            ),
+            container(
+                "shop-db-1",
+                Some("shop"),
+                Some("db"),
+                ContainerState::Running,
+            ),
+            container(
+                "blog-web-1",
+                Some("blog"),
+                Some("web"),
+                ContainerState::Exited,
+            ),
         ];
         let projects = group(&list);
         assert_eq!(projects.len(), 2);
@@ -147,8 +164,18 @@ mod tests {
     #[test]
     fn a_partially_running_stack_is_marked_partial() {
         let list = vec![
-            container("shop-web-1", Some("shop"), Some("web"), ContainerState::Running),
-            container("shop-db-1", Some("shop"), Some("db"), ContainerState::Exited),
+            container(
+                "shop-web-1",
+                Some("shop"),
+                Some("web"),
+                ContainerState::Running,
+            ),
+            container(
+                "shop-db-1",
+                Some("shop"),
+                Some("db"),
+                ContainerState::Exited,
+            ),
         ];
         let projects = group(&list);
         assert_eq!(projects[0].status, ComposeStackStatus::Partial);
@@ -159,7 +186,12 @@ mod tests {
     fn containers_outside_any_stack_are_ignored() {
         let list = vec![
             container("standalone", None, None, ContainerState::Running),
-            container("shop-web-1", Some("shop"), Some("web"), ContainerState::Running),
+            container(
+                "shop-web-1",
+                Some("shop"),
+                Some("web"),
+                ContainerState::Running,
+            ),
         ];
         let projects = group(&list);
         assert_eq!(projects.len(), 1);
@@ -168,7 +200,12 @@ mod tests {
 
     #[test]
     fn config_files_are_split_out_of_the_comma_joined_label() {
-        let list = vec![container("shop-web-1", Some("shop"), Some("web"), ContainerState::Running)];
+        let list = vec![container(
+            "shop-web-1",
+            Some("shop"),
+            Some("web"),
+            ContainerState::Running,
+        )];
         let projects = group(&list);
         assert_eq!(projects[0].config_files.len(), 2);
         assert_eq!(projects[0].config_files[0], "/srv/app/compose.yaml");
@@ -178,8 +215,18 @@ mod tests {
     #[test]
     fn scaled_replicas_all_appear_under_their_service() {
         let list = vec![
-            container("shop-web-2", Some("shop"), Some("web"), ContainerState::Running),
-            container("shop-web-1", Some("shop"), Some("web"), ContainerState::Running),
+            container(
+                "shop-web-2",
+                Some("shop"),
+                Some("web"),
+                ContainerState::Running,
+            ),
+            container(
+                "shop-web-1",
+                Some("shop"),
+                Some("web"),
+                ContainerState::Running,
+            ),
         ];
         let projects = group(&list);
         assert_eq!(projects[0].services.len(), 2);
@@ -190,7 +237,12 @@ mod tests {
 
     #[test]
     fn a_service_without_a_service_label_falls_back_to_its_container_name() {
-        let list = vec![container("odd-one", Some("shop"), None, ContainerState::Running)];
+        let list = vec![container(
+            "odd-one",
+            Some("shop"),
+            None,
+            ContainerState::Running,
+        )];
         let projects = group(&list);
         assert_eq!(projects[0].services[0].service, "odd-one");
     }

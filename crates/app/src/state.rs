@@ -67,13 +67,18 @@ impl Route {
 
     /// The routes worth showing for this engine.
     pub fn available(caps: &model::EngineCapabilities) -> Vec<Route> {
-        Self::all().into_iter().filter(|r| r.supported(caps)).collect()
+        Self::all()
+            .into_iter()
+            .filter(|r| r.supported(caps))
+            .collect()
     }
 
     /// Parse a route from its label, for the `HOPPER_ROUTE` dev override.
     pub fn from_env() -> Option<Route> {
         let want = std::env::var("HOPPER_ROUTE").ok()?;
-        Route::all().into_iter().find(|r| r.label().eq_ignore_ascii_case(want.trim()))
+        Route::all()
+            .into_iter()
+            .find(|r| r.label().eq_ignore_ascii_case(want.trim()))
     }
 
     /// Sidebar order.
@@ -181,7 +186,10 @@ impl AppState {
             search: Signal::new(cx, String::new()),
             selection: Signal::new(cx, BTreeSet::new()),
             selected: Signal::new(cx, None),
-            sidebar_collapsed: Signal::new(cx, std::env::var("HOPPER_SIDEBAR").as_deref() == Ok("collapsed")),
+            sidebar_collapsed: Signal::new(
+                cx,
+                std::env::var("HOPPER_SIDEBAR").as_deref() == Ok("collapsed"),
+            ),
             run_target: Signal::new(cx, None),
             toasts: cx.new(|_| ToastStack::new().duration(Some(Duration::from_secs(4)))),
             epoch: Signal::new(cx, 0),

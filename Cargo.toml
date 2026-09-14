@@ -56,15 +56,26 @@ hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", 
 http-body-util = "0.1"
 bytes = "1"
 
-# TLS for remote daemons reached over tcp:// with DOCKER_TLS_VERIFY.
-tokio-native-tls = "0.3"
-native-tls = "0.2"
+# TLS for remote daemons reached over tcp:// with DOCKER_TLS_VERIFY. Rustls
+# keeps Linux and Windows builds self-contained; native roots are loaded at
+# runtime by rustls-native-certs.
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+] }
+rustls-pki-types = { version = "1", features = ["std"] }
+rustls-native-certs = "0.8"
+tokio-rustls = { version = "0.26", default-features = false, features = [
+    "ring",
+    "tls12",
+] }
 
 # Registry search + GitHub PAT validation.
 reqwest = { version = "0.12", default-features = false, features = [
     "json",
     "stream",
-    "native-tls",
+    "rustls-tls-native-roots",
 ] }
 
 # Build contexts are streamed to the daemon as a tar; volume migration moves
@@ -88,6 +99,7 @@ async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "6"
+tempfile = "3"
 
 regex = "1"
 base64 = "0.22"

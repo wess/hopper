@@ -24,7 +24,8 @@ gpui. The boundary is `app`.
 
 ## Two engines, one enum
 
-Hopper speaks to two kinds of engine: the Docker Engine API over a socket, and
+Hopper speaks to two kinds of engine: the Docker Engine API over its native
+transport, and
 Apple's runtime over its CLI. `host::runtime::Backend` picks between them.
 
 It is an **enum, not a trait**, and that is deliberate. The streaming calls take

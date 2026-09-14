@@ -8,10 +8,10 @@
 #[cfg(target_os = "macos")]
 pub mod appleinstall;
 pub mod engine;
-pub mod runtime;
 pub mod facade;
 pub mod import;
 pub mod registry;
+pub mod runtime;
 pub mod stacks;
 pub mod status;
 

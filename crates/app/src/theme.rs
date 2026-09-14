@@ -8,6 +8,19 @@ use gpui::Hsla;
 use guise::prelude::*;
 use guise::theme::{Color, Shades};
 
+pub fn scheme(mode: model::ThemeMode, appearance: gpui::WindowAppearance) -> ColorScheme {
+    match mode {
+        model::ThemeMode::Light => ColorScheme::Light,
+        model::ThemeMode::Dark => ColorScheme::Dark,
+        model::ThemeMode::System => match appearance {
+            gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark => ColorScheme::Dark,
+            gpui::WindowAppearance::Light | gpui::WindowAppearance::VibrantLight => {
+                ColorScheme::Light
+            }
+        },
+    }
+}
+
 /// The neutral ramp (`0` … `9`), light to dark.
 const DARK_RAMP: [&str; 10] = [
     "#C9D1D9", "#B1BAC4", "#8B949E", "#6E7681", "#484F58", "#30363D", "#21262D", "#161B22",
@@ -107,6 +120,26 @@ pub fn health_color(health: model::Health) -> Option<ColorName> {
 mod tests {
     use super::*;
     use model::{ContainerState, Health};
+
+    #[test]
+    fn system_theme_uses_the_current_window_appearance() {
+        assert_eq!(
+            scheme(model::ThemeMode::System, gpui::WindowAppearance::Light),
+            ColorScheme::Light
+        );
+        assert_eq!(
+            scheme(model::ThemeMode::System, gpui::WindowAppearance::Dark),
+            ColorScheme::Dark
+        );
+        assert_eq!(
+            scheme(model::ThemeMode::Light, gpui::WindowAppearance::Dark),
+            ColorScheme::Light
+        );
+        assert_eq!(
+            scheme(model::ThemeMode::Dark, gpui::WindowAppearance::Light),
+            ColorScheme::Dark
+        );
+    }
 
     #[test]
     fn every_container_state_has_a_distinct_enough_accent() {

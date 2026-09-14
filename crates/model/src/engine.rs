@@ -85,7 +85,11 @@ pub struct EngineStatus {
 }
 
 impl EngineStatus {
-    pub fn new(state: EngineState, provider: impl Into<String>, message: impl Into<String>) -> Self {
+    pub fn new(
+        state: EngineState,
+        provider: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             state,
             connected: state == EngineState::Connected,
@@ -130,11 +134,21 @@ impl Default for EngineStatus {
 pub struct EngineChoice {
     pub id: String,
     pub label: String,
-    /// Present and usable on this machine right now.
+    /// The provider can be addressed on this platform (for example, its
+    /// socket exists or its named pipe can be opened). This does not imply
+    /// that the daemon has completed a health probe.
     pub available: bool,
+    /// The provider answered its health probe.
+    #[serde(default)]
+    pub connected: bool,
+    /// The provider's most recent health state. Keeping this beside the
+    /// derived booleans lets Settings distinguish a stale socket from an
+    /// engine that is merely not installed.
+    #[serde(default = "default_choice_state")]
+    pub state: EngineState,
     /// Hopper owns its lifecycle, so it can be installed and started here.
     pub managed: bool,
-    /// Why it cannot be chosen, when it cannot.
+    /// Current health or availability explanation, when one is useful.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub reason: Option<String>,
     /// Where it listens, when it is there to listen. A machine with several
@@ -142,6 +156,10 @@ pub struct EngineChoice {
     /// apart — two rows both saying "Connected." are not a choice.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub endpoint: Option<String>,
+}
+
+fn default_choice_state() -> EngineState {
+    EngineState::NotInstalled
 }
 
 /// Configurable VM resources for a managed engine. CPU and memory apply when
@@ -160,6 +178,19 @@ impl Default for EngineResources {
             cpus: 4,
             memory_gib: 4,
             disk_gib: 60,
+        }
+    }
+}
+
+impl EngineResources {
+    /// Keep persisted settings from creating an unusable or unexpectedly
+    /// expensive managed VM. These are deliberately conservative hard bounds;
+    /// a provider can impose a tighter hardware-specific limit when it starts.
+    pub fn bounded(self) -> Self {
+        Self {
+            cpus: self.cpus.clamp(1, 64),
+            memory_gib: self.memory_gib.clamp(1, 256),
+            disk_gib: self.disk_gib.clamp(10, 2_048),
         }
     }
 }
@@ -188,7 +219,7 @@ pub struct DockerCliStatus {
     pub detail: String,
     /// Whether the `docker` on PATH is the one Hopper ships. When Docker
     /// Desktop is uninstalled its CLI goes with it, so Hopper bundles its own
-    /// and can install a shim onto PATH.
+    /// for internal Compose compatibility; it does not silently modify PATH.
     #[serde(default)]
     pub bundled: bool,
 }
@@ -268,6 +299,8 @@ pub struct EngineCapabilities {
     pub build: bool,
     /// Restart policies on `run`.
     pub restart_policy: bool,
+    /// Override an image entrypoint when creating a container.
+    pub entrypoint: bool,
 }
 
 impl EngineCapabilities {
@@ -287,6 +320,7 @@ impl EngineCapabilities {
             compose: true,
             build: true,
             restart_policy: true,
+            entrypoint: true,
         }
     }
 
@@ -318,6 +352,7 @@ impl EngineCapabilities {
             // `container build` exists, but Hopper's build path is Engine API.
             build: false,
             restart_policy: false,
+            entrypoint: true,
         }
     }
 
@@ -374,5 +409,78 @@ mod capability_tests {
             EngineCapabilities::for_runtime(RuntimeKind::EngineApi),
             EngineCapabilities::engine_api()
         );
+    }
+}
+
+#[cfg(test)]
+mod resource_tests {
+    use super::*;
+
+    #[test]
+    fn resource_settings_are_bounded_before_a_vm_can_use_them() {
+        assert_eq!(
+            (EngineResources {
+                cpus: 0,
+                memory_gib: 0,
+                disk_gib: 0
+            })
+            .bounded(),
+            EngineResources {
+                cpus: 1,
+                memory_gib: 1,
+                disk_gib: 10
+            }
+        );
+        assert_eq!(
+            (EngineResources {
+                cpus: u32::MAX,
+                memory_gib: u32::MAX,
+                disk_gib: u32::MAX
+            })
+            .bounded(),
+            EngineResources {
+                cpus: 64,
+                memory_gib: 256,
+                disk_gib: 2_048
+            }
+        );
+    }
+}
+
+#[cfg(test)]
+mod choice_tests {
+    use super::*;
+
+    #[test]
+    fn old_choice_payloads_default_to_not_installed_state() {
+        let choice: EngineChoice = serde_json::from_str(
+            r#"{
+                "id": "docker",
+                "label": "Docker",
+                "available": true,
+                "managed": false
+            }"#,
+        )
+        .unwrap();
+        assert_eq!(choice.state, EngineState::NotInstalled);
+        assert!(!choice.connected);
+    }
+
+    #[test]
+    fn current_choice_payloads_preserve_health_state() {
+        let choice = EngineChoice {
+            id: "docker".into(),
+            label: "Docker".into(),
+            available: true,
+            connected: false,
+            state: EngineState::Unreachable,
+            managed: false,
+            reason: Some("socket did not answer".into()),
+            endpoint: Some("unix:/var/run/docker.sock".into()),
+        };
+        let raw = serde_json::to_string(&choice).unwrap();
+        let back: EngineChoice = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back.state, EngineState::Unreachable);
+        assert_eq!(back.reason, choice.reason);
     }
 }

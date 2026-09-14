@@ -278,3 +278,4 @@ initrd
 # Generated engine build output (guest kernel/initrd, fetched host binaries).
 # Cargo.lock IS committed — Hopper is an application, not a library.
 /native/build
+.impeccable

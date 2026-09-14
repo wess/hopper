@@ -96,7 +96,9 @@ pub async fn create(
         "Driver": driver.unwrap_or("local"),
         "Labels": labels,
     });
-    let raw: RawVolume = client.json(Req::post("/volumes/create").json_body(body)).await?;
+    let raw: RawVolume = client
+        .json(Req::post("/volumes/create").json_body(body))
+        .await?;
     Ok(map_volume(raw, &BTreeSet::new()))
 }
 
@@ -120,6 +122,7 @@ pub async fn prune(client: &Client) -> Result<PruneReport> {
         kind: "volumes".into(),
         removed: raw.deleted.unwrap_or_default().len() as i64,
         reclaimed: raw.reclaimed.unwrap_or_default(),
+        error: None,
     })
 }
 

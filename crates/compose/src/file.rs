@@ -190,7 +190,11 @@ pub enum EnvFile {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum EnvFileEntry {
-    Long { path: String, #[serde(default)] required: Option<bool> },
+    Long {
+        path: String,
+        #[serde(default)]
+        required: Option<bool>,
+    },
     Path(String),
 }
 
@@ -451,7 +455,10 @@ mod tests {
     #[test]
     fn depends_on_reads_as_a_list_or_a_condition_map() {
         let s = service("depends_on: [db]");
-        assert_eq!(s.depends_on.unwrap().into_pairs(), vec![("db".into(), None)]);
+        assert_eq!(
+            s.depends_on.unwrap().into_pairs(),
+            vec![("db".into(), None)]
+        );
 
         let s = service("depends_on:\n  db:\n    condition: service_healthy\n");
         assert_eq!(
@@ -476,9 +483,10 @@ mod tests {
 
     #[test]
     fn external_reads_as_a_flag_or_a_name() {
-        let f: File =
-            serde_yaml::from_str("networks:\n  a:\n    external: true\n  b:\n    external:\n      name: shared\n")
-                .unwrap();
+        let f: File = serde_yaml::from_str(
+            "networks:\n  a:\n    external: true\n  b:\n    external:\n      name: shared\n",
+        )
+        .unwrap();
         let a = f.networks["a"].as_ref().unwrap();
         assert!(a.external.as_ref().unwrap().is_external());
         let b = f.networks["b"].as_ref().unwrap();

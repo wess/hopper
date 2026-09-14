@@ -54,11 +54,11 @@
     <article class="docs-body">
       <h1>Engines</h1>
       <p class="lede-sm">Apple Containers on macOS, Docker or Podman on Linux, and anything that answers the Engine API.</p>
-<p>Hopper does not have one engine. It has three ways of finding one, tried in
-order, and it tells you which answered.</p>
-<h2>macOS — Apple Containers</h2>
+<p>Hopper does not have one engine. It discovers the engines that make sense on
+this machine, shows them separately, and tells you which one answered.</p>
+<h2>macOS Apple silicon — Apple Containers</h2>
 <p><a href="https://github.com/apple/container">Apple's <code>container</code></a> ships as part of the
-macOS 26 story: every container is its own lightweight virtual machine, images
+macOS 26 story and requires Apple silicon: every container is its own lightweight virtual machine, images
 are OCI, and Apple maintains it. Hopper installs it, starts and stops its
 services, and drives it.</p>
 <p>This is the default on macOS. If <code>container</code> is not on the machine, Hopper
@@ -76,7 +76,11 @@ desktop Podman is not passed over in favour of a stale root daemon:</p>
 </ol>
 <p>Podman's socket is deliberately Docker-compatible, so nothing else changes.
 <code>DOCKER_HOST</code>, when set, wins outright — if you are pointing at a remote daemon
-you mean it.</p>
+you mean it. <code>CONTAINER_HOST</code> is also accepted when <code>DOCKER_HOST</code> is unset.</p>
+<h2>Windows — Docker Desktop or Podman</h2>
+<p>Hopper checks Docker Desktop's <code>docker_engine</code> named pipe and Podman's default
+machine pipe. They are shown as separate choices when both are present, and
+Hopper attaches to the one you select without taking over its lifecycle.</p>
 <h2>Anywhere — an engine you already run</h2>
 <p>Docker Desktop, Colima, Rancher Desktop, or a daemon over TCP. This one is
 always available and always last, so Hopper stays useful whatever else fails.</p>
@@ -121,7 +125,9 @@ the compose file and creates the containers itself — see
 default:</p>
 <pre><code class="language-sh">HOPPER_ENGINE=existing /Applications/Hopper.app/Contents/MacOS/hopper
 </code></pre>
-<p>Valid ids are <code>apple</code>, <code>linux</code>, and <code>existing</code>.</p>
+<p>Valid ids depend on the platform. The common ids are <code>existing</code>, <code>docker</code>, and
+<code>podman</code>; macOS also offers <code>apple</code>, <code>colima</code>, and <code>rancher</code> when those engines
+are supported by the host.</p>
 <p>An engine you name is honoured even when it cannot run yet — Hopper reports on
 the one you asked for and what it needs, rather than quietly answering about a
 different one.</p>
@@ -134,7 +140,7 @@ different one.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

@@ -6,6 +6,7 @@ use crate::error::Result;
 use model::{DiskUsage, DockerEvent, PruneReport, SystemInfo, SystemVersion, UsageBucket};
 use serde::Deserialize;
 use serde_json::Value;
+use std::time::Duration;
 
 pub async fn ping(client: &Client) -> bool {
     client.ping().await.is_ok()
@@ -30,7 +31,9 @@ struct RawVersion {
 }
 
 pub async fn version(client: &Client) -> Result<SystemVersion> {
-    let v: RawVersion = client.json(Req::get("/version")).await?;
+    let v: RawVersion = client
+        .json(Req::get("/version").timeout(Duration::from_secs(3)))
+        .await?;
     Ok(SystemVersion {
         version: v.version.unwrap_or_default(),
         api_version: v.api_version.unwrap_or_default(),
@@ -215,11 +218,13 @@ pub async fn prune_all(client: &Client) -> Vec<PruneReport> {
                     .get("SpaceReclaimed")
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0),
+                error: None,
             },
-            Err(_) => PruneReport {
+            Err(error) => PruneReport {
                 kind: kind.into(),
                 removed: 0,
                 reclaimed: 0,
+                error: Some(error.message),
             },
         };
         reports.push(report);

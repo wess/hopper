@@ -15,6 +15,7 @@ pub struct Networks {
     state: AppState,
     last_epoch: u64,
     busy: Option<String>,
+    confirm_remove: Option<String>,
 }
 
 impl Networks {
@@ -28,23 +29,36 @@ impl Networks {
             state,
             last_epoch: 0,
             busy: None,
+            confirm_remove: None,
         };
         view.reload(cx);
         view
     }
 
     fn reload(&self, cx: &mut Context<Self>) {
+        if !self.state.host.selection_ready() {
+            return;
+        }
         let host = Arc::clone(&self.state.host);
+        let request_generation = host.selection_generation();
+        let check_host = Arc::clone(&host);
         let signal = self.state.networks.clone();
-        bridge::run(cx, async move { host.networks().await }, move |result, cx| {
-            signal.set(
-                cx,
-                match result {
-                    Ok(list) => Load::Ready(list),
-                    Err(e) => Load::Failed(e.message),
-                },
-            );
-        });
+        bridge::run(
+            cx,
+            async move { host.networks().await },
+            move |result, cx| {
+                if check_host.selection_generation() != request_generation {
+                    return;
+                }
+                signal.set(
+                    cx,
+                    match result {
+                        Ok(list) => Load::Ready(list),
+                        Err(e) => Load::Failed(e.message),
+                    },
+                );
+            },
+        );
     }
 
     fn remove(&mut self, id: String, cx: &mut Context<Self>) {
@@ -58,10 +72,21 @@ impl Networks {
             move |result, cx| {
                 if let Err(e) = result {
                     tracing::warn!("network remove failed: {}", e.message);
+                    state.toast_titled(cx, "Could not remove network", e.message, ColorName::Red);
                 }
                 state.bump(cx);
             },
         );
+    }
+
+    fn ask_remove(&mut self, id: String, cx: &mut Context<Self>) {
+        self.confirm_remove = Some(id);
+        cx.notify();
+    }
+
+    fn cancel_remove(&mut self, cx: &mut Context<Self>) {
+        self.confirm_remove = None;
+        cx.notify();
     }
 
     fn row(&self, n: &Network, cx: &mut Context<Self>) -> impl IntoElement {
@@ -135,7 +160,7 @@ impl Networks {
                     .color(ColorName::Red)
                     // Docker's own networks can never be removed.
                     .disabled(busy || builtin)
-                    .on_click(cx.listener(move |this, _, _, cx| this.remove(id.clone(), cx))),
+                    .on_click(cx.listener(move |this, _, _, cx| this.ask_remove(id.clone(), cx))),
             )
     }
 }
@@ -181,7 +206,7 @@ impl Render for Networks {
             .map(|l| l.len())
             .unwrap_or(0);
 
-        div()
+        let mut root = div()
             .flex()
             .flex_col()
             .size_full()
@@ -205,6 +230,25 @@ impl Render for Networks {
                             ),
                     ),
             )
-            .child(div().flex_1().overflow_hidden().child(body))
+            .child(div().flex_1().overflow_hidden().child(body));
+
+        if let Some(id) = self.confirm_remove.clone() {
+            root = root.child(
+                ConfirmModal::new()
+                    .title("Remove network?")
+                    .message(format!(
+                        "Remove {id}? Containers attached to it may lose connectivity."
+                    ))
+                    .confirm_label("Remove network")
+                    .danger()
+                    .on_confirm(cx.listener(move |this, _, _, cx| {
+                        this.confirm_remove = None;
+                        this.remove(id.clone(), cx);
+                    }))
+                    .on_cancel(cx.listener(|this, _, _, cx| this.cancel_remove(cx))),
+            );
+        }
+
+        root
     }
 }

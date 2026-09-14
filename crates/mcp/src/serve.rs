@@ -1,13 +1,21 @@
 //! The stdio dispatch loop.
 
 use crate::protocol::{self, codes};
+use futures::StreamExt;
 use host::Host;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::AsyncWriteExt;
+use tokio_util::codec::{FramedRead, LinesCodec};
+
+const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 /// Route one request to its handler.
-pub async fn dispatch(host: &Arc<Host>, method: &str, params: &Value) -> Result<Value, (i32, String)> {
+pub async fn dispatch(
+    host: &Arc<Host>,
+    method: &str,
+    params: &Value,
+) -> Result<Value, (i32, String)> {
     match method {
         "initialize" => Ok(protocol::initialize_result(
             "hopper",
@@ -16,17 +24,14 @@ pub async fn dispatch(host: &Arc<Host>, method: &str, params: &Value) -> Result<
         "ping" => Ok(json!({})),
         "tools/list" => Ok(tools_list()),
         "tools/call" => {
-            let name = params
-                .get("name")
-                .and_then(|v| v.as_str())
-                .ok_or((codes::INVALID_REQUEST, "tools/call needs a `name`.".to_string()))?;
+            let name = params.get("name").and_then(|v| v.as_str()).ok_or((
+                codes::INVALID_REQUEST,
+                "tools/call needs a `name`.".to_string(),
+            ))?;
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
             Ok(crate::tools::call(host, name, &args).await)
         }
-        other => Err((
-            codes::METHOD_NOT_FOUND,
-            format!("Unknown method: {other}"),
-        )),
+        other => Err((codes::METHOD_NOT_FOUND, format!("Unknown method: {other}"))),
     }
 }
 
@@ -36,11 +41,14 @@ fn tools_list() -> Value {
 
 /// Serve MCP over stdio until the client closes the stream.
 pub async fn run(host: Arc<Host>) -> anyhow::Result<()> {
-    let stdin = BufReader::new(tokio::io::stdin());
-    let mut lines = stdin.lines();
+    let mut lines = FramedRead::new(
+        tokio::io::stdin(),
+        LinesCodec::new_with_max_length(MAX_FRAME_BYTES),
+    );
     let mut stdout = tokio::io::stdout();
 
-    while let Some(line) = lines.next_line().await? {
+    while let Some(line) = lines.next().await {
+        let line = line?;
         if line.trim().is_empty() {
             continue;
         }
@@ -67,10 +75,7 @@ pub async fn run(host: Arc<Host>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn write(
-    out: &mut tokio::io::Stdout,
-    response: &protocol::Response,
-) -> anyhow::Result<()> {
+async fn write(out: &mut tokio::io::Stdout, response: &protocol::Response) -> anyhow::Result<()> {
     let mut line = serde_json::to_string(response)?;
     line.push('\n');
     out.write_all(line.as_bytes()).await?;
@@ -109,7 +114,9 @@ mod tests {
 
     #[tokio::test]
     async fn a_tool_call_without_a_name_is_rejected() {
-        let (code, _) = dispatch(&host(), "tools/call", &json!({})).await.unwrap_err();
+        let (code, _) = dispatch(&host(), "tools/call", &json!({}))
+            .await
+            .unwrap_err();
         assert_eq!(code, codes::INVALID_REQUEST);
     }
 

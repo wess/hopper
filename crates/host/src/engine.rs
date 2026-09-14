@@ -45,10 +45,7 @@ impl Engines {
 
     /// Whether the active engine is one Hopper can start and stop.
     pub fn managed(&self) -> bool {
-        self.registry
-            .active()
-            .map(|p| p.managed())
-            .unwrap_or(false)
+        self.registry.active().map(|p| p.managed()).unwrap_or(false)
     }
 
     pub async fn start(&self, resources: EngineResources) -> anyhow::Result<()> {
@@ -75,13 +72,12 @@ impl Engines {
         }
     }
 
-    /// Bring forwarded host ports in line with what the running containers
-    /// publish.
+    /// Reconcile host ports for a backend that needs explicit forwarding.
     ///
     /// Nothing to do on either backend today: an engine someone else runs
     /// already binds its published ports on the host, and Apple's runtime
-    /// forwards its own. Kept as the seam the event stream calls so a future
-    /// engine that needs forwarding has somewhere to put it.
+    /// forwards its own. Kept as a seam for a future provider, but not called
+    /// from the event hot path until it has real work.
     pub async fn resync_forwards(&self) -> Vec<String> {
         Vec::new()
     }

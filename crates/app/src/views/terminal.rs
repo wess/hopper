@@ -29,6 +29,9 @@ pub struct Terminal {
     session: Option<Arc<host::docker_exec::Session>>,
     started: bool,
     error: Option<String>,
+    /// Invalidates output and completions from a session for the prior
+    /// container when the detail pane is retargeted.
+    generation: u64,
 }
 
 impl Terminal {
@@ -40,6 +43,7 @@ impl Terminal {
             session: None,
             started: false,
             error: None,
+            generation: 0,
         };
         view.connect(cx);
         view
@@ -51,6 +55,7 @@ impl Terminal {
             return;
         }
         self.container = container;
+        self.generation += 1;
         // Dropping the session closes its socket, ending the shell.
         self.session = None;
         self.screen = super::ansi::Screen::new(MAX_LINES);
@@ -65,21 +70,28 @@ impl Terminal {
 
     fn connect(&mut self, cx: &mut Context<Self>) {
         self.started = true;
+        self.error = None;
+        let generation = self.generation;
         let host = Arc::clone(&self.state.host);
         let id = self.container.clone();
         let entity = cx.entity().downgrade();
 
         // The exec session pushes output through a channel; the UI drains it
         // on the main thread.
-        let (tx, mut rx) = futures::channel::mpsc::unbounded::<String>();
+        // A command such as `yes` can produce output faster than gpui can
+        // paint it. Bound the handoff so terminal output cannot grow Hopper's
+        // memory without limit; backpressure ends the session cleanly.
+        let (mut tx, mut rx) = futures::channel::mpsc::channel::<String>(256);
 
         cx.spawn(async move |_, cx| {
             while let Some(text) = futures::StreamExt::next(&mut rx).await {
                 if cx
                     .update(|cx| {
                         let _ = entity.update(cx, |this: &mut Terminal, cx| {
-                            this.append(&text);
-                            cx.notify();
+                            if this.generation == generation {
+                                this.append(&text);
+                                cx.notify();
+                            }
                         });
                     })
                     .is_err()
@@ -94,13 +106,16 @@ impl Terminal {
         bridge::run(
             cx,
             async move {
-                host.exec_start(&id, None, true, move |chunk| tx.unbounded_send(chunk).is_ok())
+                host.exec_start(&id, None, true, move |chunk| tx.try_send(chunk).is_ok())
                     .await
                     .map(Arc::new)
                     .map_err(|e| e.message)
             },
             move |result, cx| {
                 let _ = entity2.update(cx, |this: &mut Terminal, cx| {
+                    if this.generation != generation {
+                        return;
+                    }
                     match result {
                         Ok(session) => this.session = Some(session),
                         Err(e) => this.error = Some(e),
@@ -203,7 +218,10 @@ mod tests {
     #[test]
     fn enter_becomes_a_carriage_return() {
         // A shell wants CR, not LF, to execute a line.
-        assert_eq!(encode_key(&keystroke("enter", Modifiers::none())), vec![b'\r']);
+        assert_eq!(
+            encode_key(&keystroke("enter", Modifiers::none())),
+            vec![b'\r']
+        );
     }
 
     #[test]
@@ -229,7 +247,10 @@ mod tests {
 
     #[test]
     fn backspace_sends_delete_not_a_literal() {
-        assert_eq!(encode_key(&keystroke("backspace", Modifiers::none())), vec![0x7f]);
+        assert_eq!(
+            encode_key(&keystroke("backspace", Modifiers::none())),
+            vec![0x7f]
+        );
     }
 
     #[test]
@@ -248,5 +269,4 @@ mod tests {
     fn an_unmapped_key_produces_nothing_rather_than_garbage() {
         assert!(encode_key(&keystroke("f1", Modifiers::none())).is_empty());
     }
-
 }

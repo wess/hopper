@@ -8,6 +8,7 @@
 use anyhow::Context as _;
 use model::{RegistryResult, RegistrySource};
 use serde::Deserialize;
+use std::time::Duration;
 
 const HUB_SEARCH: &str = "https://hub.docker.com/v2/search/repositories/";
 const GITHUB_SEARCH: &str = "https://api.github.com/search/repositories";
@@ -21,6 +22,8 @@ const PAGE: &str = "25";
 fn client() -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
         .user_agent(concat!("hopper/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(20))
         .build()
 }
 
@@ -253,7 +256,10 @@ mod tests {
         // Quay sends `null`, not `""`, on plenty of repositories.
         let hits = parsed(NGINX);
         assert_eq!(hits[1].description, "");
-        assert_eq!(hits[1].reference, "quay.io/openshifttest/nginxolm-operator-bundle");
+        assert_eq!(
+            hits[1].reference,
+            "quay.io/openshifttest/nginxolm-operator-bundle"
+        );
     }
 
     #[test]

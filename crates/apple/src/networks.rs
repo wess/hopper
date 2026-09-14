@@ -43,12 +43,13 @@ pub async fn remove(cli: &Cli, id: &str) -> Result<()> {
 }
 
 pub async fn prune(cli: &Cli) -> Result<PruneReport> {
-    let before = list(cli).await.map(|n| n.len()).unwrap_or(0);
+    let before = list(cli).await?.len();
     cli.ok(&["network", "prune"]).await?;
-    let after = list(cli).await.map(|n| n.len()).unwrap_or(0);
+    let after = list(cli).await?.len();
     Ok(PruneReport {
         kind: "networks".into(),
         removed: before.saturating_sub(after) as i64,
         reclaimed: 0,
+        error: None,
     })
 }

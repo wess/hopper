@@ -4,14 +4,18 @@ A native desktop app for running and managing containers — a Docker Desktop
 replacement written in Rust. The UI is [gpui](https://github.com/zed-industries/zed)
 + [guise](https://github.com/wess/guise); the async layer is Tokio.
 
-On **macOS** the engine is [Apple's `container`](https://github.com/apple/container)
+On **macOS Apple silicon** the engine is [Apple's `container`](https://github.com/apple/container)
 (macOS 26+): every container is its own lightweight VM, maintained by Apple, and
-Hopper installs and drives it for you. On **Linux** Hopper uses whichever of
-Docker or Podman you have. Either way you can uninstall Docker Desktop — and
-**Import from Docker** brings your images and containers across first.
+Hopper installs and drives it for you. On Intel Macs, Hopper attaches to Docker,
+Podman, Colima, Rancher Desktop, or another Docker-compatible endpoint instead.
+On **Linux** Hopper uses whichever of
+Docker or Podman you have. On **Windows** it attaches to Docker Desktop or
+Podman over their named pipes. Either way you can uninstall Docker Desktop —
+and **Import from Docker** brings your images and containers across first.
 
-No bundled browser, no Electron, no sidecar processes, and no entitlements
-beyond files and networking.
+No bundled browser or Electron, no always-running sidecar or VM, and no
+entitlements beyond files and networking. Release builds may include the
+standalone Docker CLI and Compose binaries used on demand for compatibility.
 
 ## Features
 
@@ -33,28 +37,36 @@ beyond files and networking.
   protected).
 - **Stacks** — compose projects reconstructed from container labels, so they
   appear with no compose CLI and start/stop label-driven.
-- **Settings** — engine control, VM resources, file-sharing paths, Docker CLI
-  integration.
+- **Settings** — choose Automatic, Apple Containers, Docker, Podman, Colima,
+  Rancher Desktop, or an existing endpoint; control lifecycle, appearance,
+  per-container resource guidance, and Docker CLI integration.
 - **Migration** — scan a source engine (Docker Desktop / Colima / Rancher) and
-  copy images, volumes, and networks into Hopper's engine.
+  copy images, networks, and container configuration into Hopper's engine;
+  named volumes referenced by recreated containers are created as needed,
+  while selected volume contents are called out for manual transfer rather
+  than being silently lost.
 - **MCP server** — a standalone stdio Model Context Protocol server
   (`hoppermcp`) exposing Docker tools to AI clients.
 
 ### Engines
 
-- **macOS — Apple Containers.** Needs macOS 26. If it is not installed, Hopper
+- **macOS — Apple Containers.** Needs an Apple silicon Mac running macOS 26. If it is not installed, Hopper
   offers to fetch Apple's signed installer and hands it to the system installer;
   Hopper never elevates. After that it starts and stops the services itself.
 - **Linux — Docker or Podman.** Whichever is there, rootless sockets checked
   before the system ones, so a desktop Podman is not passed over for a stale
   root daemon. Podman's socket is Docker-compatible, so nothing else changes.
+- **Windows — Docker Desktop or Podman.** Hopper checks their named pipes and
+  attaches to the one you choose; it does not claim ownership of either
+  lifecycle.
 - **Anywhere — an engine you already run.** Docker Desktop, Colima, Rancher
   Desktop, or a remote daemon over TCP.
 
 Apple's runtime is not the Engine API, and Hopper does not pretend otherwise:
-pause, rename, post-create resource changes, restart policies, healthchecks and
-the event stream do not exist there, so the UI hides them rather than offering a
-button that fails. Anything that needs them can switch engines in Settings.
+pause, rename, post-create resource changes, restart policies, healthchecks,
+and the event stream do not exist there, so the UI hides
+them or explains the limitation rather than offering a button that fails.
+Anything that needs them can switch engines in Settings.
 
 ### Import from Docker
 
@@ -97,8 +109,16 @@ cargo clippy --all-targets  # lint
 cargo run -p mcp            # the stdio MCP server
 ```
 
-An engine must be reachable. On macOS that means Apple's `container` — Hopper's
-first-run panel installs it if it is missing.
+An engine must be reachable. On macOS that can be Apple's `container`, Docker,
+Podman, Colima, Rancher Desktop, or another Docker-compatible endpoint;
+Hopper's first-run panel offers Apple's signed installer when that runtime is
+missing. On Linux and Windows, start Docker or Podman (or configure a remote
+Docker endpoint) before using the app.
+
+For an explicit endpoint, set `DOCKER_HOST`; Hopper also understands Podman's
+standard `CONTAINER_HOST` when `DOCKER_HOST` is not set. A saved engine choice
+in Settings takes precedence over automatic discovery, while these environment
+variables are useful for remote daemons and shell-driven workflows.
 
 ## Build a release
 
@@ -107,8 +127,11 @@ scripts/bundle.sh           # assemble + sign dist/Hopper.app
 scripts/dmg.sh              # package dist/Hopper.dmg
 ```
 
-Pushing a version bump in `Cargo.toml` to `main` tags, builds, notarizes, and
-publishes via `.github/workflows/release.yml`.
+The CI workflow builds and tests the workspace on Linux, macOS, and Windows.
+Releases include a notarized macOS DMG plus portable Linux (`.tar.gz`) and
+Windows (`.zip`) client archives. The macOS scripts above handle signing and
+notarization with the configured `CODESIGN_IDENTITY` credentials; Linux and
+Windows attach to Docker or Podman already installed on the host.
 
 ## Sponsor
 

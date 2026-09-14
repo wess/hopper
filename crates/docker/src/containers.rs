@@ -135,7 +135,9 @@ pub async fn list(client: &Client, all: bool) -> Result<Vec<Container>> {
 }
 
 pub async fn inspect(client: &Client, id: &str) -> Result<InspectResult> {
-    client.json(Req::get(format!("/containers/{id}/json"))).await
+    client
+        .json(Req::get(format!("/containers/{id}/json")))
+        .await
 }
 
 /// Health as the daemon reports it on inspect, which is authoritative —
@@ -243,6 +245,7 @@ pub async fn prune(client: &Client) -> Result<PruneReport> {
         kind: "containers".into(),
         removed: raw.deleted.unwrap_or_default().len() as i64,
         reclaimed: raw.reclaimed.unwrap_or_default(),
+        error: None,
     })
 }
 
@@ -342,7 +345,11 @@ pub fn create_body(input: &RunInput) -> Value {
     host_config.insert("PortBindings".into(), Value::Object(bindings));
     host_config.insert("Binds".into(), json!(binds));
     host_config.insert("AutoRemove".into(), json!(input.auto_remove));
-    if let Some(restart) = input.restart.as_deref().filter(|r| !r.is_empty() && *r != "no") {
+    if let Some(restart) = input
+        .restart
+        .as_deref()
+        .filter(|r| !r.is_empty() && *r != "no")
+    {
         host_config.insert("RestartPolicy".into(), json!({ "Name": restart }));
     }
 
@@ -355,8 +362,21 @@ pub fn create_body(input: &RunInput) -> Value {
     if !input.labels.is_empty() {
         body.insert("Labels".into(), json!(input.labels));
     }
-    if let Some(cmd) = input.command.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+    if let Some(cmd) = input
+        .command
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+    {
         body.insert("Cmd".into(), json!(split_command(cmd)));
+    }
+    if let Some(entrypoint) = input
+        .entrypoint
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+    {
+        body.insert("Entrypoint".into(), json!(split_command(entrypoint)));
     }
     for (key, value) in [
         ("WorkingDir", &input.workdir),
@@ -382,17 +402,26 @@ struct Created {
     id: String,
 }
 
-/// Create and start a container from the Run dialog input.
-pub async fn run(client: &Client, input: &RunInput) -> Result<String> {
+/// Create a container from the Run dialog input without starting it.
+pub async fn create(client: &Client, input: &RunInput) -> Result<String> {
     let created: Created = client
         .json(
             Req::post("/containers/create")
-                .query_opt("name", input.name.as_deref().filter(|n| !n.trim().is_empty()))
+                .query_opt(
+                    "name",
+                    input.name.as_deref().filter(|n| !n.trim().is_empty()),
+                )
                 .json_body(create_body(input)),
         )
         .await?;
-    start(client, &created.id).await?;
     Ok(created.id)
+}
+
+/// Create and start a container from the Run dialog input.
+pub async fn run(client: &Client, input: &RunInput) -> Result<String> {
+    let id = create(client, input).await?;
+    start(client, &id).await?;
+    Ok(id)
 }
 
 /// Apply new resource limits or a restart policy to an existing container.
@@ -528,12 +557,28 @@ mod tests {
         let body = create_body(&input);
         assert_eq!(body["Image"], "nginx");
         assert!(body["ExposedPorts"].get("80/tcp").is_some());
-        assert_eq!(body["HostConfig"]["PortBindings"]["80/tcp"][0]["HostPort"], "8080");
+        assert_eq!(
+            body["HostConfig"]["PortBindings"]["80/tcp"][0]["HostPort"],
+            "8080"
+        );
         assert_eq!(
             body["HostConfig"]["Binds"][0],
             "/srv:/usr/share/nginx/html:ro"
         );
         assert_eq!(body["HostConfig"]["RestartPolicy"]["Name"], "always");
+    }
+
+    #[test]
+    fn create_body_preserves_an_entrypoint() {
+        let input = RunInput {
+            image: "worker".into(),
+            entrypoint: Some("/bin/sh -c".into()),
+            command: Some("echo 'hello world'".into()),
+            ..Default::default()
+        };
+        let body = create_body(&input);
+        assert_eq!(body["Entrypoint"], json!(["/bin/sh", "-c"]));
+        assert_eq!(body["Cmd"], json!(["echo", "hello world"]));
     }
 
     #[test]

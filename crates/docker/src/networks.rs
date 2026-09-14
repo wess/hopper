@@ -127,7 +127,8 @@ pub async fn remove(client: &Client, id: &str) -> Result<()> {
 pub async fn connect(client: &Client, id: &str, container: &str) -> Result<()> {
     client
         .action(
-            Req::post(format!("/networks/{id}/connect")).json_body(json!({ "Container": container })),
+            Req::post(format!("/networks/{id}/connect"))
+                .json_body(json!({ "Container": container })),
         )
         .await
 }
@@ -154,6 +155,7 @@ pub async fn prune(client: &Client) -> Result<PruneReport> {
         removed: raw.deleted.unwrap_or_default().len() as i64,
         // Networks occupy no disk, so nothing is reclaimed by removing them.
         reclaimed: 0,
+        error: None,
     })
 }
 
@@ -163,7 +165,10 @@ pub fn ensure_removable(net: &Network) -> Result<()> {
     if net.is_builtin() {
         return Err(DockerError::api(
             403,
-            format!("{} is a built-in Docker network and cannot be removed.", net.name),
+            format!(
+                "{} is a built-in Docker network and cannot be removed.",
+                net.name
+            ),
         ));
     }
     Ok(())

@@ -10,9 +10,9 @@ dmg="dist/Hopper.dmg"
 
 rm -f "$dmg"
 staging="$(mktemp -d)"
+trap 'rm -rf "$staging"' EXIT
 cp -R "$app" "$staging/"
 ln -s /Applications "$staging/Applications"
 
 hdiutil create -volname "Hopper" -srcfolder "$staging" -ov -format UDZO "$dmg" >/dev/null
-rm -rf "$staging"
 echo "[dmg] -> $dmg"

@@ -53,7 +53,13 @@ impl Tab {
     }
 
     pub fn all() -> [Tab; 5] {
-        [Tab::Logs, Tab::Stats, Tab::Files, Tab::Terminal, Tab::Inspect]
+        [
+            Tab::Logs,
+            Tab::Stats,
+            Tab::Files,
+            Tab::Terminal,
+            Tab::Inspect,
+        ]
     }
 
     /// Whether the active engine can serve this tab.
@@ -71,7 +77,10 @@ impl Tab {
 
     /// The tabs this engine can actually serve.
     pub fn available(caps: &model::EngineCapabilities) -> Vec<Tab> {
-        Self::all().into_iter().filter(|t| t.supported(caps)).collect()
+        Self::all()
+            .into_iter()
+            .filter(|t| t.supported(caps))
+            .collect()
     }
 }
 
@@ -160,7 +169,7 @@ impl Detail {
             Tab::Logs => {
                 bridge::stream(
                     cx,
-                    move |tx| async move {
+                    move |mut tx| async move {
                         let opts = LogOptions {
                             tail: 500,
                             follow: true,
@@ -168,7 +177,7 @@ impl Detail {
                         };
                         let _ = host
                             .stream_logs("detail", &id, &opts, |line| {
-                                tx.unbounded_send((line.stream, line.text)).is_ok()
+                                tx.try_send((line.stream, line.text)).is_ok()
                             })
                             .await;
                     },
@@ -188,9 +197,9 @@ impl Detail {
             Tab::Stats => {
                 bridge::stream(
                     cx,
-                    move |tx| async move {
+                    move |mut tx| async move {
                         let _ = host
-                            .stream_stats(&id, |sample| tx.unbounded_send(sample).is_ok())
+                            .stream_stats(&id, |sample| tx.try_send(sample).is_ok())
                             .await;
                     },
                     {
@@ -207,25 +216,21 @@ impl Detail {
                 );
             }
             Tab::Inspect => {
-                bridge::run(
-                    cx,
-                    async move { host.container_inspect(&id).await },
-                    {
-                        move |result, cx| {
-                            let _ = entity.update(cx, |this: &mut Self, cx| {
-                                if this.generation != generation {
-                                    return;
-                                }
-                                this.inspect = Some(match result {
-                                    Ok(value) => serde_json::to_string_pretty(&value)
-                                        .unwrap_or_else(|e| e.to_string()),
-                                    Err(e) => e.message,
-                                });
-                                cx.notify();
+                bridge::run(cx, async move { host.container_inspect(&id).await }, {
+                    move |result, cx| {
+                        let _ = entity.update(cx, |this: &mut Self, cx| {
+                            if this.generation != generation {
+                                return;
+                            }
+                            this.inspect = Some(match result {
+                                Ok(value) => serde_json::to_string_pretty(&value)
+                                    .unwrap_or_else(|e| e.to_string()),
+                                Err(e) => e.message,
                             });
-                        }
-                    },
-                );
+                            cx.notify();
+                        });
+                    }
+                });
             }
         }
     }

@@ -19,6 +19,8 @@ use model::StreamKind;
 
 /// Longest UTF-8 sequence; a carry can never exceed this.
 const MAX_UTF8: usize = 4;
+/// Do not retain a malicious or misbehaving stdcopy frame indefinitely.
+const MAX_FRAME_PAYLOAD: usize = 64 * 1024 * 1024;
 
 /// Splits a byte stream into `(stream, payload)` frames.
 #[derive(Debug, Default)]
@@ -28,6 +30,7 @@ pub struct Frames {
     /// deciding per frame would misread raw TTY output that happens to begin
     /// with a byte sequence shaped like a header.
     framed: Option<bool>,
+    dropped: bool,
 }
 
 impl Frames {
@@ -43,6 +46,7 @@ impl Frames {
         Self {
             buf: Vec::new(),
             framed: Some(!tty),
+            dropped: false,
         }
     }
 
@@ -53,7 +57,15 @@ impl Frames {
 
     /// Feed a chunk, returning every complete frame it completed.
     pub fn push(&mut self, chunk: &[u8]) -> Vec<(StreamKind, Bytes)> {
+        if self.dropped {
+            return Vec::new();
+        }
         self.buf.extend_from_slice(chunk);
+        if self.buf.len() > MAX_FRAME_PAYLOAD + 8 {
+            self.buf.clear();
+            self.dropped = true;
+            return Vec::new();
+        }
         let mut out = Vec::new();
 
         loop {
@@ -76,7 +88,13 @@ impl Frames {
             if self.buf.len() < 8 {
                 break;
             }
-            let size = u32::from_be_bytes([self.buf[4], self.buf[5], self.buf[6], self.buf[7]]) as usize;
+            let size =
+                u32::from_be_bytes([self.buf[4], self.buf[5], self.buf[6], self.buf[7]]) as usize;
+            if size > MAX_FRAME_PAYLOAD {
+                self.buf.clear();
+                self.dropped = true;
+                break;
+            }
             if self.buf.len() < 8 + size {
                 break; // wait for the rest of the frame
             }
@@ -99,7 +117,7 @@ impl Frames {
     /// Whatever is left when the stream ends. Unframed output that never
     /// reached 8 bytes still has to be delivered.
     pub fn finish(&mut self) -> Option<(StreamKind, Bytes)> {
-        if self.buf.is_empty() {
+        if self.dropped || self.buf.is_empty() {
             return None;
         }
         if self.framed == Some(true) {
@@ -108,7 +126,10 @@ impl Frames {
             self.buf.clear();
             return None;
         }
-        Some((StreamKind::Stdout, Bytes::from(std::mem::take(&mut self.buf))))
+        Some((
+            StreamKind::Stdout,
+            Bytes::from(std::mem::take(&mut self.buf)),
+        ))
     }
 }
 
@@ -293,11 +314,7 @@ mod tests {
         let bytes = "héllo".as_bytes();
         let first = d.push(&bytes[..2]); // 'h' + the lead byte of 'é'
         let second = d.push(&bytes[2..]);
-        let joined: String = first
-            .into_iter()
-            .chain(second)
-            .map(|(_, t)| t)
-            .collect();
+        let joined: String = first.into_iter().chain(second).map(|(_, t)| t).collect();
         assert_eq!(joined, "héllo");
     }
 

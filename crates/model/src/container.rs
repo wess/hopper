@@ -249,6 +249,10 @@ pub struct RunInput {
     pub volumes: Vec<VolumeMapping>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub command: Option<String>,
+    /// Override the image entrypoint, represented in the same shell-like
+    /// format as `command` so the wire builders can share their parser.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub entrypoint: Option<String>,
     /// no | always | unless-stopped | on-failure
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub restart: Option<String>,

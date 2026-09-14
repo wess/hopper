@@ -7,7 +7,10 @@
 //! * named pipe  — Windows (Docker Desktop's `\\.\pipe\docker_engine`)
 //! * tcp         — remote daemons, and the Windows "expose on tcp://" option
 //!
-//! Precedence: `DOCKER_HOST` → `DOCKER_SOCKET` → per-platform default.
+//! Precedence: `DOCKER_HOST` → `CONTAINER_HOST` → `DOCKER_SOCKET` →
+//! per-platform default. `CONTAINER_HOST` is Podman's standard endpoint
+//! variable and is accepted so an explicitly selected Podman machine is not
+//! silently replaced by a local Docker socket.
 //! Everything here is pure (env and OS are injectable) so it unit-tests
 //! without a daemon.
 
@@ -26,8 +29,14 @@ pub enum Endpoint {
 
 impl Default for Endpoint {
     fn default() -> Self {
-        Endpoint::Unix {
-            path: UNIX_DEFAULT.into(),
+        if cfg!(windows) {
+            Endpoint::Npipe {
+                path: normalize_pipe(WINDOWS_DEFAULT_PIPE),
+            }
+        } else {
+            Endpoint::Unix {
+                path: UNIX_DEFAULT.into(),
+            }
         }
     }
 }
@@ -84,6 +93,14 @@ fn split_host_port(authority: &str, tls: bool) -> (String, u16) {
     }
 }
 
+fn format_host_port(host: &str, port: u16) -> String {
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    }
+}
+
 /// Parse a `DOCKER_HOST` value. Returns `None` for an unrecognized scheme so
 /// the caller can fall back rather than connect somewhere wrong.
 pub fn parse_docker_host(value: &str, tls_verify: bool) -> Option<Endpoint> {
@@ -126,13 +143,18 @@ pub fn parse_docker_host(value: &str, tls_verify: bool) -> Option<Endpoint> {
 }
 
 fn truthy(s: Option<&String>) -> bool {
-    matches!(s.map(String::as_str), Some("1") | Some("true"))
+    s.is_some_and(|value| value.trim() == "1" || value.trim().eq_ignore_ascii_case("true"))
 }
 
 /// Resolve the active endpoint from an environment map and platform string.
 pub fn resolve_endpoint(env: &HashMap<String, String>, os: &str) -> Endpoint {
     if let Some(host) = env.get("DOCKER_HOST") {
         if let Some(ep) = parse_docker_host(host, truthy(env.get("DOCKER_TLS_VERIFY"))) {
+            return ep;
+        }
+    }
+    if let Some(host) = env.get("CONTAINER_HOST") {
+        if let Some(ep) = parse_docker_host(host, truthy(env.get("CONTAINER_TLS_VERIFY"))) {
             return ep;
         }
     }
@@ -166,7 +188,7 @@ impl Endpoint {
     /// The HTTP `Host:` header for hand-rolled requests.
     pub fn host_header(&self) -> String {
         match self {
-            Endpoint::Tcp { host, port, .. } => format!("{host}:{port}"),
+            Endpoint::Tcp { host, port, .. } => format_host_port(host, *port),
             _ => "localhost".into(),
         }
     }
@@ -176,7 +198,7 @@ impl Endpoint {
         match self {
             Endpoint::Tcp { host, port, tls } => {
                 let scheme = if *tls { "https" } else { "http" };
-                format!("{scheme}://{host}:{port}")
+                format!("{scheme}://{}", format_host_port(host, *port))
             }
             Endpoint::Unix { path } => format!("unix:{path}"),
             Endpoint::Npipe { path } => format!("npipe:{path}"),
@@ -189,7 +211,7 @@ impl Endpoint {
         match self {
             Endpoint::Tcp { host, port, tls } => {
                 let scheme = if *tls { "https" } else { "tcp" };
-                format!("{scheme}://{host}:{port}")
+                format!("{scheme}://{}", format_host_port(host, *port))
             }
             Endpoint::Npipe { path } => format!("npipe://{}", path.replace('\\', "/")),
             Endpoint::Unix { path } => format!("unix://{path}"),
@@ -392,6 +414,33 @@ mod tests {
     }
 
     #[test]
+    fn podmans_container_host_wins_over_the_default_socket() {
+        let e = env(&[("CONTAINER_HOST", "unix:///tmp/podman.sock")]);
+        assert_eq!(
+            resolve_endpoint(&e, "linux"),
+            Endpoint::Unix {
+                path: "/tmp/podman.sock".into()
+            }
+        );
+    }
+
+    #[test]
+    fn docker_host_still_wins_over_podmans_container_host() {
+        let e = env(&[
+            ("DOCKER_HOST", "tcp://docker:2375"),
+            ("CONTAINER_HOST", "unix:///tmp/podman.sock"),
+        ]);
+        assert_eq!(
+            resolve_endpoint(&e, "linux"),
+            Endpoint::Tcp {
+                host: "docker".into(),
+                port: 2375,
+                tls: false,
+            }
+        );
+    }
+
+    #[test]
     fn an_unparseable_docker_host_falls_through_to_docker_socket() {
         let e = env(&[
             ("DOCKER_HOST", "nonsense://x"),
@@ -407,16 +456,26 @@ mod tests {
 
     #[test]
     fn tls_verify_upgrades_a_plain_tcp_host() {
-        let e = env(&[
-            ("DOCKER_HOST", "tcp://box"),
-            ("DOCKER_TLS_VERIFY", "1"),
-        ]);
+        let e = env(&[("DOCKER_HOST", "tcp://box"), ("DOCKER_TLS_VERIFY", "1")]);
         assert_eq!(
             resolve_endpoint(&e, "linux"),
             Endpoint::Tcp {
                 host: "box".into(),
                 port: 2376,
                 tls: true
+            }
+        );
+    }
+
+    #[test]
+    fn tls_environment_flags_are_case_insensitive() {
+        let e = env(&[("DOCKER_HOST", "tcp://box"), ("DOCKER_TLS_VERIFY", "TRUE")]);
+        assert_eq!(
+            resolve_endpoint(&e, "linux"),
+            Endpoint::Tcp {
+                host: "box".into(),
+                port: 2376,
+                tls: true,
             }
         );
     }
@@ -453,6 +512,15 @@ mod tests {
         };
         assert_eq!(tcp.describe(), "https://box:2376");
         assert_eq!(tcp.docker_host_value(), "https://box:2376");
+
+        let ipv6 = Endpoint::Tcp {
+            host: "::1".into(),
+            port: 2376,
+            tls: true,
+        };
+        assert_eq!(ipv6.host_header(), "[::1]:2376");
+        assert_eq!(ipv6.describe(), "https://[::1]:2376");
+        assert_eq!(ipv6.docker_host_value(), "https://[::1]:2376");
 
         let pipe = Endpoint::Npipe {
             path: r"\\.\pipe\docker_engine".into(),

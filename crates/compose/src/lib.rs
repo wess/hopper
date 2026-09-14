@@ -69,7 +69,8 @@ mod tests {
         let dir = std::env::temp_dir().join("hopper-compose-lib-empty");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let err = plan_dir(&dir, &PlanOptions::default(), &EngineCapabilities::apple()).unwrap_err();
+        let err =
+            plan_dir(&dir, &PlanOptions::default(), &EngineCapabilities::apple()).unwrap_err();
         assert!(err.contains("compose.yaml"));
         assert!(err.contains("docker-compose.yml"));
     }

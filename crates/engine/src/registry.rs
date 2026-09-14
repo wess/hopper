@@ -45,7 +45,7 @@ impl Registry {
         providers.extend(
             crate::daemons::known(std::env::consts::OS, &env)
                 .into_iter()
-                .map(|d| Arc::new(Named::new(d, client.clone())) as Arc<dyn Provider>),
+                .map(|d| Arc::new(Named::new(d)) as Arc<dyn Provider>),
         );
 
         providers.extend([
@@ -92,63 +92,116 @@ impl Registry {
     /// absent row is a thing to wonder about.
     pub async fn choices(&self) -> Vec<EngineChoice> {
         let ids = candidates_for(std::env::consts::OS);
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            let Some(p) = self.get(id) else { continue };
+        // Each provider probes its own endpoint, so these can run together.
+        // That keeps Settings responsive when more than one stopped daemon
+        // takes a health-check timeout, while join_all preserves picker order.
+        let providers = ids.into_iter().filter_map(|id| self.get(id));
+        let rows = futures::future::join_all(providers.map(|p| async move {
             let available = p.available().await;
-            let reason = if available {
-                None
-            } else {
-                // The provider's own status says why far better than we could.
-                Some(p.status().await.message)
-            };
+            // Availability means the provider can be addressed (for example,
+            // its socket exists); it does not mean the daemon is healthy.
+            // Surface the current status for every row so an installed but
+            // stopped engine is not presented as ready.
+            let status = p.status().await;
             // `None` for Apple's runtime, which answers no socket at all. The
             // picker says so in words rather than repeating the engine's name
             // back at itself.
             let endpoint = p.endpoint().await.map(|ep| ep.describe());
-            out.push(EngineChoice {
-                id: p.id().to_string(),
-                label: p.label().to_string(),
-                available,
-                managed: p.managed(),
-                reason,
-                endpoint,
-            });
-        }
-        out
+            (p, available, status, endpoint)
+        }))
+        .await;
+
+        rows.into_iter()
+            .map(|(p, available, status, endpoint)| {
+                let reason = (!status.connected).then_some(status.message);
+                EngineChoice {
+                    id: p.id().to_string(),
+                    label: p.label().to_string(),
+                    available,
+                    connected: status.connected,
+                    state: status.state,
+                    managed: p.managed(),
+                    reason,
+                    endpoint,
+                }
+            })
+            .collect()
     }
 
-    /// Pick the first available provider in preference order, and point the
-    /// Docker client at whatever it says.
+    /// Pick a provider in preference order, and point the Docker client at
+    /// whatever it says. Automatic selection prefers an engine that is
+    /// already connected; this matters on macOS where Apple Containers may be
+    /// installed but stopped while Docker Desktop is running.
     pub async fn select(&self, setting: Option<&str>) -> EngineStatus {
         let env = std::env::var("HOPPER_ENGINE").ok();
-        let want = preferred(env.as_deref(), setting, std::env::consts::OS);
-        let chosen_by_user = self.honours_preference(env.as_deref(), setting, &want);
+        let explicit_host = ["DOCKER_HOST", "CONTAINER_HOST"]
+            .into_iter()
+            .find_map(|name| {
+                std::env::var(name)
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            });
+        let has_provider_pin = is_explicit(env.as_deref(), setting);
+        let want = if explicit_host.is_some() && !has_provider_pin {
+            // An explicit Docker/Podman endpoint is itself a deliberate
+            // endpoint choice. Keep the existing provider selected so a
+            // temporary outage is reported honestly instead of silently
+            // moving the user to another engine.
+            "existing".to_string()
+        } else {
+            preferred(env.as_deref(), setting, std::env::consts::OS)
+        };
+        let chosen_by_user = self.honours_preference(env.as_deref(), setting, &want)
+            || (explicit_host.is_some() && !has_provider_pin);
 
-        let mut order: Vec<String> = vec![want];
+        // A retired or cross-platform legacy id may still be registered for
+        // deserialization, but it must not get an early turn in automatic
+        // selection merely because it happens to have a matching socket.
+        let mut order: Vec<String> =
+            if candidates_for(std::env::consts::OS).contains(&want.as_str()) {
+                vec![want.clone()]
+            } else {
+                Vec::new()
+            };
         for id in candidates_for(std::env::consts::OS) {
             if !order.iter().any(|o| o == id) {
                 order.push(id.to_string());
             }
         }
 
-        for (rank, id) in order.iter().enumerate() {
-            let Some(provider) = self.get(id) else { continue };
-            // The engine the user named is selected even when it cannot run:
-            // its own status says why, and that is the answer they asked for.
-            // Falling through would report on some other engine entirely —
-            // "no Docker engine is running" to someone who asked for Apple's.
-            let named = chosen_by_user && rank == 0;
-            if !named && !provider.available().await {
+        if chosen_by_user {
+            let provider = self.get(&want);
+            if let Some(provider) = provider {
+                // The engine the user named is selected even when it cannot
+                // run: its own status says why, and that is the answer they
+                // asked for. Falling through would report on another engine.
+                self.activate(&provider).await;
+                return self.enrich(provider.status().await).await;
+            }
+        }
+
+        let mut first_available = None;
+        for id in &order {
+            let Some(provider) = self.get(id) else {
+                continue;
+            };
+            if !provider.available().await {
                 continue;
             }
             self.activate(&provider).await;
             let status = provider.status().await;
-            // The tail fallback is always "available" — it never disqualifies
-            // itself — so landing on it proves nothing is listening. On a
-            // platform with an engine of its own, that is the moment to offer
-            // that engine rather than report a missing Docker.
-            if should_fall_forward(&status, provider.managed(), chosen_by_user) {
+            if first_available.is_none() {
+                first_available = Some((provider, status.clone()));
+            }
+            if status.connected {
+                return self.enrich(status).await;
+            }
+        }
+
+        if let Some((provider, status)) = first_available {
+            // If the first available provider is the unmanaged fallback and
+            // it is down, offer Hopper's managed engine instead.
+            if should_fall_forward(&status, provider.managed(), false) {
                 if let Some(managed) = self.fall_forward().await {
                     return managed;
                 }
@@ -183,7 +236,9 @@ impl Registry {
     /// people it exists for — a Mac with no Docker — were told "no Docker
     /// engine is running" rather than being offered the engine Hopper supplies.
     fn honours_preference(&self, env: Option<&str>, setting: Option<&str>, want: &str) -> bool {
-        is_explicit(env, setting) && self.get(want).is_some()
+        is_explicit(env, setting)
+            && candidates_for(std::env::consts::OS).contains(&want)
+            && self.get(want).is_some()
     }
 
     /// Point the Docker client at a provider and record it as the active one.
@@ -426,6 +481,13 @@ mod tests {
             "it is still an explicitly written setting"
         );
         assert!(!r.honours_preference(None, Some("vz"), "vz"));
+    }
+
+    #[test]
+    fn a_legacy_linux_pin_is_not_honoured_off_its_platform() {
+        // `linux` was the old combined provider. It remains registered so old
+        // settings deserialize, but it is not a valid current candidate.
+        assert!(!registry().honours_preference(None, Some("linux"), "linux"));
     }
 
     #[test]

@@ -41,6 +41,10 @@ than silently doing nothing, which is the right choice.
 ## What the app bundles
 
 The release ships the Docker CLI and a standalone Compose binary inside
-`Hopper.app`, because Docker Desktop's uninstaller takes `docker` with it. You
-can add them to your `PATH` from **Settings → Docker CLI**; it is off by default
-because the symlink is machine-wide.
+`Hopper.app`, because Docker Desktop's uninstaller takes `docker` with it.
+Hopper uses those binaries internally for Compose compatibility; it does not
+modify your machine-wide `PATH`. If you want the bundled CLI in a shell, add
+the release's sidecar directory to your shell configuration: on macOS that is
+`/Applications/Hopper.app/Contents/MacOS/sidecars`, while the Linux and
+Windows archives contain `sidecars/` next to the Hopper executable. You can
+also use the CLI installed separately by your package manager.

@@ -244,7 +244,10 @@ mod tests {
             context_dir: "/nonexistent/hopper/context".into(),
             ..Default::default()
         };
-        assert!(tar_context(&input).unwrap_err().message.contains("not a directory"));
+        assert!(tar_context(&input)
+            .unwrap_err()
+            .message
+            .contains("not a directory"));
     }
 
     #[test]

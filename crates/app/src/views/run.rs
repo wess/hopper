@@ -10,7 +10,7 @@ use std::sync::Arc;
 use gpui::prelude::*;
 use gpui::{div, Context, Entity, Window};
 use guise::prelude::*;
-use model::{PortMapping, RunInput};
+use model::{PortMapping, ResourceLimits, RunInput};
 
 use crate::bridge;
 use crate::state::{AppState, Route};
@@ -43,10 +43,26 @@ fn parse_ports(raw: &str) -> Vec<PortMapping> {
         .collect()
 }
 
+/// Translate the dialog's optional budget into the wire limits. Zero means no
+/// limit; the caps keep a malformed or stale input from asking for nonsense.
+fn resource_limits(cpus: Option<f64>, memory_gib: Option<f64>) -> ResourceLimits {
+    ResourceLimits {
+        cpus: cpus
+            .filter(|value| *value > 0.0)
+            .map(|value| value.clamp(0.1, 64.0)),
+        memory: memory_gib
+            .filter(|value| *value > 0.0)
+            .map(|value| value.round().clamp(1.0, 256.0) as u64 * 1024 * 1024 * 1024),
+        ..Default::default()
+    }
+}
+
 pub struct RunDialog {
     state: AppState,
     name: Entity<TextInput>,
     ports: Entity<TextInput>,
+    cpus: Entity<NumberInput>,
+    memory_gib: Entity<NumberInput>,
     busy: bool,
 }
 
@@ -64,10 +80,30 @@ impl RunDialog {
                 .label("Publish ports")
                 .placeholder("e.g. 8080:80, 5432:5432")
         });
+        let cpus = cx.new(|cx| {
+            NumberInput::new(cx)
+                .min(0.0)
+                .max(64.0)
+                .step(0.1)
+                .value(0.0)
+                .label("CPU limit")
+                .description("optional — 0 means unlimited; 0.1 = one tenth of a CPU")
+        });
+        let memory_gib = cx.new(|cx| {
+            NumberInput::new(cx)
+                .min(0.0)
+                .max(256.0)
+                .step(1.0)
+                .value(0.0)
+                .label("Memory limit (GiB)")
+                .description("optional — 0 means unlimited")
+        });
         Self {
             state,
             name,
             ports,
+            cpus,
+            memory_gib,
             busy: false,
         }
     }
@@ -77,6 +113,8 @@ impl RunDialog {
         self.state.run_target.set(cx, None);
         self.name.update(cx, |i, cx| i.set_text("", cx));
         self.ports.update(cx, |i, cx| i.set_text("", cx));
+        self.cpus.update(cx, |i, cx| i.set_value(0.0, cx));
+        self.memory_gib.update(cx, |i, cx| i.set_value(0.0, cx));
     }
 
     fn run(&mut self, image: String, cx: &mut Context<Self>) {
@@ -86,6 +124,10 @@ impl RunDialog {
             image: image.clone(),
             name: (!name.is_empty()).then_some(name),
             ports,
+            limits: resource_limits(
+                self.cpus.read(cx).value_f64(),
+                self.memory_gib.read(cx).value_f64(),
+            ),
             ..Default::default()
         };
 
@@ -132,13 +174,15 @@ impl Render for RunDialog {
         let run_image = image.clone();
         let body = Stack::new()
             .gap(Size::Sm)
-            .child(
-                Text::new(format!("Image  {image}"))
-                    .size(Size::Sm)
-                    .dimmed(),
-            )
+            .child(Text::new(format!("Image  {image}")).size(Size::Sm).dimmed())
             .child(self.name.clone())
             .child(self.ports.clone())
+            .child(
+                Group::new()
+                    .gap(Size::Sm)
+                    .child(self.cpus.clone())
+                    .child(self.memory_gib.clone()),
+            )
             .child(
                 Text::new("Runs detached. Manage it from the Containers tab.")
                     .size(Size::Xs)
@@ -158,9 +202,9 @@ impl Render for RunDialog {
                         Button::new("run-go", if self.busy { "Starting…" } else { "Run" })
                             .color(ColorName::Green)
                             .disabled(self.busy)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.run(run_image.clone(), cx)
-                            })),
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.run(run_image.clone(), cx)),
+                            ),
                     ),
             );
 
@@ -201,5 +245,15 @@ mod tests {
         let p = parse_ports("8080:80, , 9090");
         assert_eq!(p.len(), 1);
         assert!(parse_ports("").is_empty());
+    }
+
+    #[test]
+    fn resource_limits_treat_zero_as_unlimited_and_bound_large_values() {
+        let unlimited = resource_limits(Some(0.0), Some(0.0));
+        assert!(unlimited.is_empty());
+
+        let bounded = resource_limits(Some(100.0), Some(999.0));
+        assert_eq!(bounded.cpus, Some(64.0));
+        assert_eq!(bounded.memory, Some(256 * 1024 * 1024 * 1024));
     }
 }

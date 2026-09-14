@@ -153,7 +153,10 @@ enum Action {
 
 enum EscapeResult {
     /// `len` chars after the ESC were consumed.
-    Consumed { action: Action, len: usize },
+    Consumed {
+        action: Action,
+        len: usize,
+    },
     Incomplete,
 }
 
@@ -277,10 +280,7 @@ mod tests {
 
     #[test]
     fn an_osc_title_sequence_is_dropped() {
-        assert_eq!(
-            rendered(b"\x1b]0;my title\x07prompt$ "),
-            "prompt$ "
-        );
+        assert_eq!(rendered(b"\x1b]0;my title\x07prompt$ "), "prompt$ ");
     }
 
     #[test]

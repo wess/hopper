@@ -6,14 +6,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use gpui::prelude::*;
-use gpui::{div, Context, Entity, FocusHandle, Window};
+use gpui::{div, Context, Entity, FocusHandle, Subscription, UpdateGlobal, Window};
 use guise::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::bridge;
 use crate::sidebar;
 use crate::state::{AppState, Route};
 use crate::views;
 use host::Host;
+
+const EVENT_REFRESH_DEBOUNCE: Duration = Duration::from_millis(500);
 
 pub struct Root {
     state: AppState,
@@ -33,6 +36,7 @@ pub struct Root {
     /// so with nothing focused the menu bar greys out and its shortcuts are
     /// swallowed.
     focus: FocusHandle,
+    appearance_subscription: Option<Subscription>,
 }
 
 impl Root {
@@ -71,7 +75,24 @@ impl Root {
             run_dialog,
             detail: None,
             focus,
+            appearance_subscription: None,
         };
+        let quit_host = Arc::clone(&root.state.host);
+        cx.on_app_quit(move |_, _| {
+            let host = Arc::clone(&quit_host);
+            async move {
+                let settings = host.settings();
+                if settings.keep_engine_on_quit || !host.engines().managed() {
+                    return;
+                }
+                // gpui waits for shutdown hooks, so the managed engine gets a
+                // chance to release host resources before the process exits.
+                if let Err(error) = host.stop_engine().await {
+                    tracing::warn!("engine shutdown failed: {error}");
+                }
+            }
+        })
+        .detach();
         root.bring_up_engine(cx);
         root.poll_engine(cx);
         root.watch_events(cx);
@@ -87,17 +108,23 @@ impl Root {
     fn bring_up_engine(&self, cx: &mut Context<Self>) {
         let host = Arc::clone(&self.state.host);
         let engine = self.state.engine.clone();
+        let state = self.state.clone();
         cx.spawn(async move |_, cx| {
-            // Pick the provider (Apple's runtime where available, else an
-            // engine someone else runs) and point the client at it.
+            // Pick a connected provider first, then Apple's runtime or the
+            // platform fallback, and point the client at it.
             let status = {
                 let host = Arc::clone(&host);
                 let (tx, rx) = futures::channel::oneshot::channel();
-                bridge::runtime().spawn(async move { let _ = tx.send(host.select_engine().await); });
+                let _task = bridge::abort_on_drop(bridge::runtime().spawn(async move {
+                    let _ = tx.send(host.select_engine().await);
+                }));
                 rx.await.ok()
             };
             let Some(status) = status else { return };
             let _ = cx.update(|cx| engine.set(cx, status.clone()));
+            // List views intentionally defer their first request until the
+            // provider is selected; wake them together on the chosen backend.
+            let _ = cx.update(|cx| state.bump(cx));
 
             // Start the managed engine if it is selected, installed but idle,
             // and autostart is on. An engine someone else runs is left alone,
@@ -106,12 +133,22 @@ impl Root {
             let autostart = host.settings().autostart_engine;
             if autostart && status.managed && status.state == model::EngineState::Stopped {
                 let host = Arc::clone(&host);
+                let status_host = Arc::clone(&host);
                 let (tx, rx) = futures::channel::oneshot::channel();
-                bridge::runtime().spawn(async move {
+                let _task = bridge::abort_on_drop(bridge::runtime().spawn(async move {
                     let _ = tx.send(host.start_engine().await.map_err(|e| e.to_string()));
-                });
+                }));
                 if let Ok(Err(e)) = rx.await {
                     tracing::warn!("engine autostart failed: {e}");
+                    // Logging is useful for diagnostics, but it is invisible
+                    // to the person waiting at the setup card. Re-probe the
+                    // provider and carry the failure as detail so the UI can
+                    // explain what happened without inventing a new startup
+                    // state. The regular poll will reconcile it on its next
+                    // tick if the engine is still changing state.
+                    let mut current = status_host.engine_status().await;
+                    current.detail = Some(format!("Automatic start failed: {e}"));
+                    let _ = cx.update(|cx| engine.set(cx, current));
                 }
             }
         })
@@ -126,17 +163,15 @@ impl Root {
         cx.spawn(async move |_, cx| loop {
             let host = Arc::clone(&state.host);
             let (tx, rx) = futures::channel::oneshot::channel();
-            bridge::runtime().spawn(async move {
+            let _task = bridge::abort_on_drop(bridge::runtime().spawn(async move {
                 let _ = tx.send(host.poll_engine().await);
-            });
+            }));
             if let Ok(status) = rx.await {
                 if cx.update(|cx| state.engine.set(cx, status)).is_err() {
                     return;
                 }
             }
-            cx.background_executor()
-                .timer(Duration::from_secs(3))
-                .await;
+            cx.background_executor().timer(Duration::from_secs(3)).await;
         })
         .detach();
     }
@@ -149,27 +184,55 @@ impl Root {
     fn watch_events(&self, cx: &mut Context<Self>) {
         let state = self.state.clone();
         let host = Arc::clone(&self.state.host);
+        let refresh_pending = Arc::new(AtomicBool::new(false));
         bridge::stream(
             cx,
             move |tx| async move {
-                let _ = host
-                    .stream_events(|event| {
-                        // A closed receiver means the app is gone.
-                        tx.unbounded_send(event).is_ok()
-                    })
-                    .await;
+                // Initial selection runs concurrently with Root construction;
+                // do not attach the first event stream to the old endpoint.
+                host.wait_for_initial_selection().await;
+                loop {
+                    let generation = host.selection_generation();
+                    let event_host = Arc::clone(&host);
+                    let mut events = tx.clone();
+                    let _ = host
+                        .stream_events(move |event| {
+                            // A provider switch invalidates the long-lived
+                            // connection; let the outer loop reconnect to the
+                            // newly selected engine.
+                            if event_host.selection_generation() != generation {
+                                return false;
+                            }
+                            // A closed receiver means the app is gone.
+                            events.try_send(event).is_ok()
+                        })
+                        .await;
+                    if tx.is_closed() {
+                        break;
+                    }
+                    // Apple has no event endpoint, and a stopped daemon can
+                    // reject the stream. Back off in both cases so the UI
+                    // remains cheap while the three-second status poll keeps
+                    // the state current.
+                    tokio::time::sleep(Duration::from_secs(3)).await;
+                }
             },
             move |_event, cx| {
-                state.bump(cx);
-                // A container that publishes a port has to become reachable
-                // without the user doing anything, so the forwarder is driven
-                // off the same events the lists refresh from.
-                let host = Arc::clone(&state.host);
-                bridge::run(cx, async move { host.resync_forwards().await }, |failures, _| {
-                    for reason in failures {
-                        tracing::warn!("{reason}");
-                    }
-                });
+                // A single Compose operation can emit hundreds of events.
+                // Refresh once per short burst instead of refetching every
+                // list for every lifecycle transition.
+                if !refresh_pending.swap(true, Ordering::AcqRel) {
+                    let state = state.clone();
+                    let refresh_pending = Arc::clone(&refresh_pending);
+                    cx.spawn(async move |cx| {
+                        cx.background_executor().timer(EVENT_REFRESH_DEBOUNCE).await;
+                        let _ = cx.update(|cx| {
+                            refresh_pending.store(false, Ordering::Release);
+                            state.bump(cx);
+                        });
+                    })
+                    .detach();
+                }
             },
             |_| {},
         );
@@ -178,6 +241,22 @@ impl Root {
 
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.appearance_subscription.is_none() {
+            let state = self.state.clone();
+            self.appearance_subscription =
+                Some(cx.observe_window_appearance(window, move |_, window, cx| {
+                    if state.settings.get(cx).theme == model::ThemeMode::System {
+                        Theme::set_global(
+                            cx,
+                            crate::theme::build(crate::theme::scheme(
+                                model::ThemeMode::System,
+                                window.appearance(),
+                            )),
+                        );
+                        cx.notify();
+                    }
+                }));
+        }
         let t = cx.global::<Theme>();
         let body = t.body().hsla();
         let text = t.text().hsla();
@@ -200,32 +279,35 @@ impl Render for Root {
             div().size_full().child(self.engine_setup.clone())
         } else {
             match route {
-            Route::Containers => {
-                // The detail pane sits beside the list, so a container's logs
-                // are visible without losing the list you came from.
-                let selected = self.state.selected.get(cx);
-                let mut split = div().size_full().flex().child(
-                    div().flex_1().overflow_hidden().child(self.containers.clone()),
-                );
-                if let Some(container) = selected {
-                    let pane = match self.detail.clone() {
-                        Some(pane) => {
-                            pane.update(cx, |pane, cx| pane.show(container, cx));
-                            pane
-                        }
-                        None => {
-                            let pane = cx.new(|cx| views::Detail::new(container, cx));
-                            self.detail = Some(pane.clone());
-                            pane
-                        }
-                    };
-                    split = split.child(div().w(gpui::px(520.0)).h_full().child(pane));
-                } else {
-                    // Nothing selected: drop the pane so its streams stop.
-                    self.detail = None;
+                Route::Containers => {
+                    // The detail pane sits beside the list, so a container's logs
+                    // are visible without losing the list you came from.
+                    let selected = self.state.selected.get(cx);
+                    let mut split = div().size_full().flex().child(
+                        div()
+                            .flex_1()
+                            .overflow_hidden()
+                            .child(self.containers.clone()),
+                    );
+                    if let Some(container) = selected {
+                        let pane = match self.detail.clone() {
+                            Some(pane) => {
+                                pane.update(cx, |pane, cx| pane.show(container, cx));
+                                pane
+                            }
+                            None => {
+                                let pane = cx.new(|cx| views::Detail::new(container, cx));
+                                self.detail = Some(pane.clone());
+                                pane
+                            }
+                        };
+                        split = split.child(div().w(gpui::px(520.0)).h_full().child(pane));
+                    } else {
+                        // Nothing selected: drop the pane so its streams stop.
+                        self.detail = None;
+                    }
+                    split
                 }
-                split
-            }
                 Route::Images => div().size_full().child(self.images.clone()),
                 Route::Registry => div().size_full().child(self.registry.clone()),
                 Route::Volumes => div().size_full().child(self.volumes.clone()),

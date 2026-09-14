@@ -20,6 +20,8 @@ pub struct Daemon {
     pub id: &'static str,
     pub label: &'static str,
     pub paths: Vec<String>,
+    /// Windows daemons listen on named pipes rather than filesystem sockets.
+    pub npipe: bool,
 }
 
 impl Daemon {
@@ -34,6 +36,7 @@ impl Daemon {
 pub struct Env {
     pub home: Option<String>,
     pub xdg_runtime_dir: Option<String>,
+    pub temp_dir: Option<String>,
 }
 
 impl Env {
@@ -41,6 +44,13 @@ impl Env {
         Self {
             home: std::env::var("HOME").ok(),
             xdg_runtime_dir: std::env::var("XDG_RUNTIME_DIR").ok(),
+            // GUI-launched processes are not guaranteed to inherit TMPDIR.
+            // `temp_dir` still resolves to the platform's real temporary
+            // directory on macOS, where Podman publishes its API socket.
+            temp_dir: std::env::var("TMPDIR")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .or_else(|| Some(std::env::temp_dir().to_string_lossy().into_owned())),
         }
     }
 }
@@ -51,8 +61,22 @@ impl Env {
 /// who pinned `podman` on Linux and syncs their settings to a Mac should get
 /// Podman there too, not a dangling preference.
 pub fn known(os: &str, env: &Env) -> Vec<Daemon> {
-    // Only where these socket paths mean anything. Windows reaches its daemon
-    // over a named pipe, so it stays with the fallback that knows how.
+    if os == "windows" {
+        return vec![
+            Daemon {
+                id: "docker",
+                label: "Docker Desktop",
+                paths: vec![r"\\.\pipe\docker_engine".into()],
+                npipe: true,
+            },
+            Daemon {
+                id: "podman",
+                label: "Podman",
+                paths: vec![r"\\.\pipe\podman-machine-default".into()],
+                npipe: true,
+            },
+        ];
+    }
     if os != "macos" && os != "linux" {
         return Vec::new();
     }
@@ -66,7 +90,13 @@ pub fn known(os: &str, env: &Env) -> Vec<Daemon> {
         // Docker Desktop moved to a per-user socket; the system one is a
         // symlink it also maintains, so it is the fallback rather than first.
         docker.push(format!("{home}/.docker/run/docker.sock"));
-        // Podman on a Mac is a Linux VM, and this is the socket it forwards.
+        // Podman on a Mac is a Linux VM. Current Podman exposes the API at a
+        // per-user temporary socket returned by `podman machine inspect`.
+        // Keep the older persistent path as a compatibility fallback because
+        // existing machines can survive a Podman upgrade.
+        if let Some(temp) = &env.temp_dir {
+            podman.push(format!("{temp}/podman/podman-machine-default-api.sock"));
+        }
         podman.push(format!(
             "{home}/.local/share/containers/podman/machine/podman.sock"
         ));
@@ -83,13 +113,19 @@ pub fn known(os: &str, env: &Env) -> Vec<Daemon> {
 
     let docker = Daemon {
         id: "docker",
-        label: if os == "macos" { "Docker Desktop" } else { "Docker" },
+        label: if os == "macos" {
+            "Docker Desktop"
+        } else {
+            "Docker"
+        },
         paths: docker,
+        npipe: false,
     };
     let podman = Daemon {
         id: "podman",
         label: "Podman",
         paths: podman,
+        npipe: false,
     };
 
     // Podman leads on Linux, which is the order `providers::linux` has always
@@ -107,6 +143,7 @@ pub fn known(os: &str, env: &Env) -> Vec<Daemon> {
         id: "colima",
         label: "Colima",
         paths: vec![format!("{home}/.colima/default/docker.sock")],
+        npipe: false,
     });
     // Rancher Desktop is a desktop app, and on Linux it reuses the docker
     // socket rather than one of its own.
@@ -115,6 +152,7 @@ pub fn known(os: &str, env: &Env) -> Vec<Daemon> {
             id: "rancher",
             label: "Rancher Desktop",
             paths: vec![format!("{home}/.rd/docker.sock")],
+            npipe: false,
         });
     }
     out
@@ -122,7 +160,10 @@ pub fn known(os: &str, env: &Env) -> Vec<Daemon> {
 
 /// The named daemon ids for a platform, in the order selection should try them.
 pub fn ids(os: &str) -> Vec<&'static str> {
-    known(os, &Env::default()).into_iter().map(|d| d.id).collect()
+    known(os, &Env::default())
+        .into_iter()
+        .map(|d| d.id)
+        .collect()
 }
 
 #[cfg(test)]
@@ -133,6 +174,7 @@ mod tests {
         Env {
             home: Some("/Users/dev".into()),
             xdg_runtime_dir: Some("/run/user/1000".into()),
+            temp_dir: Some("/var/folders/xx/T".into()),
         }
     }
 
@@ -161,8 +203,7 @@ mod tests {
         let list = known("macos", &env());
         let d = find(&list, "docker");
         assert_eq!(
-            d.socket(&|p| p == "/Users/dev/.docker/run/docker.sock"
-                || p == "/var/run/docker.sock"),
+            d.socket(&|p| p == "/Users/dev/.docker/run/docker.sock" || p == "/var/run/docker.sock"),
             Some("/Users/dev/.docker/run/docker.sock".into())
         );
     }
@@ -201,6 +242,25 @@ mod tests {
         // offering a button that cannot work.
         let list = known("macos", &env());
         assert_eq!(find(&list, "colima").socket(&|_| false), None);
+    }
+
+    #[test]
+    fn macos_podman_prefers_the_current_machine_api_socket() {
+        let list = known("macos", &env());
+        let podman = find(&list, "podman");
+        assert_eq!(
+            podman.socket(&|p| p == "/var/folders/xx/T/podman/podman-machine-default-api.sock"),
+            Some("/var/folders/xx/T/podman/podman-machine-default-api.sock".into())
+        );
+    }
+
+    #[test]
+    fn windows_names_docker_and_podman_named_pipes() {
+        let list = known("windows", &Env::default());
+        assert_eq!(ids("windows"), vec!["docker", "podman"]);
+        assert!(find(&list, "docker").npipe);
+        assert_eq!(find(&list, "docker").paths[0], r"\\.\pipe\docker_engine");
+        assert!(find(&list, "podman").npipe);
     }
 
     #[test]

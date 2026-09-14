@@ -194,6 +194,8 @@ mod tests {
             secret: "t".into(),
             kind: CredKind::Token,
         };
-        assert!(serde_json::to_string(&cred).unwrap().contains(r#""kind":"token""#));
+        assert!(serde_json::to_string(&cred)
+            .unwrap()
+            .contains(r#""kind":"token""#));
     }
 }

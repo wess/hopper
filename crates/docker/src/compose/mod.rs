@@ -5,10 +5,12 @@ pub mod files;
 pub mod runner;
 
 use crate::client::Client;
-use crate::error::Result;
+use crate::error::{DockerError, Result};
 use model::{
     ComposeAction, ComposeConfigResult, ComposeOptions, ComposeProgress, ComposeTarget, StreamKind,
 };
+
+const MAX_CONFIG_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
 /// Run a lifecycle action over a stack, streaming Compose's output.
 pub async fn run<F>(
@@ -34,9 +36,19 @@ pub async fn config(client: &Client, target: &ComposeTarget) -> Result<ComposeCo
 
     let mut yaml = String::new();
     let mut errors = String::new();
+    let mut oversized = false;
     let code = runner::run(client, "config", &argv, workdir.as_deref(), |p| {
         if p.done {
             return true;
+        }
+        if yaml
+            .len()
+            .saturating_add(errors.len())
+            .saturating_add(p.line.len() + 1)
+            > MAX_CONFIG_OUTPUT_BYTES
+        {
+            oversized = true;
+            return false;
         }
         match p.stream {
             StreamKind::Stdout => {
@@ -51,6 +63,13 @@ pub async fn config(client: &Client, target: &ComposeTarget) -> Result<ComposeCo
         true
     })
     .await?;
+
+    if oversized {
+        return Err(DockerError::decode(format!(
+            "Compose config output exceeded {} MiB.",
+            MAX_CONFIG_OUTPUT_BYTES / (1024 * 1024)
+        )));
+    }
 
     Ok(if code == 0 {
         ComposeConfigResult {

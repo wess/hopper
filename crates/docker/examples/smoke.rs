@@ -69,13 +69,10 @@ async fn main() {
     // An ndjson stream: read a couple of events with a short deadline, since
     // an idle daemon emits nothing.
     let mut seen = 0usize;
-    let stream = client.ndjson::<serde_json::Value, _>(
-        Req::get("/events").no_timeout(),
-        |_| {
-            seen += 1;
-            seen < 2
-        },
-    );
+    let stream = client.ndjson::<serde_json::Value, _>(Req::get("/events").no_timeout(), |_| {
+        seen += 1;
+        seen < 2
+    });
     match tokio::time::timeout(std::time::Duration::from_millis(600), stream).await {
         Ok(Ok(())) => println!("events   : stream closed after {seen}"),
         Ok(Err(e)) => println!("events   : FAILED {e}"),

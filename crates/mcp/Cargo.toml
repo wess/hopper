@@ -16,6 +16,8 @@ docker = { workspace = true }
 host = { workspace = true }
 
 tokio = { workspace = true, features = ["io-std"] }
+tokio-util = { workspace = true, features = ["codec"] }
+futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

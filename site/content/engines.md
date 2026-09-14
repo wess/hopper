@@ -5,13 +5,13 @@ order: 2
 summary: Apple Containers on macOS, Docker or Podman on Linux, and anything that answers the Engine API.
 ---
 
-Hopper does not have one engine. It has three ways of finding one, tried in
-order, and it tells you which answered.
+Hopper does not have one engine. It discovers the engines that make sense on
+this machine, shows them separately, and tells you which one answered.
 
-## macOS — Apple Containers
+## macOS Apple silicon — Apple Containers
 
 [Apple's `container`](https://github.com/apple/container) ships as part of the
-macOS 26 story: every container is its own lightweight virtual machine, images
+macOS 26 story and requires Apple silicon: every container is its own lightweight virtual machine, images
 are OCI, and Apple maintains it. Hopper installs it, starts and stops its
 services, and drives it.
 
@@ -32,7 +32,13 @@ desktop Podman is not passed over in favour of a stale root daemon:
 
 Podman's socket is deliberately Docker-compatible, so nothing else changes.
 `DOCKER_HOST`, when set, wins outright — if you are pointing at a remote daemon
-you mean it.
+you mean it. `CONTAINER_HOST` is also accepted when `DOCKER_HOST` is unset.
+
+## Windows — Docker Desktop or Podman
+
+Hopper checks Docker Desktop's `docker_engine` named pipe and Podman's default
+machine pipe. They are shown as separate choices when both are present, and
+Hopper attaches to the one you select without taking over its lifecycle.
 
 ## Anywhere — an engine you already run
 
@@ -93,7 +99,9 @@ default:
 HOPPER_ENGINE=existing /Applications/Hopper.app/Contents/MacOS/hopper
 ```
 
-Valid ids are `apple`, `linux`, and `existing`.
+Valid ids depend on the platform. The common ids are `existing`, `docker`, and
+`podman`; macOS also offers `apple`, `colima`, and `rancher` when those engines
+are supported by the host.
 
 An engine you name is honoured even when it cannot run yet — Hopper reports on
 the one you asked for and what it needs, rather than quietly answering about a

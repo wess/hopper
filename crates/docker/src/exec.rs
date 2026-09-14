@@ -13,6 +13,9 @@ use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
+const INPUT_QUEUE: usize = 256;
+const MAX_EXEC_OUTPUT: usize = 16 * 1024 * 1024;
+
 /// How the shell for a session was chosen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Shell {
@@ -38,7 +41,11 @@ pub fn shell_command(requested: Option<&str>) -> Vec<String> {
         .map(|s| format!("[ -x {s} ] && exec {s}"))
         .collect::<Vec<_>>()
         .join("; ");
-    vec!["/bin/sh".into(), "-c".into(), format!("{probe}; exec /bin/sh")]
+    vec![
+        "/bin/sh".into(),
+        "-c".into(),
+        format!("{probe}; exec /bin/sh"),
+    ]
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -50,14 +57,25 @@ struct Created {
 /// A live exec session. Dropping it closes the socket, which ends the session.
 pub struct Session {
     pub id: String,
-    input: mpsc::UnboundedSender<Vec<u8>>,
+    input: mpsc::Sender<Vec<u8>>,
     client: Client,
+    pumps: [tokio::task::JoinHandle<()>; 2],
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        // Dropping a Tokio JoinHandle detaches its task; explicitly abort both
+        // halves so a closed terminal cannot keep a hijacked socket alive.
+        for pump in &self.pumps {
+            pump.abort();
+        }
+    }
 }
 
 impl Session {
     /// Send keystrokes to the container.
     pub fn write(&self, bytes: impl Into<Vec<u8>>) -> bool {
-        self.input.send(bytes.into()).is_ok()
+        self.input.try_send(bytes.into()).is_ok()
     }
 
     /// Tell the daemon the terminal was resized, so full-screen programs
@@ -122,11 +140,11 @@ where
         )
         .await?;
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(INPUT_QUEUE);
     let (mut reader, mut writer) = tokio::io::split(upgraded);
 
     // Pump keystrokes in.
-    tokio::spawn(async move {
+    let input_pump = tokio::spawn(async move {
         while let Some(bytes) = rx.recv().await {
             if writer.write_all(&bytes).await.is_err() {
                 break;
@@ -137,7 +155,7 @@ where
 
     // Pump output out. A TTY session is unframed; without one the daemon
     // stdcopy-frames stdout and stderr.
-    tokio::spawn(async move {
+    let output_pump = tokio::spawn(async move {
         let mut demux = TextDemux::with_tty(tty);
         let mut buf = vec![0u8; 8192];
         loop {
@@ -163,16 +181,13 @@ where
         id: created.id,
         input: tx,
         client: client.clone(),
+        pumps: [input_pump, output_pump],
     })
 }
 
 /// Run a command to completion and collect its output. Used by the MCP server
 /// and by helpers such as volume browsing.
-pub async fn run_once(
-    client: &Client,
-    container: &str,
-    argv: &[String],
-) -> Result<(String, i64)> {
+pub async fn run_once(client: &Client, container: &str, argv: &[String]) -> Result<(String, i64)> {
     let created: Created = client
         .json(
             Req::post(format!("/containers/{container}/exec")).json_body(json!({
@@ -184,7 +199,15 @@ pub async fn run_once(
         )
         .await?;
 
+    if created.id.is_empty() {
+        return Err(DockerError::api(
+            500,
+            "The daemon did not return an exec id.",
+        ));
+    }
+
     let mut out = String::new();
+    let mut truncated = false;
     let mut demux = TextDemux::with_tty(false);
     client
         .stream(
@@ -193,6 +216,19 @@ pub async fn run_once(
                 .no_timeout(),
             |chunk| {
                 for (_, text) in demux.push(&chunk) {
+                    let remaining = MAX_EXEC_OUTPUT.saturating_sub(out.len());
+                    if text.len() > remaining {
+                        out.push_str(
+                            &text[..text
+                                .char_indices()
+                                .take_while(|(i, _)| *i < remaining)
+                                .last()
+                                .map(|(i, c)| i + c.len_utf8())
+                                .unwrap_or(0)],
+                        );
+                        truncated = true;
+                        return false;
+                    }
                     out.push_str(&text);
                 }
                 true
@@ -200,7 +236,26 @@ pub async fn run_once(
         )
         .await?;
     for (_, text) in demux.finish() {
+        let remaining = MAX_EXEC_OUTPUT.saturating_sub(out.len());
+        if text.len() > remaining {
+            out.push_str(
+                &text[..text
+                    .char_indices()
+                    .take_while(|(i, _)| *i < remaining)
+                    .last()
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(0)],
+            );
+            truncated = true;
+            break;
+        }
         out.push_str(&text);
+    }
+    if truncated {
+        return Err(DockerError::decode(format!(
+            "Exec output exceeded the {} MiB limit.",
+            MAX_EXEC_OUTPUT / (1024 * 1024)
+        )));
     }
 
     #[derive(Deserialize, Default)]
@@ -210,10 +265,12 @@ pub async fn run_once(
     }
     let info: Inspect = client
         .json(Req::get(format!("/exec/{}/json", created.id)))
-        .await
-        .unwrap_or_default();
+        .await?;
 
-    Ok((out, info.exit_code.unwrap_or(0)))
+    let exit_code = info
+        .exit_code
+        .ok_or_else(|| DockerError::decode("The daemon returned no exec exit code."))?;
+    Ok((out, exit_code))
 }
 
 #[cfg(test)]
@@ -245,10 +302,7 @@ mod tests {
         let cmd = shell_command(None);
         let script = &cmd[2];
         for candidate in SHELL_CANDIDATES {
-            assert!(
-                script.contains(candidate),
-                "probe should try {candidate}"
-            );
+            assert!(script.contains(candidate), "probe should try {candidate}");
         }
         // A distroless image with none of them still gets a final attempt
         // rather than an empty command.

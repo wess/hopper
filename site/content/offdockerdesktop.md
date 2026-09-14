@@ -5,7 +5,8 @@ order: 2
 summary: Bring your images and containers across, then uninstall the thing you were paying for.
 ---
 
-You have Docker Desktop with real work in it. This moves that work onto Apple's
+You have Docker Desktop with real work in it. On a supported Apple silicon Mac,
+this moves that work onto Apple's
 runtime and gets Docker Desktop off the machine.
 
 Read the whole thing before starting — there is one step that needs manual work.

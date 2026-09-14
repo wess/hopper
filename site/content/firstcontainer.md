@@ -17,7 +17,7 @@ Open it. The sidebar footer will say what it found.
 
 ## 2. Get an engine
 
-On a clean macOS 26 machine, Hopper will say:
+On a clean Apple silicon Mac running macOS 26, Hopper will say:
 
 > **Run containers natively on this Mac**
 > Apple Containers is not installed yet.

@@ -25,12 +25,17 @@ pub struct Workspace {
 /// absent rather than matching nothing — a half-typed pattern in the settings
 /// field must not blank every view.
 fn safe_regex(pattern: &str) -> Option<regex::Regex> {
-    RegexBuilder::new(pattern).case_insensitive(true).build().ok()
+    RegexBuilder::new(pattern)
+        .case_insensitive(true)
+        .build()
+        .ok()
 }
 
 impl Workspace {
     fn has_pattern(&self) -> Option<&str> {
-        self.name_pattern.as_deref().filter(|p| !p.trim().is_empty())
+        self.name_pattern
+            .as_deref()
+            .filter(|p| !p.trim().is_empty())
     }
 
     /// Whether a container falls inside this scope.

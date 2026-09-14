@@ -176,6 +176,8 @@ impl Import {
 
     fn scan(&mut self, cx: &mut Context<Self>) {
         let host = Arc::clone(&self.state.host);
+        let check_host = Arc::clone(&host);
+        let request_generation = host.selection_generation();
         let this = cx.entity().downgrade();
         self.stage = Stage::Scanning;
         self.notes.clear();
@@ -186,6 +188,14 @@ impl Import {
             move |scan, cx| {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
+                        if check_host.selection_generation() != request_generation {
+                            // The result describes a different destination.
+                            // Return to an actionable state rather than
+                            // presenting a stale plan that could be imported.
+                            this.stage = Stage::Idle;
+                            cx.notify();
+                            return;
+                        }
                         this.selected = select_all(&scan);
                         this.stage = Stage::Chosen(Box::new(scan));
                         cx.notify();
@@ -218,11 +228,12 @@ impl Import {
 
         // Progress arrives as a stream so a long copy shows movement rather
         // than freezing on one spinner.
+        let this_done = this.clone();
         bridge::stream(
             cx,
-            move |tx| async move {
+            move |mut tx| async move {
                 let mut report = |p: MigrationProgress| {
-                    let _ = tx.unbounded_send(p);
+                    let _ = tx.try_send(p);
                 };
                 host.import_run(&plan, &mut report).await;
             },
@@ -231,10 +242,16 @@ impl Import {
                     this.update(cx, |this, cx| {
                         let item = this.label(&frame.item);
                         if let Some(e) = &frame.error {
-                            this.notes.push(Note { item: item.clone(), text: e.clone() });
+                            this.notes.push(Note {
+                                item: item.clone(),
+                                text: e.clone(),
+                            });
                         }
                         if let Some(w) = &frame.warning {
-                            this.notes.push(Note { item, text: w.clone() });
+                            this.notes.push(Note {
+                                item,
+                                text: w.clone(),
+                            });
                         }
                         if frame.finished {
                             this.stage = Stage::Done(frame.message.clone());
@@ -244,13 +261,31 @@ impl Import {
                     });
                 }
             },
-            move |cx| state.bump(cx),
+            move |cx| {
+                if let Some(this) = this_done.upgrade() {
+                    this.update(cx, |this, cx| {
+                        // The bounded progress queue may drop the terminal
+                        // frame under heavy output. The producer's completion
+                        // is still authoritative, so never leave the view
+                        // spinning forever waiting for that frame.
+                        if matches!(this.stage, Stage::Importing) {
+                            this.stage =
+                                Stage::Done("Import finished. Review the notes below.".into());
+                        }
+                        cx.notify();
+                    });
+                }
+                state.bump(cx);
+            },
         );
     }
 
     /// The name the item was listed under, falling back to a readable id.
     fn label(&self, item: &str) -> String {
-        self.labels.get(item).cloned().unwrap_or_else(|| shorten(item))
+        self.labels
+            .get(item)
+            .cloned()
+            .unwrap_or_else(|| shorten(item))
     }
 
     fn toggle(&mut self, k: String, cx: &mut Context<Self>) {
@@ -304,38 +339,47 @@ impl Render for Import {
                 );
             }
             Stage::Chosen(scan) if !scan.available => {
-                body = body.child(
-                    Text::new(
-                        scan.message
-                            .clone()
-                            .unwrap_or_else(|| "No other engine was found.".into()),
+                body = body
+                    .child(
+                        Text::new(
+                            scan.message
+                                .clone()
+                                .unwrap_or_else(|| "No other engine was found.".into()),
+                        )
+                        .size(Size::Sm),
                     )
-                    .size(Size::Sm),
-                )
-                .child(
-                    Group::new().child(
-                        Button::new("import-rescan", "Scan again")
-                            .size(Size::Sm)
-                            .variant(Variant::Light)
-                            .on_click(cx.listener(|this, _, _, cx| this.scan(cx))),
-                    ),
-                );
+                    .child(
+                        Group::new().child(
+                            Button::new("import-rescan", "Scan again")
+                                .size(Size::Sm)
+                                .variant(Variant::Light)
+                                .on_click(cx.listener(|this, _, _, cx| this.scan(cx))),
+                        ),
+                    );
             }
             Stage::Chosen(scan) => {
                 if let Some(source) = &scan.source {
-                    body = body.child(
-                        Text::new(format!("Found {source}"))
-                            .size(Size::Xs)
-                            .dimmed(),
-                    );
+                    body = body.child(Text::new(format!("Found {source}")).size(Size::Xs).dimmed());
                 }
                 body = body.child(
                     Group::new()
                         .gap(Size::Xs)
-                        .child(Badge::new(heading(MigrationKind::Image, scan.images.len())).size(Size::Sm))
-                        .child(Badge::new(heading(MigrationKind::Volume, scan.volumes.len())).size(Size::Sm))
-                        .child(Badge::new(heading(MigrationKind::Network, scan.networks.len())).size(Size::Sm))
-                        .child(Badge::new(heading(MigrationKind::Container, scan.containers.len())).size(Size::Sm)),
+                        .child(
+                            Badge::new(heading(MigrationKind::Image, scan.images.len()))
+                                .size(Size::Sm),
+                        )
+                        .child(
+                            Badge::new(heading(MigrationKind::Volume, scan.volumes.len()))
+                                .size(Size::Sm),
+                        )
+                        .child(
+                            Badge::new(heading(MigrationKind::Network, scan.networks.len()))
+                                .size(Size::Sm),
+                        )
+                        .child(
+                            Badge::new(heading(MigrationKind::Container, scan.containers.len()))
+                                .size(Size::Sm),
+                        ),
                 );
 
                 let mut list = Stack::new().gap(Size::Xs);
@@ -353,14 +397,12 @@ impl Render for Import {
                             .label(label)
                             .checked(on)
                             .size(Size::Sm)
-                            .on_change(cx.listener(move |this, _, _, cx| {
-                                this.toggle(k.clone(), cx)
-                            })),
+                            .on_change(
+                                cx.listener(move |this, _, _, cx| this.toggle(k.clone(), cx)),
+                            ),
                     );
                 }
-                body = body.child(
-                    ScrollArea::new("import-list").max_height(320.0).child(list),
-                );
+                body = body.child(ScrollArea::new("import-list").max_height(320.0).child(list));
 
                 let n = self.selected.len();
                 body = body.child(
@@ -411,7 +453,11 @@ impl Render for Import {
                         Group::new()
                             .gap(Size::Sm)
                             .align(Align::Center)
-                            .child(Icon::new(IconName::CircleCheck).size(Size::Md).color(ColorName::Green))
+                            .child(
+                                Icon::new(IconName::CircleCheck)
+                                    .size(Size::Md)
+                                    .color(ColorName::Green),
+                            )
                             .child(Text::new(summary.clone()).size(Size::Sm).medium()),
                     )
                     .child(
@@ -429,7 +475,9 @@ impl Render for Import {
         // swallowed into a success message.
         if !self.notes.is_empty() {
             let mut notes = Stack::new().gap(Size::Xs).child(
-                Text::new("Worth knowing".to_string()).size(Size::Sm).medium(),
+                Text::new("Worth knowing".to_string())
+                    .size(Size::Sm)
+                    .medium(),
             );
             for line in grouped(&self.notes) {
                 notes = notes.child(Text::new(line).size(Size::Xs).dimmed());
@@ -497,7 +545,11 @@ mod tests {
     fn the_plan_carries_each_kind_to_its_own_list() {
         let s = scan();
         let plan = plan_from(&s, &select_all(&s));
-        assert_eq!(plan.images, vec!["nginx:latest".to_string()], "images travel by reference");
+        assert_eq!(
+            plan.images,
+            vec!["nginx:latest".to_string()],
+            "images travel by reference"
+        );
         assert_eq!(plan.volumes, vec!["data".to_string()]);
         assert_eq!(plan.networks, vec!["net1".to_string()]);
         assert_eq!(plan.containers, vec!["c1".to_string()]);
@@ -525,20 +577,24 @@ mod tests {
         // Without this the import could be pointed at a different daemon than
         // the one the user was shown.
         let mut s = scan();
-        s.source_endpoint = Some(model::MigrationEndpoint::Unix { path: "/x.sock".into() });
+        s.source_endpoint = Some(model::MigrationEndpoint::Unix {
+            path: "/x.sock".into(),
+        });
         let plan = plan_from(&s, &select_all(&s));
         assert_eq!(plan.source, s.source_endpoint);
     }
 
     fn note(item: &str, text: &str) -> Note {
-        Note { item: item.into(), text: text.into() }
+        Note {
+            item: item.into(),
+            text: text.into(),
+        }
     }
 
     #[test]
     fn one_reason_repeated_per_item_collapses_to_a_single_line() {
-        // The skip that started this: eight containers, eight identical
-        // paragraphs.
-        let why = "Recreating containers is not implemented yet.";
+        // Repeated item-level notes should collapse to one readable line.
+        let why = "Containers are recreated from their portable configuration.";
         let notes: Vec<Note> = ["web", "api", "db"].iter().map(|n| note(n, why)).collect();
         let lines = grouped(&notes);
         assert_eq!(lines, vec![format!("{why} (web, api, and db)")]);
@@ -546,20 +602,31 @@ mod tests {
 
     #[test]
     fn a_lone_note_still_names_what_it_is_about() {
-        assert_eq!(grouped(&[note("data", "Volume contents are not copied yet.")]),
-            vec!["data: Volume contents are not copied yet.".to_string()]);
+        assert_eq!(
+            grouped(&[note("data", "Volume contents are not copied yet.")]),
+            vec!["data: Volume contents are not copied yet.".to_string()]
+        );
     }
 
     #[test]
     fn a_long_list_counts_the_tail_instead_of_printing_it() {
-        let notes: Vec<Note> = ["a", "b", "c", "d", "e"].iter().map(|n| note(n, "nope")).collect();
-        assert_eq!(grouped(&notes), vec!["nope (a, b, c, and 2 more)".to_string()]);
+        let notes: Vec<Note> = ["a", "b", "c", "d", "e"]
+            .iter()
+            .map(|n| note(n, "nope"))
+            .collect();
+        assert_eq!(
+            grouped(&notes),
+            vec!["nope (a, b, c, and 2 more)".to_string()]
+        );
     }
 
     #[test]
     fn distinct_reasons_stay_apart_in_the_order_they_arrived() {
         let notes = vec![note("web", "one"), note("data", "two"), note("api", "one")];
-        assert_eq!(grouped(&notes), vec!["one (web and api)".to_string(), "data: two".to_string()]);
+        assert_eq!(
+            grouped(&notes),
+            vec!["one (web and api)".to_string(), "data: two".to_string()]
+        );
     }
 
     #[test]
@@ -570,7 +637,10 @@ mod tests {
 
     #[test]
     fn a_note_about_the_whole_run_carries_no_item() {
-        assert_eq!(grouped(&[note("", "Docker went away.")]), vec!["Docker went away.".to_string()]);
+        assert_eq!(
+            grouped(&[note("", "Docker went away.")]),
+            vec!["Docker went away.".to_string()]
+        );
     }
 
     #[test]

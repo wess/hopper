@@ -12,15 +12,18 @@ use crate::error::{DockerError, Result};
 use crate::exec;
 use bytes::Bytes;
 use model::FileEntry;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read};
+
+const MAX_IN_MEMORY_ARCHIVE: usize = 64 * 1024 * 1024;
 
 /// Download a path from a container as a tar archive.
 pub async fn download(client: &Client, id: &str, path: &str) -> Result<Bytes> {
     client
-        .bytes(
+        .bytes_limited(
             Req::get(format!("/containers/{id}/archive"))
                 .query("path", path)
                 .no_timeout(),
+            MAX_IN_MEMORY_ARCHIVE,
         )
         .await
 }
@@ -154,7 +157,11 @@ pub async fn list_dir(client: &Client, id: &str, dir: &str) -> Result<Vec<FileEn
     let argv = vec![
         "/bin/sh".to_string(),
         "-c".to_string(),
-        format!("ls -la {} 2>/dev/null || ls -la {}", shell_quote(dir), shell_quote(dir)),
+        format!(
+            "ls -la {} 2>/dev/null || ls -la {}",
+            shell_quote(dir),
+            shell_quote(dir)
+        ),
     ];
     let (out, code) = exec::run_once(client, id, &argv).await?;
     if code != 0 && out.trim().is_empty() {
@@ -164,10 +171,7 @@ pub async fn list_dir(client: &Client, id: &str, dir: &str) -> Result<Vec<FileEn
         ));
     }
 
-    let mut entries: Vec<FileEntry> = out
-        .lines()
-        .filter_map(|l| parse_ls_line(l, dir))
-        .collect();
+    let mut entries: Vec<FileEntry> = out.lines().filter_map(|l| parse_ls_line(l, dir)).collect();
     // Directories first, then names, so the tree reads like a file browser.
     entries.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.name.cmp(&b.name)));
     Ok(entries)
@@ -179,13 +183,20 @@ pub fn shell_quote(s: &str) -> String {
 }
 
 /// Export a whole path to a tar file on the host.
-pub async fn export_to(client: &Client, id: &str, path: &str, dest: &std::path::Path) -> Result<()> {
-    let bytes = download(client, id, path).await?;
-    let mut file = std::fs::File::create(dest)
-        .map_err(|e| DockerError::transport(format!("Could not create {}: {e}", dest.display())))?;
-    file.write_all(&bytes)
-        .map_err(|e| DockerError::transport(format!("Could not write {}: {e}", dest.display())))?;
-    Ok(())
+pub async fn export_to(
+    client: &Client,
+    id: &str,
+    path: &str,
+    dest: &std::path::Path,
+) -> Result<()> {
+    client
+        .stream_to(
+            Req::get(format!("/containers/{id}/archive"))
+                .query("path", path)
+                .no_timeout(),
+            dest,
+        )
+        .await
 }
 
 #[cfg(test)]

@@ -6,7 +6,7 @@
     <title>Hopper — mission control for Docker</title>
     <meta
       name="description"
-      content="Hopper is a fast, native desktop app for managing Docker — containers, images, volumes, networks and whole Compose stacks — straight over the Engine socket. No bundled browser. No daemon lock-in."
+      content="Hopper is a fast, native desktop app for managing Docker — containers, images, volumes, networks and whole Compose stacks — straight through the Engine API. No bundled browser. No daemon lock-in."
     />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2336a2f7'/%3E%3Crect x='8' y='16' width='6' height='6' rx='1.4' fill='%230a0e13'/%3E%3Crect x='15.5' y='16' width='6' height='6' rx='1.4' fill='%230a0e13'/%3E%3Crect x='11.75' y='9' width='6' height='6' rx='1.4' fill='%230a0e13'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -73,8 +73,8 @@
 
           <p class="hero-sub reveal">
             A fast, native desktop app for your containers, images, volumes, networks —
-            and whole Compose stacks. It talks straight to the Engine over the unix
-            socket. No bundled browser. No daemon lock-in.
+            and whole Compose stacks. It talks straight to the engine's native endpoint.
+            No bundled browser. No daemon lock-in.
           </p>
 
           <div class="hero-cta reveal">
@@ -173,7 +173,7 @@
           <li>OrbStack</li>
           <li>Rancher&nbsp;Desktop</li>
           <li>Podman<span>API-compat</span></li>
-          <li>Remote&nbsp;over&nbsp;SSH</li>
+          <li>Remote&nbsp;over&nbsp;TCP/TLS</li>
         </ul>
       </section>
 
@@ -276,8 +276,8 @@
           <pre class="code-body"><span class="c-pun">{</span>
   <span class="c-key">"mcpServers"</span><span class="c-pun">: {</span>
     <span class="c-key">"hopper"</span><span class="c-pun">: {</span>
-      <span class="c-key">"command"</span><span class="c-pun">:</span> <span class="c-str">"bun"</span><span class="c-pun">,</span>
-      <span class="c-key">"args"</span><span class="c-pun">: [</span><span class="c-str">"run"</span><span class="c-pun">,</span> <span class="c-str">"mcp"</span><span class="c-pun">]</span>
+      <span class="c-key">"command"</span><span class="c-pun">:</span> <span class="c-str">"/Applications/Hopper.app/Contents/MacOS/sidecars/hoppermcp"</span><span class="c-pun">,</span>
+      <span class="c-key">"args"</span><span class="c-pun">: []</span>
     <span class="c-pun">}</span>
   <span class="c-pun">}</span>
 <span class="c-pun">}</span></pre>
@@ -289,14 +289,14 @@
         <header class="section-head">
           <p class="eyebrow reveal"><span class="eyebrow-dash"></span>Under the hood</p>
           <h2 class="section-title reveal">Built like a tool,<br />not a tab.</h2>
-          <p class="section-lead reveal">A Bun host process and a React&nbsp;19 webview over the Butter framework — no Electron, no bundled Chromium. It speaks the Docker Engine API directly.</p>
+          <p class="section-lead reveal">A native Rust application built with gpui and guise — no Electron, no bundled Chromium, and no always-running helper VM. It speaks the Docker Engine API directly.</p>
         </header>
 
         <div class="stats">
           <div class="stat reveal"><span class="stat-n">0</span><span class="stat-l">bundled Chromium</span></div>
-          <div class="stat reveal"><span class="stat-n">1</span><span class="stat-l">unix socket</span></div>
+          <div class="stat reveal"><span class="stat-n">1</span><span class="stat-l">engine endpoint</span></div>
           <div class="stat reveal"><span class="stat-n">v1.43</span><span class="stat-l">Engine API, pinned</span></div>
-          <div class="stat reveal"><span class="stat-n">100%</span><span class="stat-l">TypeScript, both sides</span></div>
+          <div class="stat reveal"><span class="stat-n">100%</span><span class="stat-l">Rust application</span></div>
         </div>
       </section>
 
@@ -305,23 +305,23 @@
         <div class="download-card reveal">
           <div class="download-glow" aria-hidden="true"></div>
           <p class="eyebrow"><span class="eyebrow-dash"></span>Get Hopper</p>
-          <h2 class="download-title">Point it at your socket.<br />You're already running.</h2>
+          <h2 class="download-title">Point it at your engine.<br />You're already running.</h2>
 
           <div class="dl-grid">
             <a class="dl" href="https://github.com/wess/hopper/releases" target="_blank" rel="noopener">
               <span class="dl-ic"><svg viewBox="0 0 24 24" width="26" height="26" fill="currentColor" aria-hidden="true"><path d="M16.4 1.6c.1 1-.3 2-.9 2.8-.7.8-1.7 1.4-2.7 1.3-.1-1 .4-2 1-2.7.7-.8 1.8-1.3 2.6-1.4zM19.6 17c-.5 1.2-.8 1.7-1.4 2.8-1 1.5-2.3 3.4-3.9 3.4-1.4 0-1.8-.9-3.7-.9s-2.4.9-3.7.9c-1.6 0-2.9-1.7-3.8-3.2-2.6-4-2.9-8.8-1.3-11.3 1.1-1.8 2.9-2.9 4.6-2.9 1.7 0 2.8 1 4.2 1 1.4 0 2.2-1 4.2-1 1.5 0 3.1.8 4.2 2.3-3.7 2-3.1 7.3.3 9.1z"/></svg></span>
               <span class="dl-name">macOS</span>
-              <span class="dl-sub">Universal&nbsp;·&nbsp;.dmg</span>
+              <span class="dl-sub">Apple silicon or Intel&nbsp;·&nbsp;.dmg</span>
             </a>
             <a class="dl" href="https://github.com/wess/hopper/releases" target="_blank" rel="noopener">
               <span class="dl-ic"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="15" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg></span>
               <span class="dl-name">Linux</span>
-              <span class="dl-sub">x86_64&nbsp;·&nbsp;.AppImage</span>
+              <span class="dl-sub">x86_64&nbsp;·&nbsp;.tar.gz</span>
             </a>
             <a class="dl" href="https://github.com/wess/hopper/releases" target="_blank" rel="noopener">
               <span class="dl-ic"><svg viewBox="0 0 24 24" width="23" height="23" fill="currentColor" aria-hidden="true"><path d="M3 5.4 10.3 4.4v7.1H3zM11.4 4.3 21 3v8.5h-9.6zM3 12.6h7.3v7.1L3 18.6zM11.4 12.6H21V21l-9.6-1.3z"/></svg></span>
               <span class="dl-name">Windows</span>
-              <span class="dl-sub">x64&nbsp;·&nbsp;.exe</span>
+              <span class="dl-sub">x64&nbsp;·&nbsp;.zip</span>
             </a>
           </div>
 
@@ -353,7 +353,7 @@
           <a href="#mcp">MCP</a>
           <a href="https://github.com/wess/hopper" target="_blank" rel="noopener">GitHub</a>
         </nav>
-        <p class="footer-fine">Built on Butter · Bun + React 19 · <span id="year"></span></p>
+        <p class="footer-fine">Built with Rust · gpui + guise · <span id="year"></span></p>
       </div>
     </footer>
 

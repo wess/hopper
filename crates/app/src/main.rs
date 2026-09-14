@@ -4,6 +4,10 @@
 //! Everything else lives in the domain crates; the async Docker layer is
 //! reached through the tokio bridge.
 
+// A GUI binary on Windows otherwise opens a console window beside the app.
+// Debug builds keep it so `cargo run` still shows logs.
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+
 mod bridge;
 mod format;
 mod root;
@@ -87,7 +91,8 @@ fn main() {
         .init();
 
     Application::new().run(|cx: &mut App| {
-        theme::build(ColorScheme::Dark).init(cx);
+        let settings = store::load_settings();
+        theme::build(theme::scheme(settings.theme, cx.window_appearance())).init(cx);
 
         cx.bind_keys([
             KeyBinding::new("cmd-q", Quit, None),
@@ -104,7 +109,7 @@ fn main() {
         cx.on_action::<ShowDocs>(|_, cx| cx.open_url("https://github.com/wess/hopper"));
 
         let bounds = Bounds::centered(None, size(px(1380.0), px(880.0)), cx);
-        cx.open_window(
+        if let Err(error) = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),
                 window_min_size: Some(size(px(920.0), px(560.0))),
@@ -115,8 +120,11 @@ fn main() {
                 ..Default::default()
             },
             |_, cx| cx.new(root::Root::new),
-        )
-        .unwrap();
+        ) {
+            tracing::error!(%error, "could not create the Hopper window");
+            cx.quit();
+            return;
+        }
         cx.activate(true);
     });
 }

@@ -6,11 +6,14 @@
 
 use crate::client::Client;
 use crate::error::{DockerError, Result};
+use futures::StreamExt;
 use model::{ComposeProgress, StreamKind};
 use std::path::PathBuf;
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio_util::codec::{FramedRead, LinesCodec};
+
+const MAX_COMPOSE_LINE_BYTES: usize = 1024 * 1024;
 
 /// How Compose will be invoked.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +24,8 @@ pub enum Compose {
     Standalone(PathBuf),
     /// The `docker compose` plugin.
     Plugin,
+    /// The `docker compose` plugin using Hopper's bundled Docker CLI.
+    BundledPlugin(PathBuf),
 }
 
 impl Compose {
@@ -31,23 +36,65 @@ impl Compose {
                 (p.to_string_lossy().to_string(), vec![])
             }
             Compose::Plugin => ("docker".to_string(), vec!["compose".to_string()]),
+            Compose::BundledPlugin(p) => {
+                (p.to_string_lossy().to_string(), vec!["compose".to_string()])
+            }
         }
     }
 }
 
 /// Where the bundled binary sits inside the app bundle, relative to the
 /// executable. Sidecars live in `Contents/MacOS/sidecars/`.
-fn bundled_path() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let dir = exe.parent()?;
-    let candidate = dir.join("sidecars").join("compose");
+fn bundled_candidate_from(exe: &std::path::Path) -> Option<PathBuf> {
+    Some(
+        exe.parent()?
+            .join("sidecars")
+            .join(executable_name("compose")),
+    )
+}
+
+fn bundled_path_from(exe: &std::path::Path) -> Option<PathBuf> {
+    let candidate = bundled_candidate_from(exe)?;
     candidate.is_file().then_some(candidate)
+}
+
+fn bundled_docker_candidate_from(exe: &std::path::Path) -> Option<PathBuf> {
+    Some(
+        exe.parent()?
+            .join("sidecars")
+            .join(executable_name("docker")),
+    )
+}
+
+#[cfg(windows)]
+fn executable_name(name: &str) -> String {
+    format!("{name}.exe")
+}
+
+#[cfg(not(windows))]
+fn executable_name(name: &str) -> String {
+    name.to_string()
+}
+
+fn bundled_docker_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let candidate = bundled_docker_candidate_from(&exe)?;
+    candidate.is_file().then_some(candidate)
+}
+
+fn bundled_path() -> Option<PathBuf> {
+    bundled_path_from(&std::env::current_exe().ok()?)
 }
 
 fn on_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
+    let names = if cfg!(windows) {
+        vec![format!("{name}.exe"), name.to_string()]
+    } else {
+        vec![name.to_string()]
+    };
     std::env::split_paths(&path)
-        .map(|dir| dir.join(name))
+        .flat_map(|dir| names.iter().map(move |name| dir.join(name)))
         .find(|p| p.is_file())
 }
 
@@ -58,6 +105,9 @@ pub fn discover() -> Option<Compose> {
     }
     if let Some(p) = on_path("docker-compose") {
         return Some(Compose::Standalone(p));
+    }
+    if let Some(p) = bundled_docker_path() {
+        return Some(Compose::BundledPlugin(p));
     }
     on_path("docker").map(|_| Compose::Plugin)
 }
@@ -88,29 +138,54 @@ where
 
     let mut cmd = Command::new(&program);
     cmd.args(&argv)
+        .kill_on_drop(true)
+        .env_remove("DOCKER_TLS_VERIFY")
         .env("DOCKER_HOST", client.endpoint().docker_host_value())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .stdin(Stdio::null());
+    if matches!(client.endpoint(), crate::Endpoint::Tcp { tls: true, .. }) {
+        cmd.env("DOCKER_TLS_VERIFY", "1");
+    }
     if let Some(dir) = workdir.filter(|d| !d.trim().is_empty()) {
         cmd.current_dir(dir);
     }
 
-    let mut child = cmd.spawn().map_err(|e| {
-        DockerError::transport(format!("Could not start {program}: {e}"))
-    })?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| DockerError::transport(format!("Could not start {program}: {e}")))?;
 
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(StreamKind, String)>();
+    // Compose can be very chatty (especially while pulling images). Keep a
+    // bounded queue so a slow UI consumer applies backpressure to the child
+    // process instead of letting output grow without limit in Hopper.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(StreamKind, String)>(256);
 
     if let Some(out) = stdout {
         let tx = tx.clone();
         tokio::spawn(async move {
-            let mut lines = BufReader::new(out).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if tx.send((StreamKind::Stdout, line)).is_err() {
-                    break;
+            let mut lines =
+                FramedRead::new(out, LinesCodec::new_with_max_length(MAX_COMPOSE_LINE_BYTES));
+            while let Some(result) = lines.next().await {
+                match result {
+                    Ok(line) => {
+                        if tx.send((StreamKind::Stdout, line)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        if tx
+                            .send((
+                                StreamKind::Stdout,
+                                format!("[Compose output line omitted: {error}]"),
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -119,10 +194,27 @@ where
         // Compose writes its progress to stderr, so this is the interesting
         // stream, not an error channel.
         tokio::spawn(async move {
-            let mut lines = BufReader::new(err).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                if tx.send((StreamKind::Stderr, line)).is_err() {
-                    break;
+            let mut lines =
+                FramedRead::new(err, LinesCodec::new_with_max_length(MAX_COMPOSE_LINE_BYTES));
+            while let Some(result) = lines.next().await {
+                match result {
+                    Ok(line) => {
+                        if tx.send((StreamKind::Stderr, line)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        if tx
+                            .send((
+                                StreamKind::Stderr,
+                                format!("[Compose output line omitted: {error}]"),
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -172,16 +264,48 @@ mod tests {
     }
 
     #[test]
+    fn the_bundled_docker_cli_is_invoked_as_a_plugin() {
+        let (program, args) =
+            Compose::BundledPlugin(PathBuf::from("/Apps/Hopper.app/sidecars/docker")).program();
+        assert_eq!(program, "/Apps/Hopper.app/sidecars/docker");
+        assert_eq!(args, vec!["compose"]);
+    }
+
+    #[test]
     fn a_standalone_binary_is_invoked_directly() {
-        let (program, args) = Compose::Standalone(PathBuf::from("/usr/local/bin/docker-compose")).program();
+        let (program, args) =
+            Compose::Standalone(PathBuf::from("/usr/local/bin/docker-compose")).program();
         assert_eq!(program, "/usr/local/bin/docker-compose");
         assert!(args.is_empty());
     }
 
     #[test]
     fn the_bundled_binary_is_invoked_directly_too() {
-        let (program, args) = Compose::Bundled(PathBuf::from("/Apps/Hopper.app/sidecars/compose")).program();
-        assert!(program.ends_with("compose"));
+        let (program, args) = Compose::Bundled(PathBuf::from(format!(
+            "/Apps/Hopper.app/sidecars/{}",
+            executable_name("compose")
+        )))
+        .program();
+        assert!(program.ends_with(&executable_name("compose")));
         assert!(args.is_empty());
+    }
+
+    #[test]
+    fn bundled_sidecars_are_next_to_the_app_executable() {
+        let exe = PathBuf::from("/Applications/Hopper.app/Contents/MacOS/hopper");
+        assert_eq!(
+            bundled_candidate_from(&exe),
+            Some(PathBuf::from(format!(
+                "/Applications/Hopper.app/Contents/MacOS/sidecars/{}",
+                executable_name("compose")
+            ))),
+        );
+        assert_eq!(
+            bundled_docker_candidate_from(&exe),
+            Some(PathBuf::from(format!(
+                "/Applications/Hopper.app/Contents/MacOS/sidecars/{}",
+                executable_name("docker")
+            ))),
+        );
     }
 }

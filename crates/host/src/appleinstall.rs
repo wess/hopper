@@ -11,8 +11,11 @@
 
 use serde::Deserialize;
 use std::path::PathBuf;
+use std::time::Duration;
+use tokio::io::AsyncWriteExt;
 
 const LATEST_RELEASE: &str = "https://api.github.com/repos/apple/container/releases/latest";
+const MAX_INSTALLER_BYTES: u64 = 512 * 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct Release {
@@ -44,7 +47,12 @@ pub struct Installer {
 /// symbol bundle, and installing an unsigned one would trip Gatekeeper.
 fn choose(release: &Release) -> Option<Installer> {
     let asset = release.assets.iter().find(|a| {
-        a.name.ends_with(".pkg") && a.name.contains("signed") && !a.name.contains("unsigned")
+        a.name.ends_with(".pkg")
+            && a.name.contains("signed")
+            && !a.name.contains("unsigned")
+            && !a.name.contains('/')
+            && !a.name.contains('\\')
+            && trusted_asset_url(&a.browser_download_url)
     })?;
     Some(Installer {
         version: release.tag_name.trim_start_matches('v').to_string(),
@@ -53,10 +61,26 @@ fn choose(release: &Release) -> Option<Installer> {
     })
 }
 
+/// GitHub release metadata is remote input. Restrict the installer to the
+/// canonical Apple/container release path before handing it to Installer.app;
+/// reqwest may still follow GitHub's normal redirect to its asset CDN.
+fn trusted_asset_url(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url.host_str() == Some("github.com")
+        && url
+            .path()
+            .starts_with("/apple/container/releases/download/")
+}
+
 /// Ask GitHub which installer is current.
 pub async fn latest() -> Result<Installer, String> {
     let client = reqwest::Client::builder()
         .user_agent("hopper")
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
     let release: Release = client
@@ -64,6 +88,8 @@ pub async fn latest() -> Result<Installer, String> {
         .send()
         .await
         .map_err(|e| format!("could not reach GitHub: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("GitHub did not return a release listing: {e}"))?
         .json()
         .await
         .map_err(|e| format!("could not read the release listing: {e}"))?;
@@ -85,22 +111,104 @@ pub async fn download_and_open() -> Result<PathBuf, String> {
 
     let client = reqwest::Client::builder()
         .user_agent("hopper")
+        .connect_timeout(Duration::from_secs(10))
+        // Packages are streamed, so allow a slower connection while still
+        // ensuring a stalled download cannot live forever.
+        .timeout(Duration::from_secs(15 * 60))
         .build()
         .map_err(|e| e.to_string())?;
-    let bytes = client
+    let mut response = client
         .get(&installer.url)
         .send()
         .await
         .map_err(|e| format!("could not download the installer: {e}"))?
-        .bytes()
-        .await
-        .map_err(|e| format!("the download did not complete: {e}"))?;
-    tokio::fs::write(&path, &bytes)
-        .await
-        .map_err(|e| format!("could not save the installer: {e}"))?;
+        .error_for_status()
+        .map_err(|e| format!("Apple's installer download failed: {e}"))?;
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_INSTALLER_BYTES)
+    {
+        return Err(format!(
+            "Apple's installer is larger than the {} MiB safety limit.",
+            MAX_INSTALLER_BYTES / (1024 * 1024)
+        ));
+    }
+
+    // Stream to disk instead of buffering a potentially large package in the
+    // app. A temporary name prevents Installer.app from seeing a partial
+    // package if the connection or the process dies halfway through.
+    let partial = path.with_extension("pkg.part");
+    let download = async {
+        let mut file = tokio::fs::File::create(&partial)
+            .await
+            .map_err(|e| format!("could not create the installer download: {e}"))?;
+        let mut downloaded = 0_u64;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| format!("the installer download did not complete: {e}"))?
+        {
+            downloaded = downloaded
+                .checked_add(chunk.len() as u64)
+                .ok_or_else(|| "Apple's installer download is too large.".to_string())?;
+            if downloaded > MAX_INSTALLER_BYTES {
+                return Err(format!(
+                    "Apple's installer is larger than the {} MiB safety limit.",
+                    MAX_INSTALLER_BYTES / (1024 * 1024)
+                ));
+            }
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("could not save the installer: {e}"))?;
+        }
+        file.flush()
+            .await
+            .map_err(|e| format!("could not finish saving the installer: {e}"))?;
+        Ok::<(), String>(())
+    }
+    .await;
+    if let Err(error) = download {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err(error);
+    }
+    if let Err(error) = verify_signed_package(&partial).await {
+        let _ = tokio::fs::remove_file(&partial).await;
+        return Err(error);
+    }
+    tokio::fs::rename(&partial, &path).await.map_err(|e| {
+        // Rename can fail independently (for example on a full or
+        // read-only Downloads folder); do not leave a misleading partial
+        // package behind in that case either.
+        let _ = std::fs::remove_file(&partial);
+        format!("could not finalize the installer download: {e}")
+    })?;
 
     open(&path).await?;
     Ok(path)
+}
+
+/// Verify the package before opening Installer.app. Gatekeeper performs its
+/// own checks later, but doing this here lets Hopper fail with a clear message
+/// and avoids presenting a tampered or incomplete package to the user.
+async fn verify_signed_package(path: &std::path::Path) -> Result<(), String> {
+    let mut child = tokio::process::Command::new("/usr/sbin/pkgutil")
+        .args(["--check-signature"])
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("could not verify Apple's installer signature: {e}"))?;
+    let status = tokio::time::timeout(Duration::from_secs(30), child.wait())
+        .await
+        .map_err(|_| "Apple's installer signature check timed out.".to_string())?
+        .map_err(|e| format!("could not verify Apple's installer signature: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("Apple's installer package signature could not be verified.".into())
+    }
 }
 
 /// Hand a path to the system, which for a `.pkg` means Installer.app.
@@ -142,7 +250,8 @@ mod tests {
                 },
                 Asset {
                     name: "container-1.2.2-installer-signed.pkg".into(),
-                    browser_download_url: "https://x/signed".into(),
+                    browser_download_url:
+                        "https://github.com/apple/container/releases/download/v1.2.2/container-1.2.2-installer-signed.pkg".into(),
                 },
             ],
         }
@@ -152,7 +261,10 @@ mod tests {
     fn the_signed_package_is_the_one_chosen() {
         // The unsigned package sorts earlier and would trip Gatekeeper.
         let i = choose(&release()).unwrap();
-        assert_eq!(i.url, "https://x/signed");
+        assert_eq!(
+            i.url,
+            "https://github.com/apple/container/releases/download/v1.2.2/container-1.2.2-installer-signed.pkg"
+        );
         assert_eq!(i.file_name, "container-1.2.2-installer-signed.pkg");
         assert_eq!(i.version, "1.2.2");
     }
@@ -162,6 +274,29 @@ mod tests {
         let mut r = release();
         r.tag_name = "v1.3.0".into();
         assert_eq!(choose(&r).unwrap().version, "1.3.0");
+    }
+
+    #[test]
+    fn malformed_signed_assets_are_not_selected() {
+        let mut r = release();
+        r.assets.insert(
+            0,
+            Asset {
+                name: "nested/container-installer-signed.pkg".into(),
+                browser_download_url: "https://x/bad-path".into(),
+            },
+        );
+        r.assets.insert(
+            0,
+            Asset {
+                name: "container-empty-installer-signed.pkg".into(),
+                browser_download_url: "  ".into(),
+            },
+        );
+        assert_eq!(
+            choose(&r).unwrap().url,
+            "https://github.com/apple/container/releases/download/v1.2.2/container-1.2.2-installer-signed.pkg"
+        );
     }
 
     #[test]
@@ -178,6 +313,24 @@ mod tests {
 
     #[test]
     fn a_release_with_no_assets_at_all_is_refused() {
-        assert!(choose(&Release { tag_name: "1.0.0".into(), assets: vec![] }).is_none());
+        assert!(choose(&Release {
+            tag_name: "1.0.0".into(),
+            assets: vec![]
+        })
+        .is_none());
+    }
+
+    #[test]
+    fn installer_urls_must_be_canonical_github_release_assets() {
+        assert!(trusted_asset_url(
+            "https://github.com/apple/container/releases/download/v1.2.2/container.pkg"
+        ));
+        assert!(!trusted_asset_url("https://example.com/container.pkg"));
+        assert!(!trusted_asset_url(
+            "http://github.com/apple/container/releases/download/v1.2.2/container.pkg"
+        ));
+        assert!(!trusted_asset_url(
+            "https://github.com/other/project/releases/download/v1.2.2/container.pkg"
+        ));
     }
 }

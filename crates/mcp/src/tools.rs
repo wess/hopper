@@ -5,6 +5,8 @@ use model::LogOptions;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+const MAX_LOG_OUTPUT: usize = 16 * 1024 * 1024;
+
 /// The tool catalogue, as `tools/list` returns it.
 pub fn catalogue() -> Value {
     json!({
@@ -74,7 +76,9 @@ pub fn catalogue() -> Value {
 }
 
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
-    args.get(key).and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+    args.get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
 }
 
 /// Run one tool call, returning its MCP result payload.
@@ -159,16 +163,27 @@ pub async fn call(host: &Arc<Host>, name: &str, args: &Value) -> Value {
                 ..Default::default()
             };
             let mut out = String::new();
+            let mut truncated = false;
             match host
                 .stream_logs("mcp", &id, &opts, |line| {
+                    if out.len().saturating_add(line.text.len()).saturating_add(1) > MAX_LOG_OUTPUT
+                    {
+                        truncated = true;
+                        return false;
+                    }
                     out.push_str(&line.text);
                     out.push('\n');
                     true
                 })
                 .await
             {
-                Ok(()) if out.is_empty() => text_result("(no output)"),
-                Ok(()) => text_result(out),
+                Ok(()) if out.is_empty() && !truncated => text_result("(no output)"),
+                Ok(()) => {
+                    if truncated {
+                        out.push_str("\n[log output truncated at 16 MiB]");
+                    }
+                    text_result(out)
+                }
                 Err(e) => error_result(e.message),
             }
         }

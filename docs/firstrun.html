@@ -82,7 +82,7 @@ daemon answered — <code>Connected to Docker 29.7.2.</code> or similar.</p>
 <tr><td><strong>not installed</strong></td><td>No engine here, and one can be offered or installed.</td></tr>
 <tr><td><strong>needs permission</strong></td><td>The socket exists but Hopper is not allowed to open it. On Linux, usually the <code>docker</code> group.</td></tr>
 <tr><td><strong>unreachable</strong></td><td>Something is listening but not answering properly.</td></tr>
-<tr><td><strong>unsupported</strong></td><td>This engine cannot run on this machine — for example Apple Containers on macOS 15.</td></tr>
+<tr><td><strong>unsupported</strong></td><td>This engine cannot run on this machine — for example Apple Containers on an Intel Mac or before macOS 26.</td></tr>
 </tbody></table>
 <p>Only the states Hopper can actually act on offer a button. A stopped engine that
 Hopper manages gets <strong>Start</strong>; a missing Docker does not, because starting it is
@@ -100,7 +100,7 @@ running, Hopper starts it in the background. Turn it off under
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

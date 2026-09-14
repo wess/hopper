@@ -8,12 +8,7 @@ use docker::{DockerError, ErrorKind};
 use model::{EngineState, EngineStatus};
 
 /// Classify a ping failure into the state the UI acts on.
-pub fn classify(
-    err: &DockerError,
-    provider: &str,
-    managed: bool,
-    endpoint: &str,
-) -> EngineStatus {
+pub fn classify(err: &DockerError, provider: &str, managed: bool, endpoint: &str) -> EngineStatus {
     let (state, message) = match err.kind {
         ErrorKind::Permission => (
             EngineState::NeedsPermission,

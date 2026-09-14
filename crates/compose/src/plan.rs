@@ -41,7 +41,11 @@ pub struct PlanOptions {
 /// `caps` decides what counts as a warning: the same file planned against
 /// Docker and against Apple's runtime produces the same containers, and a
 /// different list of things that will not be honoured.
-pub fn build(loaded: &Loaded, opts: &PlanOptions, caps: &EngineCapabilities) -> Result<ComposePlan, String> {
+pub fn build(
+    loaded: &Loaded,
+    opts: &PlanOptions,
+    caps: &EngineCapabilities,
+) -> Result<ComposePlan, String> {
     let file = &loaded.file;
     let project = names::project(
         opts.project.as_deref(),
@@ -87,7 +91,8 @@ pub fn build(loaded: &Loaded, opts: &PlanOptions, caps: &EngineCapabilities) -> 
     // database.
     let active: BTreeSet<&str> = opts.profiles.iter().map(String::as_str).collect();
     for s in &mut services {
-        s.selected = s.profiles.is_empty() || s.profiles.iter().any(|p| active.contains(p.as_str()));
+        s.selected =
+            s.profiles.is_empty() || s.profiles.iter().any(|p| active.contains(p.as_str()));
     }
     if !opts.only.is_empty() {
         let wanted = with_dependencies(&services, &opts.only);
@@ -245,8 +250,7 @@ fn plan_service(
     let (ports, port_warnings) = plan_ports(service);
     warnings.extend(port_warnings);
 
-    let (volumes, volume_warnings) =
-        plan_mounts(service, &loaded.project_dir, known_volumes);
+    let (volumes, volume_warnings) = plan_mounts(service, &loaded.project_dir, known_volumes);
     warnings.extend(volume_warnings);
 
     // One network at create time is all a `run` expresses; the rest are
@@ -294,8 +298,14 @@ fn plan_service(
     // Not gated on the engine: Hopper creates containers without a healthcheck
     // whichever backend is answering, so a file that declares one loses it
     // either way.
-    if service.healthcheck.as_ref().is_some_and(|h| !h.disable.unwrap_or(false)) {
-        warnings.push("`healthcheck` was not applied — Hopper does not create containers with one.".into());
+    if service
+        .healthcheck
+        .as_ref()
+        .is_some_and(|h| !h.disable.unwrap_or(false))
+    {
+        warnings.push(
+            "`healthcheck` was not applied — Hopper does not create containers with one.".into(),
+        );
     }
     if service
         .restart
@@ -308,9 +318,9 @@ fn plan_service(
             service.restart.clone().unwrap_or_default()
         ));
     }
-    if service.entrypoint.is_some() {
+    if service.entrypoint.is_some() && !caps.entrypoint {
         warnings.push(
-            "`entrypoint` was not applied — Hopper creates containers with the image's own entrypoint."
+            "`entrypoint` was not applied — this engine does not support overriding an image entrypoint."
                 .into(),
         );
     }
@@ -335,6 +345,7 @@ fn plan_service(
         ports,
         volumes,
         command: plan_command(service),
+        entrypoint: plan_words(service.entrypoint.as_ref()),
         restart: service.restart.clone(),
         auto_remove: false,
         network,
@@ -367,7 +378,11 @@ fn plan_service(
 /// A list form is re-joined with quoting so `["sh", "-c", "echo hi there"]`
 /// survives the round trip through the splitter on the other side.
 fn plan_command(service: &Service) -> Option<String> {
-    let parts = service.command.clone()?.into_vec();
+    plan_words(service.command.as_ref())
+}
+
+fn plan_words(value: Option<&crate::file::OneOrMany>) -> Option<String> {
+    let parts = value?.clone().into_vec();
     match parts.len() {
         0 => None,
         1 => Some(parts[0].clone()),
@@ -511,7 +526,11 @@ fn short_port(text: &str) -> Result<PortMapping, String> {
         }
         [host, container] => ((*host).to_string(), (*container).to_string()),
         [ip, host, container] => (format!("{ip}:{host}"), (*container).to_string()),
-        _ => return Err(format!("`{text}` is not a port mapping Hopper understands.")),
+        _ => {
+            return Err(format!(
+                "`{text}` is not a port mapping Hopper understands."
+            ))
+        }
     };
     Ok(PortMapping {
         host,
@@ -572,7 +591,9 @@ fn mount_source(
         return name.clone();
     }
     if source.starts_with('.') || source.starts_with('/') || source.starts_with('~') {
-        return resolve_path(project_dir, source).to_string_lossy().to_string();
+        return resolve_path(project_dir, source)
+            .to_string_lossy()
+            .to_string();
     }
     source.to_string()
 }
@@ -582,30 +603,46 @@ fn short_mount(
     project_dir: &Path,
     known_volumes: &BTreeMap<String, String>,
 ) -> Result<VolumeMapping, String> {
-    // Windows-style `C:\path:/target` is not something Hopper handles, and
-    // splitting it naively would produce a mount from `C`.
-    let parts: Vec<&str> = text.split(':').collect();
-    match parts.as_slice() {
-        [target] => Err(format!(
-            "`{target}` is an anonymous volume, which Hopper does not create — give it a name or a host path."
-        )),
-        [source, target] => Ok(VolumeMapping {
-            host: mount_source(source, project_dir, known_volumes),
-            container: (*target).to_string(),
-            ro: false,
-        }),
-        [source, target, mode] => Ok(VolumeMapping {
-            host: mount_source(source, project_dir, known_volumes),
-            container: (*target).to_string(),
-            ro: mode.split(',').any(|m| m == "ro"),
-        }),
-        _ => Err(format!("`{text}` is not a mount Hopper understands.")),
+    // A Windows drive letter is itself separated by `:`. Merge it before
+    // interpreting the source/target separator so `C:\\work:/app` remains a
+    // bind mount from `C:\\work`, rather than becoming a mount from `C`.
+    let mut parts = text.split(':');
+    let first = parts.next().unwrap_or_default();
+    let (source, target, mode) = if first.len() == 1 && first.as_bytes()[0].is_ascii_alphabetic() {
+        let Some(path) = parts.next() else {
+            return Err(format!("`{text}` is not a mount Hopper understands."));
+        };
+        let Some(target) = parts.next() else {
+            return Err(format!("`{text}` is not a mount Hopper understands."));
+        };
+        (format!("{first}:{path}"), target, parts.next())
+    } else {
+        let Some(target) = parts.next() else {
+            return Err(format!(
+                "`{text}` is an anonymous volume, which Hopper does not create — give it a name or a host path."
+            ));
+        };
+        (first.to_string(), target, parts.next())
+    };
+
+    if parts.next().is_some() || source.is_empty() || target.is_empty() {
+        return Err(format!("`{text}` is not a mount Hopper understands."));
     }
+    Ok(VolumeMapping {
+        host: mount_source(&source, project_dir, known_volumes),
+        container: target.to_string(),
+        ro: mode.is_some_and(|value| value.split(',').any(|m| m == "ro")),
+    })
 }
 
 fn resolve_path(project_dir: &Path, path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
+        let home = if cfg!(windows) {
+            std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME"))
+        } else {
+            std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+        };
+        if let Some(home) = home {
             return PathBuf::from(home).join(rest);
         }
     }
@@ -646,7 +683,9 @@ fn user_labels(service: &Service, warnings: &mut Vec<String>) -> BTreeMap<String
             Some(v) => {
                 labels.insert(key, v);
             }
-            None => warnings.push(format!("the label `{key}` has no value, so it was skipped.")),
+            None => warnings.push(format!(
+                "the label `{key}` has no value, so it was skipped."
+            )),
         }
     }
     labels
@@ -670,7 +709,10 @@ fn stamp(
     labels.insert(names::ONEOFF.into(), "False".into());
     labels.insert(names::CONFIG_HASH.into(), hash.to_string());
     labels.insert(names::DEPENDS_ON.into(), depends_on.join(","));
-    labels.insert(names::WORKING_DIR.into(), loaded.project_dir.to_string_lossy().to_string());
+    labels.insert(
+        names::WORKING_DIR.into(),
+        loaded.project_dir.to_string_lossy().to_string(),
+    );
     labels.insert(names::CONFIG_FILES.into(), loaded.config_files.join(","));
 }
 
@@ -688,7 +730,14 @@ fn canonical(run: &RunInput) -> String {
     let ports: Vec<String> = run
         .ports
         .iter()
-        .map(|p| format!("{}:{}/{}", p.host, p.container, p.proto.clone().unwrap_or_default()))
+        .map(|p| {
+            format!(
+                "{}:{}/{}",
+                p.host,
+                p.container,
+                p.proto.clone().unwrap_or_default()
+            )
+        })
         .collect();
     let labels: Vec<String> = run.labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
     [
@@ -730,7 +779,8 @@ fn plan_limits(service: &Service, warnings: &mut Vec<String>) -> ResourceLimits 
         limits.memory = service.mem_limit.as_ref().and_then(bytes);
     }
     if service.mem_limit.is_some() && limits.memory.is_none() {
-        warnings.push("`mem_limit` was not a size Hopper could read, so no memory cap was set.".into());
+        warnings
+            .push("`mem_limit` was not a size Hopper could read, so no memory cap was set.".into());
     }
     limits
 }
@@ -743,7 +793,10 @@ fn cpus(value: &serde_yaml::Value) -> Option<f64> {
 fn bytes(value: &serde_yaml::Value) -> Option<u64> {
     let text = file::scalar(value)?;
     let text = text.trim().to_lowercase();
-    let (digits, unit) = text.split_at(text.find(|c: char| !c.is_ascii_digit()).unwrap_or(text.len()));
+    let (digits, unit) = text.split_at(
+        text.find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(text.len()),
+    );
     let n: u64 = digits.parse().ok()?;
     let scale = match unit.trim() {
         "" | "b" => 1,
@@ -844,11 +897,21 @@ mod tests {
     }
 
     fn plan(yaml: &str) -> ComposePlan {
-        build(&loaded(yaml), &PlanOptions::default(), &EngineCapabilities::engine_api()).unwrap()
+        build(
+            &loaded(yaml),
+            &PlanOptions::default(),
+            &EngineCapabilities::engine_api(),
+        )
+        .unwrap()
     }
 
     fn apple_plan(yaml: &str) -> ComposePlan {
-        build(&loaded(yaml), &PlanOptions::default(), &EngineCapabilities::apple()).unwrap()
+        build(
+            &loaded(yaml),
+            &PlanOptions::default(),
+            &EngineCapabilities::apple(),
+        )
+        .unwrap()
     }
 
     fn service<'a>(plan: &'a ComposePlan, name: &str) -> &'a ComposePlanService {
@@ -870,7 +933,10 @@ mod tests {
         let labels = &service(&p, "web").run.labels;
         assert_eq!(labels["com.docker.compose.project"], "shop");
         assert_eq!(labels["com.docker.compose.service"], "web");
-        assert_eq!(labels["com.docker.compose.project.working_dir"], "/srv/shop");
+        assert_eq!(
+            labels["com.docker.compose.project.working_dir"],
+            "/srv/shop"
+        );
         assert_eq!(
             labels["com.docker.compose.project.config_files"],
             "/srv/shop/compose.yaml"
@@ -891,8 +957,14 @@ mod tests {
     fn every_service_joins_the_project_network_so_names_resolve() {
         let p = plan("services:\n  web:\n    image: nginx\n  db:\n    image: postgres\n");
         assert_eq!(p.networks[0].name, "shop_default");
-        assert_eq!(service(&p, "web").run.network.as_deref(), Some("shop_default"));
-        assert_eq!(service(&p, "db").run.network.as_deref(), Some("shop_default"));
+        assert_eq!(
+            service(&p, "web").run.network.as_deref(),
+            Some("shop_default")
+        );
+        assert_eq!(
+            service(&p, "db").run.network.as_deref(),
+            Some("shop_default")
+        );
     }
 
     #[test]
@@ -901,7 +973,10 @@ mod tests {
             "services:\n  web:\n    image: nginx\n    networks: [front]\nnetworks:\n  front:\n",
         );
         assert!(p.networks.iter().any(|n| n.name == "shop_front"));
-        assert_eq!(service(&p, "web").run.network.as_deref(), Some("shop_front"));
+        assert_eq!(
+            service(&p, "web").run.network.as_deref(),
+            Some("shop_front")
+        );
         // No service is left on the default, so it is not created.
         assert!(!p.networks.iter().any(|n| n.name == "shop_default"));
     }
@@ -942,7 +1017,8 @@ mod tests {
 
     #[test]
     fn a_port_range_is_refused_with_a_reason_rather_than_mangled() {
-        let p = plan("services:\n  web:\n    image: nginx\n    ports:\n      - 8000-8010:8000-8010\n");
+        let p =
+            plan("services:\n  web:\n    image: nginx\n    ports:\n      - 8000-8010:8000-8010\n");
         let web = service(&p, "web");
         assert!(web.run.ports.is_empty());
         assert!(web.warnings.iter().any(|w| w.contains("port range")));
@@ -960,7 +1036,8 @@ mod tests {
 
     #[test]
     fn a_parent_relative_mount_is_collapsed_rather_than_left_literal() {
-        let p = plan("services:\n  web:\n    image: nginx\n    volumes:\n      - ../shared:/data\n");
+        let p =
+            plan("services:\n  web:\n    image: nginx\n    volumes:\n      - ../shared:/data\n");
         assert_eq!(service(&p, "web").run.volumes[0].host, "/srv/shared");
     }
 
@@ -968,6 +1045,22 @@ mod tests {
     fn a_read_only_mount_keeps_its_mode() {
         let p = plan("services:\n  web:\n    image: nginx\n    volumes:\n      - ./src:/app:ro\n");
         assert!(service(&p, "web").run.volumes[0].ro);
+    }
+
+    #[test]
+    fn a_windows_drive_mount_keeps_the_drive_in_the_source_path() {
+        let p = plan(
+            r#"services:
+  web:
+    image: nginx
+    volumes:
+      - 'C:\workspace:/app:ro'
+"#,
+        );
+        let mount = &service(&p, "web").run.volumes[0];
+        assert_eq!(mount.host, r"C:\workspace");
+        assert_eq!(mount.container, "/app");
+        assert!(mount.ro);
     }
 
     #[test]
@@ -981,7 +1074,8 @@ mod tests {
 
     #[test]
     fn an_anonymous_volume_says_it_was_skipped() {
-        let p = plan("services:\n  db:\n    image: postgres\n    volumes:\n      - /var/lib/data\n");
+        let p =
+            plan("services:\n  db:\n    image: postgres\n    volumes:\n      - /var/lib/data\n");
         let db = service(&p, "db");
         assert!(db.run.volumes.is_empty());
         assert!(db.warnings.iter().any(|w| w.contains("anonymous volume")));
@@ -1037,7 +1131,11 @@ mod tests {
     fn a_service_built_from_a_dockerfile_is_blocked_with_a_reason() {
         let p = plan("services:\n  app:\n    build: .\n");
         let app = service(&p, "app");
-        assert!(app.blocked.as_deref().unwrap().contains("does not build images"));
+        assert!(app
+            .blocked
+            .as_deref()
+            .unwrap()
+            .contains("does not build images"));
         assert!(p.runnable().is_empty());
     }
 
@@ -1089,7 +1187,10 @@ mod tests {
         // staying quiet on Docker would be the lie.
         let yaml = "services:\n  db:\n    image: postgres\n    healthcheck:\n      test: [CMD, pg_isready]\n";
         for p in [apple_plan(yaml), plan(yaml)] {
-            assert!(p.services[0].warnings.iter().any(|w| w.contains("healthcheck")));
+            assert!(p.services[0]
+                .warnings
+                .iter()
+                .any(|w| w.contains("healthcheck")));
         }
     }
 
@@ -1126,8 +1227,14 @@ mod tests {
         };
         let base = "services:\n  web:\n    image: nginx\n    ports: ['80:80']\n";
         assert_eq!(hash(base), hash(base));
-        assert_ne!(hash(base), hash("services:\n  web:\n    image: nginx\n    ports: ['81:80']\n"));
-        assert_ne!(hash(base), hash("services:\n  web:\n    image: caddy\n    ports: ['80:80']\n"));
+        assert_ne!(
+            hash(base),
+            hash("services:\n  web:\n    image: nginx\n    ports: ['81:80']\n")
+        );
+        assert_ne!(
+            hash(base),
+            hash("services:\n  web:\n    image: caddy\n    ports: ['80:80']\n")
+        );
     }
 
     #[test]
@@ -1143,7 +1250,10 @@ mod tests {
     #[test]
     fn an_unimplemented_key_becomes_a_warning_rather_than_a_silent_drop() {
         let p = plan("services:\n  web:\n    image: nginx\n    cap_add: [NET_ADMIN]\n");
-        assert!(service(&p, "web").warnings.iter().any(|w| w.contains("cap_add")));
+        assert!(service(&p, "web")
+            .warnings
+            .iter()
+            .any(|w| w.contains("cap_add")));
     }
 
     #[test]
@@ -1159,7 +1269,8 @@ mod tests {
 
     #[test]
     fn a_list_command_survives_being_flattened_to_one_line() {
-        let p = plan("services:\n  web:\n    image: nginx\n    command: [sh, -c, \"echo hi there\"]\n");
+        let p =
+            plan("services:\n  web:\n    image: nginx\n    command: [sh, -c, \"echo hi there\"]\n");
         assert_eq!(
             service(&p, "web").run.command.as_deref(),
             Some("sh -c \"echo hi there\"")
@@ -1167,9 +1278,18 @@ mod tests {
     }
 
     #[test]
+    fn an_entrypoint_is_carried_to_the_run_request() {
+        let p = plan("services:\n  web:\n    image: nginx\n    entrypoint: [sh, -c]\n");
+        assert_eq!(service(&p, "web").run.entrypoint.as_deref(), Some("sh -c"));
+    }
+
+    #[test]
     fn an_explicit_container_name_is_honoured_over_the_generated_one() {
         let p = plan("services:\n  web:\n    image: nginx\n    container_name: shop-frontend\n");
-        assert_eq!(service(&p, "web").run.name.as_deref(), Some("shop-frontend"));
+        assert_eq!(
+            service(&p, "web").run.name.as_deref(),
+            Some("shop-frontend")
+        );
     }
 
     #[test]

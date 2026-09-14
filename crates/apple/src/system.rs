@@ -8,6 +8,7 @@
 use docker::{DockerError, Result};
 use model::{DiskUsage, SystemVersion, UsageBucket};
 use serde::Deserialize;
+use std::time::Duration;
 
 use crate::cli::Cli;
 
@@ -37,12 +38,16 @@ impl SystemStatus {
 /// the body first and only fall back to "not running" when there is nothing
 /// there — going by the exit code alone throws away the answer.
 pub async fn status(cli: &Cli) -> Result<SystemStatus> {
-    let (stdout, _ok) = cli.output(&["system", "status", "--format", "json"]).await?;
+    let (stdout, _ok) = cli
+        .output_with_timeout(
+            &["system", "status", "--format", "json"],
+            Duration::from_secs(3),
+        )
+        .await?;
     if stdout.trim().is_empty() {
         return Ok(SystemStatus::default());
     }
-    // A body we cannot read is still not a running engine.
-    Ok(crate::cli::decode(&stdout).unwrap_or_default())
+    crate::cli::decode(&stdout)
 }
 
 /// Start the services.
@@ -50,7 +55,8 @@ pub async fn status(cli: &Cli) -> Result<SystemStatus> {
 /// `--enable-kernel-install` lets the first run fetch the recommended kernel
 /// without a prompt; there is no terminal here to answer one.
 pub async fn start(cli: &Cli) -> Result<()> {
-    cli.ok(&["system", "start", "--enable-kernel-install"]).await
+    cli.ok(&["system", "start", "--enable-kernel-install"])
+        .await
 }
 
 pub async fn stop(cli: &Cli) -> Result<()> {
@@ -61,7 +67,7 @@ pub async fn stop(cli: &Cli) -> Result<()> {
 pub async fn version(cli: &Cli) -> Result<SystemVersion> {
     let raw = cli.run(&["--version"]).await?;
     let version = parse_version(&raw);
-    let status = status(cli).await.unwrap_or_default();
+    let status = status(cli).await?;
     Ok(SystemVersion {
         version,
         api_version: status.api_server_version,
@@ -171,7 +177,10 @@ mod tests {
     fn the_version_number_survives_apples_wording() {
         assert_eq!(parse_version("container CLI version 1.2.2"), "1.2.2");
         assert_eq!(parse_version("1.2.2"), "1.2.2");
-        assert_eq!(parse_version("container version v1.2.2 (build abc)"), "1.2.2");
+        assert_eq!(
+            parse_version("container version v1.2.2 (build abc)"),
+            "1.2.2"
+        );
     }
 
     #[test]
@@ -188,7 +197,10 @@ mod tests {
 
     #[test]
     fn status_reads_running_case_insensitively() {
-        let s = SystemStatus { status: "Running".into(), ..Default::default() };
+        let s = SystemStatus {
+            status: "Running".into(),
+            ..Default::default()
+        };
         assert!(s.running());
         assert!(!SystemStatus::default().running());
     }
@@ -197,7 +209,10 @@ mod tests {
     fn unregistered_services_are_not_running() {
         // The literal value `container system status` prints on a machine
         // where the package is present but was never started.
-        let s = SystemStatus { status: "unregistered".into(), ..Default::default() };
+        let s = SystemStatus {
+            status: "unregistered".into(),
+            ..Default::default()
+        };
         assert!(!s.running());
     }
 }

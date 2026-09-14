@@ -76,9 +76,13 @@ equivalent — <code>--restart</code>, <code>--hostname</code>, <code>--network=
 than silently doing nothing, which is the right choice.</p>
 <h2>What the app bundles</h2>
 <p>The release ships the Docker CLI and a standalone Compose binary inside
-<code>Hopper.app</code>, because Docker Desktop's uninstaller takes <code>docker</code> with it. You
-can add them to your <code>PATH</code> from <strong>Settings → Docker CLI</strong>; it is off by default
-because the symlink is machine-wide.</p>
+<code>Hopper.app</code>, because Docker Desktop's uninstaller takes <code>docker</code> with it.
+Hopper uses those binaries internally for Compose compatibility; it does not
+modify your machine-wide <code>PATH</code>. If you want the bundled CLI in a shell, add
+the release's sidecar directory to your shell configuration: on macOS that is
+<code>/Applications/Hopper.app/Contents/MacOS/sidecars</code>, while the Linux and
+Windows archives contain <code>sidecars/</code> next to the Hopper executable. You can
+also use the CLI installed separately by your package manager.</p>
       <nav class="pager">
         <a class="prev" href="import.html"><span>Previous</span>Import from Docker</a>
         <a class="next" href="settings.html"><span>Next</span>Settings</a>
@@ -88,7 +92,7 @@ because the symlink is machine-wide.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

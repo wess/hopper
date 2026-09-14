@@ -42,7 +42,7 @@ You can still switch to Apple Containers later, and
 | **not installed** | No engine here, and one can be offered or installed. |
 | **needs permission** | The socket exists but Hopper is not allowed to open it. On Linux, usually the `docker` group. |
 | **unreachable** | Something is listening but not answering properly. |
-| **unsupported** | This engine cannot run on this machine — for example Apple Containers on macOS 15. |
+| **unsupported** | This engine cannot run on this machine — for example Apple Containers on an Intel Mac or before macOS 26. |
 
 Only the states Hopper can actually act on offer a button. A stopped engine that
 Hopper manages gets **Start**; a missing Docker does not, because starting it is

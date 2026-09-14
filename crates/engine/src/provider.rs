@@ -139,14 +139,20 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_platform_still_gets_the_fallback() {
-        assert_eq!(candidates_for("windows"), vec!["existing"]);
+    fn windows_keeps_named_pipes_and_other_unknown_platforms_get_fallback() {
+        assert_eq!(
+            candidates_for("windows"),
+            vec!["docker", "podman", "existing"]
+        );
         assert_eq!(candidates_for("plan9"), vec!["existing"]);
     }
 
     #[test]
     fn the_environment_variable_overrides_everything() {
-        assert_eq!(preferred(Some("existing"), Some("apple"), "macos"), "existing");
+        assert_eq!(
+            preferred(Some("existing"), Some("apple"), "macos"),
+            "existing"
+        );
     }
 
     #[test]

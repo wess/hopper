@@ -21,22 +21,56 @@ async fn main() {
         }
     };
     println!("project  = {}", plan.project);
-    println!("networks = {:?}", plan.networks.iter().map(|n| &n.name).collect::<Vec<_>>());
-    println!("volumes  = {:?}", plan.volumes.iter().map(|v| &v.name).collect::<Vec<_>>());
+    println!(
+        "networks = {:?}",
+        plan.networks.iter().map(|n| &n.name).collect::<Vec<_>>()
+    );
+    println!(
+        "volumes  = {:?}",
+        plan.volumes.iter().map(|v| &v.name).collect::<Vec<_>>()
+    );
     for s in &plan.services {
-        println!("\nservice {} (selected={} blocked={:?})", s.service, s.selected, s.blocked);
+        println!(
+            "\nservice {} (selected={} blocked={:?})",
+            s.service, s.selected, s.blocked
+        );
         println!("  name   {:?}", s.run.name);
         println!("  image  {}", s.run.image);
         println!("  net    {:?} extra={:?}", s.run.network, s.extra_networks);
         println!("  env    {:?}", s.run.env);
-        println!("  ports  {:?}", s.run.ports.iter().map(|p| format!("{}->{}", p.host, p.container)).collect::<Vec<_>>());
-        println!("  mounts {:?}", s.run.volumes.iter().map(|v| format!("{}:{}{}", v.host, v.container, if v.ro {":ro"} else {""})).collect::<Vec<_>>());
+        println!(
+            "  ports  {:?}",
+            s.run
+                .ports
+                .iter()
+                .map(|p| format!("{}->{}", p.host, p.container))
+                .collect::<Vec<_>>()
+        );
+        println!(
+            "  mounts {:?}",
+            s.run
+                .volumes
+                .iter()
+                .map(|v| format!(
+                    "{}:{}{}",
+                    v.host,
+                    v.container,
+                    if v.ro { ":ro" } else { "" }
+                ))
+                .collect::<Vec<_>>()
+        );
         println!("  after  {:?}", s.depends_on);
-        for w in &s.warnings { println!("  ! {w}"); }
+        for w in &s.warnings {
+            println!("  ! {w}");
+        }
     }
     println!("\n--- {} ---", if down_only { "down" } else { "up" });
     let mut sink = |p: ComposeProgress| {
-        let mark = if matches!(p.stream, model::StreamKind::Stderr) { "!" } else { " " };
+        let mark = if matches!(p.stream, model::StreamKind::Stderr) {
+            "!"
+        } else {
+            " "
+        };
         println!("{mark} {}", p.line);
     };
     if down_only {
@@ -47,7 +81,13 @@ async fn main() {
 
     println!("\n--- stacks ---");
     for p in host.compose_projects().await.unwrap_or_default() {
-        println!("{} {}/{} {:?}", p.name, p.running, p.total, p.service_names());
+        println!(
+            "{} {}/{} {:?}",
+            p.name,
+            p.running,
+            p.total,
+            p.service_names()
+        );
         println!("  files {:?}", p.config_files);
     }
 }

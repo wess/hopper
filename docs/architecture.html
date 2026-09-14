@@ -69,7 +69,8 @@
 <p>Each crate depends only on those below it, and the gpui-free core never imports
 gpui. The boundary is <code>app</code>.</p>
 <h2>Two engines, one enum</h2>
-<p>Hopper speaks to two kinds of engine: the Docker Engine API over a socket, and
+<p>Hopper speaks to two kinds of engine: the Docker Engine API over its native
+transport, and
 Apple's runtime over its CLI. <code>host::runtime::Backend</code> picks between them.</p>
 <p>It is an <strong>enum, not a trait</strong>, and that is deliberate. The streaming calls take
 closures — <code>FnMut(LogLine) -&gt; bool</code> — which are not object-safe. Boxing every
@@ -103,7 +104,7 @@ the whole view.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — containers on macOS and Linux, natively.</span>
+      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

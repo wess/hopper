@@ -48,11 +48,15 @@ impl Provider for AppleContainers {
         RuntimeKind::Apple
     }
 
-    /// Only offered where it can actually run: macOS 26 or later, with the
-    /// `container` binary present. A Mac without it falls through to whatever
-    /// engine is already running, and the engine view offers the install.
+    /// Only offered where it can actually run: Apple silicon, macOS 26 or
+    /// later, with the `container` binary present. A Mac without it falls
+    /// through to whatever engine is already running, and the engine view
+    /// offers the install.
     async fn available(&self) -> bool {
-        cfg!(target_os = "macos") && apple::system::too_old().is_none() && apple::installed()
+        cfg!(target_os = "macos")
+            && cfg!(target_arch = "aarch64")
+            && apple::system::too_old().is_none()
+            && apple::installed()
     }
 
     async fn endpoint(&self) -> Option<Endpoint> {
@@ -70,6 +74,12 @@ impl Provider for AppleContainers {
             return base(
                 EngineState::Unsupported,
                 "Apple Containers only runs on macOS.",
+            );
+        }
+        if !cfg!(target_arch = "aarch64") {
+            return base(
+                EngineState::Unsupported,
+                "Apple Containers requires an Apple silicon Mac.",
             );
         }
         if let Some(e) = apple::system::too_old() {
@@ -105,16 +115,16 @@ impl Provider for AppleContainers {
     /// Apple sizes each container's VM per run, so there is nothing global to
     /// apply — the resources argument is deliberately ignored.
     async fn start(&self, _resources: EngineResources) -> anyhow::Result<()> {
-        let cli = Cli::locate()
-            .ok_or_else(|| anyhow::anyhow!("Apple Containers is not installed."))?;
+        let cli =
+            Cli::locate().ok_or_else(|| anyhow::anyhow!("Apple Containers is not installed."))?;
         apple::system::start(&cli)
             .await
             .map_err(|e| anyhow::anyhow!("{}", e.message))
     }
 
     async fn stop(&self) -> anyhow::Result<()> {
-        let cli = Cli::locate()
-            .ok_or_else(|| anyhow::anyhow!("Apple Containers is not installed."))?;
+        let cli =
+            Cli::locate().ok_or_else(|| anyhow::anyhow!("Apple Containers is not installed."))?;
         apple::system::stop(&cli)
             .await
             .map_err(|e| anyhow::anyhow!("{}", e.message))

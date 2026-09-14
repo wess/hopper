@@ -8,16 +8,32 @@ use async_trait::async_trait;
 use docker::client::Client;
 use docker::Endpoint;
 use model::{EngineState, EngineStatus};
+use std::time::Duration;
 
 use crate::provider::Provider;
 
 pub struct Existing {
-    client: Client,
+    endpoint: Endpoint,
 }
 
 impl Existing {
     pub fn new(client: Client) -> Self {
-        Self { client }
+        Self {
+            endpoint: client.endpoint(),
+        }
+    }
+
+    fn current_endpoint(&self) -> Endpoint {
+        let explicit = ["DOCKER_HOST", "CONTAINER_HOST"]
+            .into_iter()
+            .find_map(|name| {
+                std::env::var(name)
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            });
+        explicit
+            .map(|_| docker::endpoint::from_env())
+            .unwrap_or_else(|| self.endpoint.clone())
     }
 }
 
@@ -38,17 +54,32 @@ impl Provider for Existing {
     }
 
     async fn endpoint(&self) -> Option<Endpoint> {
-        Some(docker::endpoint::from_env())
+        Some(self.current_endpoint())
     }
 
     async fn status(&self) -> EngineStatus {
-        let endpoint = self.client.endpoint();
+        // This row is also queried while another named provider may be
+        // active. Probe the default/DOCKER_HOST endpoint directly instead of
+        // borrowing the shared client, which may currently point elsewhere.
+        let endpoint = self.current_endpoint();
         let described = endpoint.describe();
-        match self.client.ping().await {
+        let client = Client::new(endpoint);
+        client.set_timeout(Duration::from_secs(3));
+        match client.ping().await {
             Ok(()) => EngineStatus::new(EngineState::Connected, "existing", "Connected.")
                 .endpoint(described),
             Err(e) => {
                 let mut status = crate::status_from(&e, "existing", false, &described);
+                let explicit_endpoint = ["DOCKER_HOST", "CONTAINER_HOST"].into_iter().any(|name| {
+                    std::env::var(name)
+                        .ok()
+                        .is_some_and(|value| !value.trim().is_empty())
+                });
+                if explicit_endpoint && status.state == EngineState::Stopped {
+                    status.state = EngineState::Unreachable;
+                    status.message = "The configured Docker endpoint is not responding.".into();
+                    return status;
+                }
                 // Nothing here can be started by Hopper, so say what the user
                 // can actually do instead of offering a dead button.
                 if status.state == EngineState::Stopped {

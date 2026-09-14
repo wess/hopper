@@ -43,7 +43,8 @@ pub async fn remove(cli: &Cli, id: &str) -> Result<()> {
 /// Save an image to a tar on the host. The import path uses this in reverse.
 pub async fn save(cli: &Cli, reference: &str, dest: &std::path::Path) -> Result<()> {
     let dest = dest.to_string_lossy().into_owned();
-    cli.ok(&["image", "save", "--output", &dest, reference]).await
+    cli.ok(&["image", "save", "--output", &dest, reference])
+        .await
 }
 
 /// Load an image from a tar produced by `docker save` or `container save`.
@@ -53,16 +54,17 @@ pub async fn load(cli: &Cli, src: &std::path::Path) -> Result<()> {
 }
 
 pub async fn prune(cli: &Cli, all: bool) -> Result<PruneReport> {
-    let before = list(cli).await.map(|i| i.len()).unwrap_or(0);
+    let before = list(cli).await?.len();
     let mut args = vec!["image", "prune"];
     if all {
         args.push("--all");
     }
     cli.ok(&args).await?;
-    let after = list(cli).await.map(|i| i.len()).unwrap_or(0);
+    let after = list(cli).await?.len();
     Ok(PruneReport {
         kind: "images".into(),
         removed: before.saturating_sub(after) as i64,
         reclaimed: 0,
+        error: None,
     })
 }

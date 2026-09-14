@@ -7,7 +7,7 @@ summary: The failures people actually hit, and what they mean.
 
 ## "Apple Containers can't run on this Mac"
 
-It needs macOS 26. The vmnet APIs that give containers their own addresses do not
+It needs an Apple silicon Mac running macOS 26. The vmnet APIs that give containers their own addresses do not
 exist earlier. Use a Docker engine instead — Hopper still works as a client.
 
 ## The engine says "stopped" and Start does nothing

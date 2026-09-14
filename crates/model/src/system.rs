@@ -85,6 +85,8 @@ pub struct PruneReport {
     pub removed: i64,
     /// Bytes.
     pub reclaimed: i64,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub error: Option<String>,
 }
 
 #[cfg(test)]

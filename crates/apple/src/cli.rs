@@ -10,10 +10,14 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::time::Duration;
 
 use docker::{DockerError, Result};
 use serde::de::DeserializeOwned;
+use tokio::io::AsyncRead;
 use tokio::process::Command;
+
+const MAX_CLI_OUTPUT_BYTES: usize = 64 * 1024 * 1024;
 
 /// Where the signed installer puts things. The package declares
 /// `install-location=/usr/local`, so the binary is fixed unless someone moved it.
@@ -55,16 +59,29 @@ impl Cli {
         &self.bin
     }
 
-    /// Run a command, returning stdout on success.
-    pub async fn run(&self, args: &[&str]) -> Result<String> {
-        let output = Command::new(&self.bin)
+    fn spawn(&self, args: &[&str]) -> Result<tokio::process::Child> {
+        Command::new(&self.bin)
             .args(args)
             .stdin(Stdio::null())
-            .output()
-            .await
+            .kill_on_drop(true)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| {
                 DockerError::transport(format!("could not run `{}`: {e}", self.bin.display()))
-            })?;
+            })
+    }
+
+    /// Run a command, returning stdout on success.
+    pub async fn run(&self, args: &[&str]) -> Result<String> {
+        let output = collect(self.spawn(args)?, &self.bin).await?;
+        if output.oversized {
+            return Err(DockerError::transport(format!(
+                "`{}` produced more than {} MiB of output",
+                self.bin.display(),
+                MAX_CLI_OUTPUT_BYTES / (1024 * 1024)
+            )));
+        }
 
         if output.status.success() {
             return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
@@ -82,14 +99,40 @@ impl Cli {
     /// exits 1 when the services are not registered, so for that one call the
     /// exit code has to be read alongside the output rather than instead of it.
     pub async fn output(&self, args: &[&str]) -> Result<(String, bool)> {
-        let output = Command::new(&self.bin)
-            .args(args)
-            .stdin(Stdio::null())
-            .output()
+        let output = collect(self.spawn(args)?, &self.bin).await?;
+        if output.oversized {
+            return Err(DockerError::transport(format!(
+                "`{}` produced more than {} MiB of output",
+                self.bin.display(),
+                MAX_CLI_OUTPUT_BYTES / (1024 * 1024)
+            )));
+        }
+        Ok((
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            output.status.success(),
+        ))
+    }
+
+    /// Run a status-like command with a deadline. `kill_on_drop` matters here:
+    /// dropping a timed-out Tokio child must not leave a `container` process
+    /// behind after the health poll has moved on.
+    pub async fn output_with_timeout(
+        &self,
+        args: &[&str],
+        timeout: Duration,
+    ) -> Result<(String, bool)> {
+        let output = tokio::time::timeout(timeout, collect(self.spawn(args)?, &self.bin))
             .await
-            .map_err(|e| {
-                DockerError::transport(format!("could not run `{}`: {e}", self.bin.display()))
-            })?;
+            .map_err(|_| {
+                DockerError::timeout(format!("`container {}` timed out", args.join(" ")))
+            })??;
+        if output.oversized {
+            return Err(DockerError::transport(format!(
+                "`{}` produced more than {} MiB of output",
+                self.bin.display(),
+                MAX_CLI_OUTPUT_BYTES / (1024 * 1024)
+            )));
+        }
         Ok((
             String::from_utf8_lossy(&output.stdout).into_owned(),
             output.status.success(),
@@ -117,11 +160,8 @@ impl Cli {
 pub fn decode<T: DeserializeOwned>(raw: &str) -> Result<T> {
     let trimmed = raw.trim();
     let body = if trimmed.is_empty() { "[]" } else { trimmed };
-    serde_json::from_str(body).map_err(|e| {
-        DockerError::decode(format!(
-            "could not read the output of `container`: {e}"
-        ))
-    })
+    serde_json::from_str(body)
+        .map_err(|e| DockerError::decode(format!("could not read the output of `container`: {e}")))
 }
 
 /// Turn a failed run into an error the rest of Hopper already knows how to
@@ -137,7 +177,10 @@ fn classify(stderr: &str, args: &[&str], code: Option<i32>) -> DockerError {
     if lower.contains("not found") || lower.contains("does not exist") {
         return DockerError::api(404, message);
     }
-    if lower.contains("already exists") || lower.contains("already in use") || lower.contains("in use by") {
+    if lower.contains("already exists")
+        || lower.contains("already in use")
+        || lower.contains("in use by")
+    {
         return DockerError::api(409, message);
     }
     if lower.contains("permission denied") || lower.contains("not permitted") {
@@ -189,6 +232,74 @@ fn executable(p: &Path) -> bool {
     }
 }
 
+struct CliOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    status: std::process::ExitStatus,
+    oversized: bool,
+}
+
+/// Drain both pipes concurrently. If either one reaches the cap, kill the
+/// child immediately so a verbose process cannot block the other pipe.
+async fn collect(mut child: tokio::process::Child, bin: &Path) -> Result<CliOutput> {
+    let stdout = child.stdout.take().ok_or_else(|| {
+        DockerError::transport(format!("`{}` produced no stdout pipe", bin.display()))
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        DockerError::transport(format!("`{}` produced no stderr pipe", bin.display()))
+    })?;
+    let stdout_read = read_limited(stdout);
+    let stderr_read = read_limited(stderr);
+    tokio::pin!(stdout_read, stderr_read);
+
+    let (stdout, stderr, oversized) = tokio::select! {
+        result = &mut stdout_read => {
+            let (stdout, oversized) = result.map_err(|e| DockerError::transport(format!("could not read `{}` stdout: {e}", bin.display())))?;
+            if oversized {
+                let _ = child.kill().await;
+            }
+            let (stderr, _) = stderr_read.await.map_err(|e| DockerError::transport(format!("could not read `{}` stderr: {e}", bin.display())))?;
+            (stdout, stderr, oversized)
+        }
+        result = &mut stderr_read => {
+            let (stderr, oversized) = result.map_err(|e| DockerError::transport(format!("could not read `{}` stderr: {e}", bin.display())))?;
+            if oversized {
+                let _ = child.kill().await;
+            }
+            let (stdout, _) = stdout_read.await.map_err(|e| DockerError::transport(format!("could not read `{}` stdout: {e}", bin.display())))?;
+            (stdout, stderr, oversized)
+        }
+    };
+    let status = child.wait().await.map_err(|e| {
+        DockerError::transport(format!("could not finish `{}`: {e}", bin.display()))
+    })?;
+    Ok(CliOutput {
+        stdout,
+        stderr,
+        status,
+        oversized,
+    })
+}
+
+/// Read a CLI pipe without allowing a malformed runtime response to consume
+/// unbounded memory. The caller kills the child as soon as the cap is hit.
+async fn read_limited<R: AsyncRead + Unpin>(mut reader: R) -> std::io::Result<(Vec<u8>, bool)> {
+    use tokio::io::AsyncReadExt;
+
+    let mut out = Vec::new();
+    let mut buf = [0_u8; 16 * 1024];
+    loop {
+        let n = reader.read(&mut buf).await?;
+        if n == 0 {
+            return Ok((out, false));
+        }
+        if out.len().saturating_add(n) > MAX_CLI_OUTPUT_BYTES {
+            return Ok((out, true));
+        }
+        out.extend_from_slice(&buf[..n]);
+    }
+}
+
 /// A `PATH` walk, so a Homebrew or hand-placed `container` is still found.
 fn which(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
@@ -214,13 +325,20 @@ mod tests {
     #[test]
     fn a_missing_object_reads_as_not_found() {
         let e = classify("Error: container not found: web", &["inspect"], Some(1));
-        assert!(e.is_not_found(), "views branch on 404 regardless of backend");
+        assert!(
+            e.is_not_found(),
+            "views branch on 404 regardless of backend"
+        );
         assert_eq!(e.message, "container not found: web");
     }
 
     #[test]
     fn a_name_clash_reads_as_a_conflict() {
-        let e = classify("Error: volume already exists", &["volume", "create"], Some(1));
+        let e = classify(
+            "Error: volume already exists",
+            &["volume", "create"],
+            Some(1),
+        );
         assert!(e.is_conflict());
     }
 
@@ -267,5 +385,15 @@ mod tests {
         std::env::set_var(BIN_ENV, "/nonexistent/container");
         assert!(Cli::locate().is_none());
         std::env::remove_var(BIN_ENV);
+    }
+
+    #[tokio::test]
+    async fn cli_output_reader_is_bounded() {
+        use tokio::io::AsyncReadExt;
+
+        let reader = tokio::io::repeat(0).take((MAX_CLI_OUTPUT_BYTES + 1) as u64);
+        let (bytes, oversized) = read_limited(reader).await.unwrap();
+        assert!(oversized);
+        assert_eq!(bytes.len(), MAX_CLI_OUTPUT_BYTES);
     }
 }

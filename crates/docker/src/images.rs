@@ -132,6 +132,7 @@ pub async fn prune(client: &Client, all: bool) -> Result<PruneReport> {
         kind: "images".into(),
         removed: raw.deleted.unwrap_or_default().len() as i64,
         reclaimed: raw.reclaimed.unwrap_or_default(),
+        error: None,
     })
 }
 
@@ -321,6 +322,15 @@ pub async fn save(client: &Client, refs: &[String]) -> Result<Bytes> {
     client.bytes(req).await
 }
 
+/// Export one or more images directly to a file without retaining the tar in memory.
+pub async fn save_to(client: &Client, refs: &[String], path: &std::path::Path) -> Result<()> {
+    let mut req = Req::get("/images/get").no_timeout();
+    for r in refs {
+        req = req.query("names", r);
+    }
+    client.stream_to(req, path).await
+}
+
 /// Import images from a tar archive produced by [`save`].
 pub async fn load(client: &Client, tar: Bytes) -> Result<()> {
     client
@@ -328,6 +338,17 @@ pub async fn load(client: &Client, tar: Bytes) -> Result<()> {
             Req::post("/images/load")
                 .raw_body(tar, "application/x-tar")
                 .no_timeout(),
+        )
+        .await
+}
+
+/// Import an image archive directly from disk without retaining it in memory.
+pub async fn load_file(client: &Client, path: &std::path::Path) -> Result<()> {
+    client
+        .action_file(
+            Req::post("/images/load").no_timeout(),
+            path,
+            "application/x-tar",
         )
         .await
 }

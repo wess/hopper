@@ -7,7 +7,39 @@
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::io::Write;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(not(windows))]
+fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)
+}
+
+#[cfg(windows)]
+fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::{
+        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+    };
+
+    let from: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
+    let to: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
+    let replaced = unsafe {
+        MoveFileExW(
+            from.as_ptr(),
+            to.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
 
 /// Read and decode a document, falling back to the default when it is missing
 /// or unreadable.
@@ -23,8 +55,18 @@ pub fn read_or_default<T: DeserializeOwned + Default>(path: &Path) -> T {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!("{} is not valid JSON ({e}); backing it up", path.display());
-            let backup = path.with_extension("json.corrupt");
-            let _ = std::fs::rename(path, backup);
+            let backup = path.with_extension(format!(
+                "json.corrupt.{}.{}",
+                std::process::id(),
+                NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+            ));
+            if let Err(error) = std::fs::rename(path, &backup) {
+                tracing::warn!(
+                    "could not preserve corrupt file {} as {}: {error}",
+                    path.display(),
+                    backup.display()
+                );
+            }
             T::default()
         }
     }
@@ -38,9 +80,37 @@ pub fn write<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
     let text = serde_json::to_string_pretty(value)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, text.as_bytes())?;
-    std::fs::rename(&tmp, path)?;
+    // A fixed sibling temp name lets concurrent settings/workspace writes
+    // steal one another's file. Give each writer its own name; the final
+    // rename remains atomic, and a crash still leaves the previous document
+    // untouched.
+    let tmp = path.with_extension(format!(
+        "json.tmp.{}.{}",
+        std::process::id(),
+        NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+    ));
+    let write_result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        file.write_all(text.as_bytes())?;
+        file.sync_all()
+    })();
+    if let Err(error) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
+    if let Err(error) = replace_file(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
+    #[cfg(unix)]
+    if let Some(parent) = path.parent() {
+        // Persist the directory entry created by the atomic replacement.
+        let directory = std::fs::File::open(parent)?;
+        directory.sync_all()?;
+    }
     Ok(())
 }
 
@@ -83,15 +153,46 @@ mod tests {
     #[test]
     fn a_corrupt_file_is_backed_up_rather_than_lost() {
         let path = tmpdir().join("corrupt.json");
-        let backup = path.with_extension("json.corrupt");
-        let _ = std::fs::remove_file(&backup);
         std::fs::write(&path, b"{not json").unwrap();
 
         assert_eq!(read_or_default::<Doc>(&path), Doc::default());
-        assert!(backup.exists(), "the unreadable document should be kept");
-        assert_eq!(std::fs::read_to_string(&backup).unwrap(), "{not json");
+        let backups: Vec<_> = std::fs::read_dir(tmpdir())
+            .unwrap()
+            .filter_map(|entry| {
+                let path = entry.ok()?.path();
+                path.file_name()?
+                    .to_str()?
+                    .starts_with("corrupt.json.corrupt.")
+                    .then_some(path)
+            })
+            .collect();
+        assert_eq!(backups.len(), 1, "the unreadable document should be kept");
+        assert_eq!(std::fs::read_to_string(&backups[0]).unwrap(), "{not json");
+        let _ = std::fs::remove_file(&backups[0]);
+    }
 
-        let _ = std::fs::remove_file(&backup);
+    #[test]
+    fn repeated_corruption_keeps_each_recovery_copy() {
+        let path = tmpdir().join("repeated-corrupt.json");
+        std::fs::write(&path, b"{first").unwrap();
+        assert_eq!(read_or_default::<Doc>(&path), Doc::default());
+        std::fs::write(&path, b"{second").unwrap();
+        assert_eq!(read_or_default::<Doc>(&path), Doc::default());
+
+        let backups: Vec<_> = std::fs::read_dir(tmpdir())
+            .unwrap()
+            .filter_map(|entry| {
+                let path = entry.ok()?.path();
+                path.file_name()?
+                    .to_str()?
+                    .starts_with("repeated-corrupt.json.corrupt.")
+                    .then_some(path)
+            })
+            .collect();
+        assert_eq!(backups.len(), 2);
+        for backup in backups {
+            let _ = std::fs::remove_file(backup);
+        }
     }
 
     #[test]
@@ -108,6 +209,31 @@ mod tests {
         let path = tmpdir().join("clean.json");
         write(&path, &Doc::default()).unwrap();
         assert!(!path.with_extension("json.tmp").exists());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn concurrent_writers_do_not_steal_each_others_temp_files() {
+        let path = tmpdir().join("concurrent.json");
+        let mut writers = Vec::new();
+        for count in 0..8 {
+            let path = path.clone();
+            writers.push(std::thread::spawn(move || {
+                write(
+                    &path,
+                    &Doc {
+                        name: format!("writer-{count}"),
+                        count,
+                    },
+                )
+                .unwrap();
+            }));
+        }
+        for writer in writers {
+            writer.join().unwrap();
+        }
+        let result: Doc = read_or_default(&path);
+        assert!(result.name.starts_with("writer-"));
         let _ = std::fs::remove_file(&path);
     }
 }

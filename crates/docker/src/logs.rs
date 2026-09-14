@@ -9,6 +9,8 @@ use crate::demux::TextDemux;
 use crate::error::Result;
 use model::{LogLine, LogOptions, StreamKind};
 
+const MAX_LOG_LINE_BYTES: usize = 4 * 1024 * 1024;
+
 /// Split the RFC3339 timestamp the daemon prefixes when `timestamps=1`.
 ///
 /// Returns the unix-millis timestamp and the remaining text. A line without a
@@ -72,10 +74,33 @@ impl Lines {
         let tail = parts.pop().unwrap_or_default().to_string();
         let out = parts
             .into_iter()
-            .map(|l| (stream, l.trim_end_matches('\r').to_string()))
+            .map(|l| {
+                let line = l.trim_end_matches('\r');
+                let bounded = &line[..line
+                    .char_indices()
+                    .take_while(|(i, _)| *i < MAX_LOG_LINE_BYTES)
+                    .last()
+                    .map(|(i, c)| i + c.len_utf8())
+                    .unwrap_or(0)
+                    .min(line.len())];
+                (stream, bounded.to_string())
+            })
             .collect();
         if !tail.is_empty() {
-            self.partial.push((stream, tail));
+            if tail.len() <= MAX_LOG_LINE_BYTES {
+                self.partial.push((stream, tail));
+            } else {
+                self.partial.push((
+                    stream,
+                    tail[..tail
+                        .char_indices()
+                        .take_while(|(i, _)| *i < MAX_LOG_LINE_BYTES)
+                        .last()
+                        .map(|(i, c)| i + c.len_utf8())
+                        .unwrap_or(0)]
+                        .to_string(),
+                ));
+            }
         }
         out
     }

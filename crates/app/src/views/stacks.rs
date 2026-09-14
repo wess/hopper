@@ -18,7 +18,7 @@ use guise::prelude::*;
 use crate::bridge;
 use crate::state::{AppState, Load};
 use crate::theme;
-use model::{ComposeProject, ComposeProgress, ComposeStackStatus, StreamKind};
+use model::{ComposeProgress, ComposeProject, ComposeStackStatus, StreamKind};
 
 /// A compose run in flight, or the one that just finished.
 struct Run {
@@ -27,6 +27,18 @@ struct Run {
     lines: Vec<(SharedString, bool)>,
     done: bool,
     failed: bool,
+}
+
+impl Run {
+    const MAX_LINES: usize = 512;
+
+    fn push_line(&mut self, line: (SharedString, bool)) {
+        self.lines.push(line);
+        if self.lines.len() > Self::MAX_LINES {
+            let excess = self.lines.len() - Self::MAX_LINES;
+            self.lines.drain(..excess);
+        }
+    }
 }
 
 pub struct Stacks {
@@ -39,6 +51,7 @@ pub struct Stacks {
     startable: BTreeSet<String>,
     busy: Option<String>,
     run: Option<Run>,
+    confirm_down: Option<String>,
 }
 
 fn status_color(status: ComposeStackStatus) -> ColorName {
@@ -61,18 +74,27 @@ impl Stacks {
             startable: BTreeSet::new(),
             busy: None,
             run: None,
+            confirm_down: None,
         };
         view.reload(cx);
         view
     }
 
     fn reload(&self, cx: &mut Context<Self>) {
+        if !self.state.host.selection_ready() {
+            return;
+        }
         let host = Arc::clone(&self.state.host);
+        let request_generation = host.selection_generation();
+        let check_host = Arc::clone(&host);
         let this = cx.entity().downgrade();
         bridge::run(
             cx,
             async move { host.compose_projects().await },
             move |result, cx| {
+                if check_host.selection_generation() != request_generation {
+                    return;
+                }
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
                         this.projects = match result {
@@ -209,13 +231,13 @@ impl Stacks {
 
         bridge::stream(
             cx,
-            move |tx| async move {
+            move |mut tx| async move {
                 let plan = match plan() {
                     Ok(plan) => plan,
                     Err(reason) => {
                         // A file that will not parse is the end of the run, and
                         // the reason is the only thing worth showing.
-                        let _ = tx.unbounded_send(ComposeProgress {
+                        let _ = tx.try_send(ComposeProgress {
                             request_id: String::new(),
                             line: reason.clone(),
                             stream: StreamKind::Stderr,
@@ -226,7 +248,7 @@ impl Stacks {
                     }
                 };
                 let mut sink = move |p: ComposeProgress| {
-                    let _ = tx.unbounded_send(p);
+                    let _ = tx.try_send(p);
                 };
                 host.compose_up(&plan, &mut sink).await;
             },
@@ -244,7 +266,7 @@ impl Stacks {
                             if !progress.request_id.is_empty() {
                                 run.project = progress.request_id.clone();
                             }
-                            run.lines.push((
+                            run.push_line((
                                 progress.line.clone().into(),
                                 progress.stream == StreamKind::Stderr,
                             ));
@@ -274,6 +296,7 @@ impl Stacks {
 
     /// Stop and remove a stack's containers and the networks it owns.
     fn down(&mut self, project: String, cx: &mut Context<Self>) {
+        self.confirm_down = None;
         let host = Arc::clone(&self.state.host);
         let state = self.state.clone();
         let this = cx.entity().downgrade();
@@ -288,9 +311,9 @@ impl Stacks {
 
         bridge::stream(
             cx,
-            move |tx| async move {
+            move |mut tx| async move {
                 let mut sink = move |p: ComposeProgress| {
-                    let _ = tx.unbounded_send(p);
+                    let _ = tx.try_send(p);
                 };
                 host.compose_down(&project, false, &mut sink).await;
             },
@@ -300,7 +323,7 @@ impl Stacks {
                     if let Some(this) = this.upgrade() {
                         this.update(cx, |this, cx| {
                             if let Some(run) = &mut this.run {
-                                run.lines.push((
+                                run.push_line((
                                     progress.line.clone().into(),
                                     progress.stream == StreamKind::Stderr,
                                 ));
@@ -327,6 +350,16 @@ impl Stacks {
                 state.bump(cx);
             },
         );
+    }
+
+    fn ask_down(&mut self, project: String, cx: &mut Context<Self>) {
+        self.confirm_down = Some(project);
+        cx.notify();
+    }
+
+    fn cancel_down(&mut self, cx: &mut Context<Self>) {
+        self.confirm_down = None;
+        cx.notify();
     }
 
     /// The run panel: what happened, in order, with problems coloured.
@@ -389,12 +422,10 @@ impl Stacks {
             .border_color(palette.border_subtle)
             .bg(palette.bg_subtle)
             .child(
-                Stack::new().gap(Size::Sm).child(head).child(
-                    div()
-                        .max_h(px(220.0))
-                        .overflow_hidden()
-                        .child(lines),
-                ),
+                Stack::new()
+                    .gap(Size::Sm)
+                    .child(head)
+                    .child(div().max_h(px(220.0)).overflow_hidden().child(lines)),
             )
     }
 
@@ -419,16 +450,17 @@ impl Stacks {
 
         let mut actions = Group::new().gap(Size::Xs);
         if has_files {
-            actions = actions.child(
-                Button::new(SharedString::from(format!("stack-up-{}", p.name)), "Up")
-                    .size(Size::Xs)
-                    .variant(Variant::Light)
-                    .color(ColorName::Blue)
-                    .disabled(busy)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.up_from_project(name_up.clone(), cx)
-                    })),
-            );
+            actions =
+                actions.child(
+                    Button::new(SharedString::from(format!("stack-up-{}", p.name)), "Up")
+                        .size(Size::Xs)
+                        .variant(Variant::Light)
+                        .color(ColorName::Blue)
+                        .disabled(busy)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.up_from_project(name_up.clone(), cx)
+                        })),
+                );
         }
         actions = actions
             .child(
@@ -438,7 +470,11 @@ impl Stacks {
                 )
                 .size(Size::Xs)
                 .variant(Variant::Subtle)
-                .color(if up { ColorName::Yellow } else { ColorName::Green })
+                .color(if up {
+                    ColorName::Yellow
+                } else {
+                    ColorName::Green
+                })
                 .disabled(busy)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.act(name_toggle.clone(), !up, cx);
@@ -450,9 +486,9 @@ impl Stacks {
                     .variant(Variant::Subtle)
                     .color(ColorName::Red)
                     .disabled(busy)
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.down(name_down.clone(), cx)
-                    })),
+                    .on_click(
+                        cx.listener(move |this, _, _, cx| this.ask_down(name_down.clone(), cx)),
+                    ),
             );
 
         div()
@@ -554,6 +590,20 @@ impl Render for Stacks {
             content = content.child(self.panel(run, cx));
         }
 
-        content.child(div().flex_1().overflow_hidden().child(body))
+        let mut root = content.child(div().flex_1().overflow_hidden().child(body));
+        if let Some(project) = self.confirm_down.clone() {
+            root = root.child(
+                ConfirmModal::new()
+                    .title("Take stack down?")
+                    .message(format!(
+                        "Stop and remove the containers and networks belonging to {project}?"
+                    ))
+                    .confirm_label("Take down")
+                    .danger()
+                    .on_confirm(cx.listener(move |this, _, _, cx| this.down(project.clone(), cx)))
+                    .on_cancel(cx.listener(|this, _, _, cx| this.cancel_down(cx))),
+            );
+        }
+        root
     }
 }

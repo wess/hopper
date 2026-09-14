@@ -6,7 +6,6 @@ pub mod dashboard;
 pub mod detail;
 pub mod engine;
 pub mod files;
-pub mod terminal;
 pub mod images;
 pub mod import;
 pub mod networks;
@@ -14,6 +13,7 @@ pub mod registry;
 pub mod run;
 pub mod settings;
 pub mod stacks;
+pub mod terminal;
 pub mod volumes;
 
 pub use containers::Containers;
@@ -34,7 +34,6 @@ use gpui::prelude::*;
 use guise::prelude::*;
 
 use crate::state::{AppState, Route};
-
 
 /// A single centred line — for empty and loading states, which must read
 /// differently from each other and from a failure.
@@ -88,4 +87,3 @@ pub fn failure(summary: &str, detail: &str) -> gpui::AnyElement {
         )
         .into_any_element()
 }
-

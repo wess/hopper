@@ -9,6 +9,7 @@
 //! time, not the user's containers.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use apple::Cli;
 use docker::client::Client;
@@ -35,7 +36,13 @@ fn step(
     }
 }
 
-fn failed(phase: MigrationPhase, item: &str, done: usize, total: usize, error: String) -> MigrationProgress {
+fn failed(
+    phase: MigrationPhase,
+    item: &str,
+    done: usize,
+    total: usize,
+    error: String,
+) -> MigrationProgress {
     let mut p = step(phase, item, done, total, "Failed");
     p.error = Some(error);
     p
@@ -56,6 +63,15 @@ pub fn scratch_dir() -> PathBuf {
     root.join("import")
 }
 
+fn scratch_run_dir() -> PathBuf {
+    static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
+    scratch_dir().join(format!(
+        "run.{}.{}",
+        std::process::id(),
+        NEXT_RUN.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
 fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
 }
@@ -67,7 +83,13 @@ fn dirs_home() -> Option<PathBuf> {
 pub fn tar_name(reference: &str) -> String {
     let safe: String = reference
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("{safe}.tar")
 }
@@ -83,15 +105,27 @@ pub async fn import_images(
     if total == 0 {
         return 0;
     }
-    let dir = scratch_dir();
+    let dir = scratch_run_dir();
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
-        report(failed(MigrationPhase::Images, "", 0, total, format!("could not make a scratch directory: {e}")));
+        report(failed(
+            MigrationPhase::Images,
+            "",
+            0,
+            total,
+            format!("could not make a scratch directory: {e}"),
+        ));
         return 0;
     }
 
     let mut copied = 0;
     for (i, reference) in plan.images.iter().enumerate() {
-        report(step(MigrationPhase::Images, reference, i, total, format!("Copying {reference}")));
+        report(step(
+            MigrationPhase::Images,
+            reference,
+            i,
+            total,
+            format!("Copying {reference}"),
+        ));
         let path = dir.join(tar_name(reference));
 
         match copy_one_image(source, cli, reference, &path).await {
@@ -105,18 +139,77 @@ pub async fn import_images(
     copied
 }
 
+/// Recreate the selected networks on Apple's runtime before containers use
+/// them. Apple accepts the portable name, subnet, and internal flag; Docker-
+/// specific driver and attachable settings have no equivalent there.
+pub async fn import_networks(
+    source: &Client,
+    cli: &Cli,
+    plan: &MigrationPlan,
+    report: Report<'_>,
+) -> usize {
+    let total = plan.networks.len();
+    if total == 0 {
+        return 0;
+    }
+    let existing = match docker::networks::list(source).await {
+        Ok(existing) => existing,
+        Err(e) => {
+            let mut p = step(MigrationPhase::Networks, "networks", 0, total, "Failed");
+            p.error = Some(format!(
+                "Could not read networks from the source: {}",
+                e.message
+            ));
+            report(p);
+            return 0;
+        }
+    };
+
+    let mut created = 0;
+    for (i, id) in plan.networks.iter().enumerate() {
+        let Some(network) = existing.iter().find(|n| &n.id == id || &n.name == id) else {
+            let mut p = step(MigrationPhase::Networks, id, i, total, "Failed");
+            p.error = Some("The source network no longer exists.".into());
+            report(p);
+            continue;
+        };
+        report(step(
+            MigrationPhase::Networks,
+            &network.name,
+            i,
+            total,
+            format!("Creating {}", network.name),
+        ));
+        let input = model::NetworkCreateInput {
+            name: network.name.clone(),
+            driver: None,
+            internal: network.internal,
+            attachable: false,
+            subnet: network.ipam.first().and_then(|c| c.subnet.clone()),
+            gateway: None,
+        };
+        match apple::networks::create(cli, &input).await {
+            Ok(_) => created += 1,
+            Err(e) if e.is_conflict() => created += 1,
+            Err(e) => {
+                let mut p = step(MigrationPhase::Networks, &network.name, i, total, "Failed");
+                p.error = Some(e.message);
+                report(p);
+            }
+        }
+    }
+    created
+}
+
 async fn copy_one_image(
     source: &Client,
     cli: &Cli,
     reference: &str,
     path: &Path,
 ) -> Result<(), String> {
-    let tar = docker::images::save(source, std::slice::from_ref(&reference.to_string()))
+    docker::images::save_to(source, std::slice::from_ref(&reference.to_string()), path)
         .await
-        .map_err(|e| format!("could not export {reference} from Docker: {}", e.message))?;
-    tokio::fs::write(path, &tar)
-        .await
-        .map_err(|e| format!("could not stage {reference}: {e}"))?;
+        .map_err(|e| format!("could not export or stage {reference}: {}", e.message))?;
     apple::images::load(cli, path)
         .await
         .map_err(|e| format!("Apple Containers refused {reference}: {}", e.message))
@@ -137,24 +230,72 @@ pub async fn import_containers(
     if total == 0 {
         return 0;
     }
-    let existing = docker::containers::list(source, true).await.unwrap_or_default();
+    let existing = match docker::containers::list(source, true).await {
+        Ok(existing) => existing,
+        Err(e) => {
+            let mut p = step(MigrationPhase::Containers, "containers", 0, total, "Failed");
+            p.error = Some(format!(
+                "Could not read containers from the source: {}",
+                e.message
+            ));
+            report(p);
+            return 0;
+        }
+    };
     let mut created = 0;
 
     for (i, id) in plan.containers.iter().enumerate() {
         let Some(c) = existing.iter().find(|c| &c.id == id || &c.name == id) else {
+            report(failed(
+                MigrationPhase::Containers,
+                id,
+                i,
+                total,
+                "The source container no longer exists.".into(),
+            ));
             continue;
         };
-        report(step(MigrationPhase::Containers, &c.name, i, total, format!("Recreating {}", c.name)));
+        report(step(
+            MigrationPhase::Containers,
+            &c.name,
+            i,
+            total,
+            format!("Recreating {}", c.name),
+        ));
 
-        let input = to_run_input(c);
+        let input = match crate::run::inspect_run_input(source, c).await {
+            Ok(input) => input,
+            Err(e) => {
+                report(failed(
+                    MigrationPhase::Containers,
+                    &c.name,
+                    i,
+                    total,
+                    format!("Could not inspect the source container: {}", e.message),
+                ));
+                continue;
+            }
+        };
         // Anything Apple cannot honour is a warning on the item, not a failure.
         for note in apple::containers::unsupported(&input) {
-            let mut p = step(MigrationPhase::Containers, &c.name, i, total, "Recreated with changes");
+            let mut p = step(
+                MigrationPhase::Containers,
+                &c.name,
+                i,
+                total,
+                "Recreated with changes",
+            );
             p.warning = Some(note);
             report(p);
         }
-        if let Some(warning) = crate::run::bind_warning(&c.name, &bind_sources(c)) {
-            let mut p = step(MigrationPhase::Containers, &c.name, i, total, "Recreated with changes");
+        if let Some(warning) = crate::run::bind_warning(&c.name, &crate::run::bind_sources(c)) {
+            let mut p = step(
+                MigrationPhase::Containers,
+                &c.name,
+                i,
+                total,
+                "Recreated with changes",
+            );
             p.warning = Some(warning);
             report(p);
         }
@@ -162,7 +303,13 @@ pub async fn import_containers(
         match apple::containers::run(cli, &input).await {
             Ok(_) => created += 1,
             Err(e) if e.is_conflict() => created += 1,
-            Err(e) => report(failed(MigrationPhase::Containers, &c.name, i, total, e.message)),
+            Err(e) => report(failed(
+                MigrationPhase::Containers,
+                &c.name,
+                i,
+                total,
+                e.message,
+            )),
         }
     }
     created
@@ -170,58 +317,12 @@ pub async fn import_containers(
 
 /// The host paths a container bind-mounts, which will not exist in the guest.
 pub fn bind_sources(c: &model::Container) -> Vec<String> {
-    c.mounts
-        .iter()
-        .filter(|m| m.kind == "bind")
-        .map(|m| m.source.clone())
-        .collect()
+    crate::run::bind_sources(c)
 }
 
 /// A running container, described as the request that would recreate it.
 pub fn to_run_input(c: &model::Container) -> model::RunInput {
-    let ports = c
-        .ports
-        .iter()
-        .filter_map(|p| {
-            // Only published ports can be recreated; an unpublished one has no
-            // host side to ask for.
-            p.public_port.map(|host| model::PortMapping {
-                host: host.to_string(),
-                container: p.private_port.to_string(),
-                proto: Some(p.proto.clone()),
-            })
-        })
-        .collect();
-
-    let volumes = c
-        .mounts
-        .iter()
-        .map(|m| model::VolumeMapping {
-            host: m.name.clone().unwrap_or_else(|| m.source.clone()),
-            container: m.destination.clone(),
-            ro: !m.rw,
-        })
-        .collect();
-
-    model::RunInput {
-        image: c.image.clone(),
-        name: Some(c.name.clone()),
-        env: Vec::new(),
-        ports,
-        volumes,
-        // The image's own entrypoint is the right default; a command copied
-        // from a running container often names a path only that image has.
-        command: None,
-        restart: None,
-        auto_remove: false,
-        network: c.networks.first().cloned().filter(|n| n != "bridge" && n != "default"),
-        workdir: None,
-        user: None,
-        hostname: None,
-        limits: Default::default(),
-        labels: c.labels.clone(),
-        tty: false,
-    }
+    crate::run::to_run_input(c)
 }
 
 #[cfg(test)]
@@ -269,9 +370,19 @@ mod tests {
     fn only_published_ports_are_recreated() {
         let mut c = container();
         c.ports = vec![
-            Port { ip: None, private_port: 80, public_port: Some(8080), proto: "tcp".into() },
+            Port {
+                ip: None,
+                private_port: 80,
+                public_port: Some(8080),
+                proto: "tcp".into(),
+            },
             // Exposed but not published: there is no host port to ask for.
-            Port { ip: None, private_port: 443, public_port: None, proto: "tcp".into() },
+            Port {
+                ip: None,
+                private_port: 443,
+                public_port: None,
+                proto: "tcp".into(),
+            },
         ];
         let input = to_run_input(&c);
         assert_eq!(input.ports.len(), 1);
@@ -283,11 +394,28 @@ mod tests {
     fn a_named_volume_travels_by_name_and_a_bind_by_path() {
         let mut c = container();
         c.mounts = vec![
-            Mount { kind: "volume".into(), source: "/var/lib/docker/volumes/data/_data".into(), destination: "/data".into(), mode: "rw".into(), rw: true, name: Some("data".into()) },
-            Mount { kind: "bind".into(), source: "/Users/wess/code".into(), destination: "/src".into(), mode: "ro".into(), rw: false, name: None },
+            Mount {
+                kind: "volume".into(),
+                source: "/var/lib/docker/volumes/data/_data".into(),
+                destination: "/data".into(),
+                mode: "rw".into(),
+                rw: true,
+                name: Some("data".into()),
+            },
+            Mount {
+                kind: "bind".into(),
+                source: "/Users/wess/code".into(),
+                destination: "/src".into(),
+                mode: "ro".into(),
+                rw: false,
+                name: None,
+            },
         ];
         let input = to_run_input(&c);
-        assert_eq!(input.volumes[0].host, "data", "a named volume must not travel as its host path");
+        assert_eq!(
+            input.volumes[0].host, "data",
+            "a named volume must not travel as its host path"
+        );
         assert!(!input.volumes[0].ro);
         assert_eq!(input.volumes[1].host, "/Users/wess/code");
         assert!(input.volumes[1].ro);
@@ -297,8 +425,22 @@ mod tests {
     fn bind_mounts_are_the_only_ones_warned_about() {
         let mut c = container();
         c.mounts = vec![
-            Mount { kind: "bind".into(), source: "/Users/wess/code".into(), destination: "/src".into(), mode: "rw".into(), rw: true, name: None },
-            Mount { kind: "volume".into(), source: "x".into(), destination: "/d".into(), mode: "rw".into(), rw: true, name: Some("x".into()) },
+            Mount {
+                kind: "bind".into(),
+                source: "/Users/wess/code".into(),
+                destination: "/src".into(),
+                mode: "rw".into(),
+                rw: true,
+                name: None,
+            },
+            Mount {
+                kind: "volume".into(),
+                source: "x".into(),
+                destination: "/d".into(),
+                mode: "rw".into(),
+                rw: true,
+                name: Some("x".into()),
+            },
         ];
         assert_eq!(bind_sources(&c), vec!["/Users/wess/code".to_string()]);
     }
@@ -318,8 +460,15 @@ mod tests {
     #[test]
     fn labels_survive_so_compose_stacks_regroup() {
         let mut c = container();
-        c.labels.insert("com.docker.compose.project".into(), "shop".into());
+        c.labels
+            .insert("com.docker.compose.project".into(), "shop".into());
         let input = to_run_input(&c);
-        assert_eq!(input.labels.get("com.docker.compose.project").map(String::as_str), Some("shop"));
+        assert_eq!(
+            input
+                .labels
+                .get("com.docker.compose.project")
+                .map(String::as_str),
+            Some("shop")
+        );
     }
 }

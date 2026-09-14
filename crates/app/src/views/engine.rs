@@ -47,6 +47,24 @@ pub enum Offer {
     Install,
 }
 
+/// Turn the stable provider id into language a person can act on.
+///
+/// Provider ids are persisted and useful to diagnostics, but they are not
+/// good UI copy. Keep this mapping in one place so the setup card and Settings
+/// agree when the user switches between Docker, Podman, and Apple's runtime.
+pub fn provider_label(provider: &str) -> &'static str {
+    match provider {
+        "apple" => "Apple Containers",
+        "docker" => "Docker",
+        "podman" => "Podman",
+        "colima" => "Colima",
+        "rancher" => "Rancher Desktop",
+        "existing" => "Docker-compatible engine",
+        "linux" => "Linux engine",
+        _ => "Container engine",
+    }
+}
+
 impl Setup {
     pub fn can_start(&self) -> bool {
         self.offer == Offer::Start
@@ -63,11 +81,16 @@ pub fn describe(e: &EngineStatus) -> Setup {
     let body = e.message.clone();
     let hint = e.detail.clone();
     let apple = e.provider == "apple";
+    let provider = provider_label(&e.provider);
     match e.state {
         Starting => Setup {
             icon: IconName::HardDriveDownload,
             tone: ColorName::Blue,
-            title: if apple { "Starting Apple Containers".into() } else { "Connecting to the engine".into() },
+            title: if apple {
+                "Starting Apple Containers".into()
+            } else {
+                format!("Connecting to {provider}")
+            },
             body,
             hint,
             busy: true,
@@ -76,7 +99,11 @@ pub fn describe(e: &EngineStatus) -> Setup {
         Stopped if e.managed => Setup {
             icon: IconName::Power,
             tone: ColorName::Green,
-            title: if apple { "Start Apple Containers".into() } else { "Start Hopper's engine".into() },
+            title: if apple {
+                "Start Apple Containers".into()
+            } else {
+                "Start Hopper's engine".into()
+            },
             body,
             hint,
             busy: false,
@@ -98,7 +125,7 @@ pub fn describe(e: &EngineStatus) -> Setup {
         NeedsPermission => Setup {
             icon: IconName::TriangleAlert,
             tone: ColorName::Orange,
-            title: "Hopper needs permission to reach Docker".into(),
+            title: format!("Hopper needs permission to reach {provider}"),
             body,
             hint,
             busy: false,
@@ -118,25 +145,33 @@ pub fn describe(e: &EngineStatus) -> Setup {
         NotInstalled => Setup {
             icon: IconName::CircleAlert,
             tone: ColorName::Gray,
-            title: "No Docker engine found".into(),
+            title: format!("No {provider} found"),
             body,
             hint,
             busy: false,
-            offer: if e.managed { Offer::Start } else { Offer::Nothing },
+            offer: if e.managed {
+                Offer::Start
+            } else {
+                Offer::Nothing
+            },
         },
         Unreachable => Setup {
             icon: IconName::CircleAlert,
             tone: ColorName::Orange,
-            title: "Docker engine isn't responding".into(),
+            title: format!("{provider} isn't responding"),
             body,
             hint,
             busy: false,
-            offer: if e.managed { Offer::Start } else { Offer::Nothing },
+            offer: if e.managed {
+                Offer::Start
+            } else {
+                Offer::Nothing
+            },
         },
         Stopped => Setup {
             icon: IconName::Power,
             tone: ColorName::Gray,
-            title: "Docker engine isn't running".into(),
+            title: format!("{provider} isn't running"),
             body,
             hint,
             busy: false,
@@ -165,7 +200,11 @@ pub struct EngineSetup {
     state: AppState,
     /// A start is in flight — hold the button until the poll reflects it.
     starting: bool,
+    /// The last action failed; keep the recovery detail beside the action
+    /// instead of sending it only to the log.
+    action_error: Option<String>,
     /// An install is downloading. macOS takes over once it opens.
+    #[cfg(target_os = "macos")]
     installing: bool,
     /// What went wrong with the last install attempt.
     install_error: Option<String>,
@@ -178,6 +217,8 @@ impl EngineSetup {
         Self {
             state,
             starting: false,
+            action_error: None,
+            #[cfg(target_os = "macos")]
             installing: false,
             install_error: None,
         }
@@ -215,12 +256,14 @@ impl EngineSetup {
         let state = self.state.clone();
         let this = cx.entity().downgrade();
         self.starting = true;
+        self.action_error = None;
         cx.notify();
         bridge::run(
             cx,
             async move { host.start_engine().await.map_err(|e| e.to_string()) },
             move |result, cx| {
-                if let Err(e) = result {
+                let action_error = result.err();
+                if let Some(e) = &action_error {
                     tracing::warn!("engine start failed: {e}");
                 }
                 // Re-enable the button; the poll will have moved the engine to
@@ -229,6 +272,7 @@ impl EngineSetup {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
                         this.starting = false;
+                        this.action_error = action_error;
                         cx.notify();
                     });
                 }
@@ -270,6 +314,10 @@ impl Render for EngineSetup {
 
         if let Some(hint) = setup.hint {
             card = card.child(Text::new(hint).size(Size::Xs).dimmed());
+        }
+        if let Some(error) = &self.action_error {
+            let red = guise::theme::theme(cx).color(ColorName::Red, 6);
+            card = card.child(Text::new(error.clone()).size(Size::Xs).color(red));
         }
         if can_install {
             #[cfg(target_os = "macos")]
@@ -370,8 +418,13 @@ mod tests {
 
     #[test]
     fn an_unmanaged_stopped_engine_is_not_ours_to_start() {
-        let s = describe(&status(EngineState::Stopped, "existing", "Docker Desktop is stopped."));
+        let s = describe(&status(
+            EngineState::Stopped,
+            "existing",
+            "Docker Desktop is stopped.",
+        ));
         assert!(!s.can_start());
+        assert_eq!(s.title, "Docker-compatible engine isn't running");
     }
 
     #[test]
@@ -387,8 +440,12 @@ mod tests {
     #[test]
     fn a_mac_without_apples_runtime_is_offered_the_install() {
         let s = describe(
-            &status(EngineState::NotInstalled, "apple", "Apple Containers is not installed yet.")
-                .managed(true),
+            &status(
+                EngineState::NotInstalled,
+                "apple",
+                "Apple Containers is not installed yet.",
+            )
+            .managed(true),
         );
         assert!(s.can_install());
         assert!(!s.can_start(), "there is nothing installed to start yet");
@@ -398,9 +455,23 @@ mod tests {
     #[test]
     fn a_missing_docker_is_not_mistaken_for_a_missing_apple_runtime() {
         // Only the apple provider offers an install; everything else says so.
-        let s = describe(&status(EngineState::NotInstalled, "existing", "No Docker engine."));
+        let s = describe(&status(
+            EngineState::NotInstalled,
+            "existing",
+            "No Docker engine.",
+        ));
         assert!(!s.can_install());
-        assert_eq!(s.title, "No Docker engine found");
+        assert_eq!(s.title, "No Docker-compatible engine found");
+    }
+
+    #[test]
+    fn a_selected_podman_engine_is_named_as_podman() {
+        let s = describe(&status(
+            EngineState::Unreachable,
+            "podman",
+            "Podman is not responding.",
+        ));
+        assert_eq!(s.title, "Podman isn't responding");
     }
 
     #[test]
@@ -408,13 +479,17 @@ mod tests {
         // What the enriched status looks like in a `cargo run` build with no
         // Docker: existing is down, and the managed engine's reason rides along
         // in `detail` so the user learns to run the signed app.
-        let e = EngineStatus::new(EngineState::NotInstalled, "existing", "No Docker engine is running.")
-            .detail(
-                "Hopper cannot run its own engine on this Mac. This build lacks the \
+        let e = EngineStatus::new(
+            EngineState::NotInstalled,
+            "existing",
+            "No Docker engine is running.",
+        )
+        .detail(
+            "Hopper cannot run its own engine on this Mac. This build lacks the \
                  virtualization entitlement — run the signed Hopper.app.",
-            );
+        );
         let s = describe(&e);
-        assert_eq!(s.title, "No Docker engine found");
+        assert_eq!(s.title, "No Docker-compatible engine found");
         assert!(!s.can_start(), "a dev build cannot start a VM");
         assert!(s.hint.unwrap().contains("signed Hopper.app"));
     }

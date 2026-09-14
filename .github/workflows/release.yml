@@ -59,11 +59,11 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Release build
-        run: cargo build --workspace --release
+        run: cargo build --workspace --release --locked
 
   create-release:
     runs-on: ubuntu-latest
@@ -93,12 +93,24 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
         with:
           ref: "v${{ needs.check-version.outputs.version }}"
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Require Apple signing and notarization credentials
+        run: |
+          set -euo pipefail
+          for required in APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD APPLE_SIGNING_IDENTITY APPLE_CERT_P12 APPLE_CERT_PASSWORD KEYCHAIN_PASSWORD; do
+            if [[ -z "${!required:-}" ]]; then
+              echo "Missing required release secret: ${required}" >&2
+              exit 1
+            fi
+          done
 
       - name: Fetch Compose + Docker CLI (host binaries)
         run: |
@@ -107,13 +119,17 @@ jobs:
           # The Docker CLI is Apache-2.0; shipping it is what lets a user
           # uninstall Docker Desktop and keep a working `docker` command.
           ver="27.5.1"
-          curl -fsSL "https://download.docker.com/mac/static/stable/aarch64/docker-${ver}.tgz" \
+          case "$(uname -m)" in
+            arm64 | aarch64) arch=aarch64 ;;
+            x86_64) arch=x86_64 ;;
+            *) echo "Unsupported macOS runner architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          curl -fsSL "https://download.docker.com/mac/static/stable/${arch}/docker-${ver}.tgz" \
             | tar -xz -C /tmp
           mkdir -p native/build
           cp /tmp/docker/docker native/build/docker
 
       - name: Import signing certificate
-        if: env.APPLE_SIGNING_IDENTITY != ''
         env:
           CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
           CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
@@ -126,7 +142,7 @@ jobs:
           echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
           security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
-          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | sed s/\"//g)
+          security list-keychains -d user -s "$KEYCHAIN"
           rm -f "$RUNNER_TEMP/cert.p12"
 
       # bundle.sh builds the release binary, assembles Hopper.app, stages the
@@ -139,7 +155,6 @@ jobs:
           scripts/dmg.sh
 
       - name: Notarize
-        if: env.APPLE_ID != ''
         run: |
           xcrun notarytool submit dist/Hopper.dmg \
             --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
@@ -166,9 +181,173 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  # Keep the portable client available on the platforms where Hopper attaches
+  # to Docker or Podman rather than supplying Apple's managed runtime.
+  build-macos-intel:
+    runs-on: macos-15-intel
+    needs: [check-version, verify, create-release]
+    if: needs.check-version.outputs.changed == 'true'
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "v${{ needs.check-version.outputs.version }}"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Require Apple signing and notarization credentials
+        run: |
+          set -euo pipefail
+          for required in APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD APPLE_SIGNING_IDENTITY APPLE_CERT_P12 APPLE_CERT_PASSWORD KEYCHAIN_PASSWORD; do
+            if [[ -z "${!required:-}" ]]; then
+              echo "Missing required release secret: ${required}" >&2
+              exit 1
+            fi
+          done
+      - name: Fetch Compose + Docker CLI (Intel)
+        run: |
+          set -euo pipefail
+          scripts/build/compose.sh
+          ver="27.5.1"
+          mkdir -p native/build
+          curl -fsSL "https://download.docker.com/mac/static/stable/x86_64/docker-${ver}.tgz" \
+            | tar -xz -C /tmp
+          cp /tmp/docker/docker native/build/docker
+      - name: Import signing certificate
+        env:
+          CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/build.keychain"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN"
+          rm -f "$RUNNER_TEMP/cert.p12"
+      - name: Bundle (.app) + package Intel DMG
+        env:
+          CODESIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          scripts/bundle.sh
+          scripts/dmg.sh
+          mv dist/Hopper.dmg "dist/Hopper-${VERSION}-intel.dmg"
+      - name: Notarize Intel DMG
+        run: |
+          xcrun notarytool submit "dist/Hopper-${VERSION}-intel.dmg" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "dist/Hopper-${VERSION}-intel.dmg"
+      - name: Verify Intel bundle
+        run: codesign --verify --strict --verbose=2 dist/Hopper.app
+      - name: Upload Intel DMG
+        run: gh release upload "v${VERSION}" "dist/Hopper-${VERSION}-intel.dmg" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  build-linux:
+    runs-on: ubuntu-latest
+    needs: [check-version, verify, create-release]
+    if: needs.check-version.outputs.changed == 'true'
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "v${{ needs.check-version.outputs.version }}"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Linux UI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig1-dev libegl1-mesa-dev libwayland-egl-backend-dev \
+            libwayland-dev libx11-dev libx11-xcb-dev libxcb1-dev \
+            libxcb-icccm4-dev libxcb-keysyms1-dev libxcb-randr0-dev \
+            libxcb-render0-dev libxcb-shm0-dev libxcb-shape0-dev \
+            libxcb-util-dev libxcb-xfixes0-dev libxcb-xkb-dev \
+            libxcb-xinerama0-dev libxi-dev libxkbcommon-dev libxkbcommon-x11-dev
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          compose_version="v2.32.4"
+          docker_version="27.5.1"
+          mkdir -p native/build
+          curl -fsSL "https://github.com/docker/compose/releases/download/${compose_version}/docker-compose-linux-x86_64" \
+            -o native/build/compose
+          chmod +x native/build/compose
+          curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${docker_version}.tgz" \
+            | tar -xz -C /tmp
+          cp /tmp/docker/docker native/build/docker
+          chmod +x native/build/docker
+          cargo build --release -p app -p mcp --locked
+          mkdir -p dist
+          cp target/release/hopperdev dist/hopper
+          mkdir -p dist/sidecars
+          cp native/build/compose native/build/docker target/release/hoppermcp dist/sidecars/
+          # -C moves only the members; the archive path is resolved from the
+          # checkout, so name it in dist/ where the upload looks for it.
+          tar -C dist -czf "$PWD/dist/Hopper-${VERSION}-linux-x86_64.tar.gz" hopper sidecars
+      - name: Upload Linux archive
+        run: gh release upload "v${VERSION}" "dist/Hopper-${VERSION}-linux-x86_64.tar.gz" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  build-windows:
+    runs-on: windows-latest
+    needs: [check-version, verify, create-release]
+    if: needs.check-version.outputs.changed == 'true'
+    env:
+      VERSION: ${{ needs.check-version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "v${{ needs.check-version.outputs.version }}"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Fetch bundled Compose and Docker CLI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $composeVersion = 'v2.32.4'
+          New-Item -ItemType Directory -Force native/build | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/docker/compose/releases/download/$composeVersion/docker-compose-windows-x86_64.exe" -OutFile native/build/compose.exe
+          $dockerVersion = '27.5.1'
+          $zip = Join-Path $env:RUNNER_TEMP 'docker.zip'
+          $extract = Join-Path $env:RUNNER_TEMP 'docker'
+          Invoke-WebRequest -Uri "https://download.docker.com/win/static/stable/x86_64/docker-$dockerVersion.zip" -OutFile $zip
+          Expand-Archive -Path $zip -DestinationPath $extract -Force
+          Copy-Item (Join-Path $extract 'docker/docker.exe') native/build/docker.exe
+      - name: Build and package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release -p app -p mcp --locked
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/hopperdev.exe dist/hopper.exe
+          New-Item -ItemType Directory -Force dist/sidecars | Out-Null
+          Copy-Item native/build/*.exe dist/sidecars/
+          Copy-Item target/release/hoppermcp.exe dist/sidecars/
+          Compress-Archive -Path dist/hopper.exe,dist/sidecars -DestinationPath "dist/Hopper-$env:VERSION-windows-x86_64.zip" -Force
+      - name: Upload Windows archive
+        shell: pwsh
+        run: gh release upload "v$env:VERSION" "dist/Hopper-$env:VERSION-windows-x86_64.zip" --clobber
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   publish:
     runs-on: ubuntu-latest
-    needs: [check-version, build]
+    needs: [check-version, build, build-macos-intel, build-linux, build-windows]
     if: needs.check-version.outputs.changed == 'true'
     steps:
       - uses: actions/checkout@v5
@@ -183,20 +362,28 @@ jobs:
     needs: [check-version, publish]
     if: needs.check-version.outputs.changed == 'true'
     steps:
-      - name: Download DMG and compute SHA
+      - name: Download DMGs and compute SHA
         id: shas
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
-          URL="https://github.com/wess/hopper/releases/download/v${VERSION}/Hopper.dmg"
-          for i in $(seq 1 30); do
-            if curl -fsSL -o /tmp/Hopper.dmg "${URL}" 2>/dev/null; then
-              break
+          for asset in Hopper.dmg "Hopper-${VERSION}-intel.dmg"; do
+            downloaded=false
+            for i in $(seq 1 30); do
+              if curl -fsSL -o "/tmp/${asset}" "https://github.com/wess/hopper/releases/download/v${VERSION}/${asset}" 2>/dev/null \
+                && test -s "/tmp/${asset}"; then
+                downloaded=true
+                break
+              fi
+              echo "Waiting for ${asset}... ($i/30)"
+              sleep 10
+            done
+            if [[ "$downloaded" != true ]]; then
+              echo "Could not download ${asset} after 30 attempts." >&2
+              exit 1
             fi
-            echo "Waiting for Hopper.dmg... ($i/30)"
-            sleep 10
           done
-          SHA=$(sha256sum /tmp/Hopper.dmg | cut -d' ' -f1)
-          echo "sha_darwin_arm64=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "sha_darwin_arm64=$(sha256sum /tmp/Hopper.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sha_darwin_x86_64=$(sha256sum "/tmp/Hopper-${VERSION}-intel.dmg" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew tap
         uses: actions/checkout@v5
@@ -212,14 +399,20 @@ jobs:
           cat > tap/Casks/hopper.rb << 'RUBY'
           cask "hopper" do
             version "VERSION_PLACEHOLDER"
-            sha256 "SHA_DARWIN_ARM64_PLACEHOLDER"
 
-            url "https://github.com/wess/hopper/releases/download/v#{version}/Hopper.dmg"
             name "Hopper"
             desc "Native container manager — Apple Containers on macOS, Docker or Podman on Linux"
             homepage "https://github.com/wess/hopper"
 
-            depends_on arch: :arm64
+            on_arm do
+              url "https://github.com/wess/hopper/releases/download/v#{version}/Hopper.dmg"
+              sha256 "SHA_DARWIN_ARM64_PLACEHOLDER"
+            end
+            on_intel do
+              url "https://github.com/wess/hopper/releases/download/v#{version}/Hopper-VERSION_PLACEHOLDER-intel.dmg"
+              sha256 "SHA_DARWIN_X86_64_PLACEHOLDER"
+            end
+
             # The app runs on Sonoma against an engine you already have; Apple
             # Containers itself needs macOS 26, which Hopper reports in-app
             # rather than blocking the install over.
@@ -236,6 +429,7 @@ jobs:
           RUBY
           sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" tap/Casks/hopper.rb
           sed -i "s/SHA_DARWIN_ARM64_PLACEHOLDER/${{ steps.shas.outputs.sha_darwin_arm64 }}/g" tap/Casks/hopper.rb
+          sed -i "s/SHA_DARWIN_X86_64_PLACEHOLDER/${{ steps.shas.outputs.sha_darwin_x86_64 }}/g" tap/Casks/hopper.rb
 
       - name: Push updated cask
         run: |

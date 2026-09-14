@@ -40,7 +40,11 @@ fn problem(request_id: &str, text: impl Into<String>) -> ComposeProgress {
     }
 }
 
-fn finished(request_id: &str, summary: impl Into<String>, error: Option<String>) -> ComposeProgress {
+fn finished(
+    request_id: &str,
+    summary: impl Into<String>,
+    error: Option<String>,
+) -> ComposeProgress {
     ComposeProgress {
         request_id: request_id.to_string(),
         line: summary.into(),
@@ -63,9 +67,38 @@ impl Host {
             report(problem(&id, warning));
         }
 
+        // Both snapshots are required before we mutate anything. Treating a
+        // failed list as empty could recreate existing containers or pull all
+        // images again, after already leaving networks and volumes behind.
+        let existing = match self.containers(true).await {
+            Ok(containers) => containers,
+            Err(e) => {
+                let summary = format!(
+                    "Stack {} was not started: existing containers could not be listed ({}).",
+                    id, e.message
+                );
+                report(finished(&id, summary.clone(), Some(summary.clone())));
+                return summary;
+            }
+        };
+        let mut present = match self.image_names().await {
+            Ok(images) => images,
+            Err(e) => {
+                let summary = format!(
+                    "Stack {} was not started: images could not be listed ({}).",
+                    id, e.message
+                );
+                report(finished(&id, summary.clone(), Some(summary.clone())));
+                return summary;
+            }
+        };
+
         for network in &plan.networks {
             if network.external {
-                report(line(&id, format!("Network {} is external, leaving it alone.", network.name)));
+                report(line(
+                    &id,
+                    format!("Network {} is external, leaving it alone.", network.name),
+                ));
                 continue;
             }
             match self
@@ -85,14 +118,20 @@ impl Host {
                 }
                 Err(e) => report(problem(
                     &id,
-                    format!("Network {} could not be created: {}", network.name, e.message),
+                    format!(
+                        "Network {} could not be created: {}",
+                        network.name, e.message
+                    ),
                 )),
             }
         }
 
         for volume in &plan.volumes {
             if volume.external {
-                report(line(&id, format!("Volume {} is external, leaving it alone.", volume.name)));
+                report(line(
+                    &id,
+                    format!("Volume {} is external, leaving it alone.", volume.name),
+                ));
                 continue;
             }
             match self.volume_create(&volume.name).await {
@@ -107,10 +146,8 @@ impl Host {
             }
         }
 
-        let existing = self.containers(true).await.unwrap_or_default();
         // Listed once, not once per service: a twelve-service stack would
         // otherwise pull the whole image list twelve times before starting.
-        let mut present = self.image_names().await;
         let mut started = 0usize;
         let mut failed = 0usize;
 
@@ -146,7 +183,11 @@ impl Host {
         present: &mut BTreeSet<String>,
         report: Report<'_>,
     ) -> Result<(), String> {
-        let name = service.run.name.clone().unwrap_or_else(|| service.service.clone());
+        let name = service
+            .run
+            .name
+            .clone()
+            .unwrap_or_else(|| service.service.clone());
 
         // A container that already matches the file is left exactly as it is.
         // Recreating unconditionally would throw away a database on every `up`
@@ -197,14 +238,17 @@ impl Host {
     }
 
     /// Every name the images on this engine answer to, tags and ids alike.
-    async fn image_names(&self) -> BTreeSet<String> {
-        let Ok(images) = self.images(false).await else {
-            return BTreeSet::new();
-        };
-        images
+    async fn image_names(&self) -> docker::Result<BTreeSet<String>> {
+        let images = self.images(false).await?;
+        Ok(images
             .iter()
-            .flat_map(|i| i.repo_tags.iter().cloned().chain(std::iter::once(i.id.clone())))
-            .collect()
+            .flat_map(|i| {
+                i.repo_tags
+                    .iter()
+                    .cloned()
+                    .chain(std::iter::once(i.id.clone()))
+            })
+            .collect())
     }
 
     /// Stop and remove a stack's containers, and the networks it owns.
@@ -244,7 +288,10 @@ impl Host {
                 }
                 Err(e) => {
                     failed += 1;
-                    report(problem(&id, format!("{} was not removed: {}", c.name, e.message)));
+                    report(problem(
+                        &id,
+                        format!("{} was not removed: {}", c.name, e.message),
+                    ));
                 }
             }
         }
@@ -252,28 +299,52 @@ impl Host {
         // Only networks this project created. An external one belongs to
         // someone else, and Hopper never made it.
         let scoped = format!("{project}_");
-        if let Ok(networks) = self.networks().await {
-            for net in networks.iter().filter(|n| n.name.starts_with(&scoped)) {
-                match self.network_remove(&net.id).await {
-                    Ok(()) => report(line(&id, format!("Network {} removed.", net.name))),
-                    Err(e) => report(problem(
-                        &id,
-                        format!("Network {} was not removed: {}", net.name, e.message),
-                    )),
+        match self.networks().await {
+            Ok(networks) => {
+                for net in networks.iter().filter(|n| n.name.starts_with(&scoped)) {
+                    match self.network_remove(&net.id).await {
+                        Ok(()) => report(line(&id, format!("Network {} removed.", net.name))),
+                        Err(e) => {
+                            failed += 1;
+                            report(problem(
+                                &id,
+                                format!("Network {} was not removed: {}", net.name, e.message),
+                            ));
+                        }
+                    }
                 }
+            }
+            Err(e) => {
+                failed += 1;
+                report(problem(
+                    &id,
+                    format!("Project networks could not be listed: {}", e.message),
+                ));
             }
         }
 
         if volumes {
-            if let Ok(list) = self.volumes().await {
-                for v in list.iter().filter(|v| v.name.starts_with(&scoped)) {
-                    match self.volume_remove(&v.name, true).await {
-                        Ok(()) => report(line(&id, format!("Volume {} removed.", v.name))),
-                        Err(e) => report(problem(
-                            &id,
-                            format!("Volume {} was not removed: {}", v.name, e.message),
-                        )),
+            match self.volumes().await {
+                Ok(list) => {
+                    for v in list.iter().filter(|v| v.name.starts_with(&scoped)) {
+                        match self.volume_remove(&v.name, true).await {
+                            Ok(()) => report(line(&id, format!("Volume {} removed.", v.name))),
+                            Err(e) => {
+                                failed += 1;
+                                report(problem(
+                                    &id,
+                                    format!("Volume {} was not removed: {}", v.name, e.message),
+                                ));
+                            }
+                        }
                     }
+                }
+                Err(e) => {
+                    failed += 1;
+                    report(problem(
+                        &id,
+                        format!("Project volumes could not be listed: {}", e.message),
+                    ));
                 }
             }
         }
@@ -281,9 +352,16 @@ impl Host {
         let summary = if failed > 0 {
             format!("Removed {removed} of {}.", members.len())
         } else {
-            format!("Removed {removed} {}.", plural(removed, "container", "containers"))
+            format!(
+                "Removed {removed} {}.",
+                plural(removed, "container", "containers")
+            )
         };
-        report(finished(&id, summary.clone(), (failed > 0).then(|| summary.clone())));
+        report(finished(
+            &id,
+            summary.clone(),
+            (failed > 0).then(|| summary.clone()),
+        ));
         summary
     }
 }
@@ -359,7 +437,10 @@ mod tests {
     fn failures_and_skips_are_never_hidden_behind_the_successes() {
         assert_eq!(summarize(2, 1, 0), "Started 2 services, 1 failed.");
         assert_eq!(summarize(2, 0, 1), "Started 2 services, 1 skipped.");
-        assert_eq!(summarize(2, 1, 3), "Started 2 services, 1 failed, 3 skipped.");
+        assert_eq!(
+            summarize(2, 1, 3),
+            "Started 2 services, 1 failed, 3 skipped."
+        );
     }
 
     #[test]

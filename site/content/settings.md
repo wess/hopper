@@ -14,8 +14,9 @@ below instead.
 
 ## Which engine
 
-**Automatic** is the default: Apple Containers on a Mac, Docker or Podman on
-Linux, and whatever is already running as the fallback. When nothing is running,
+**Automatic** is the default: Apple Containers on a supported Apple silicon Mac,
+Docker or Podman on Linux or Windows, and whatever is already running as the
+fallback. When nothing is running,
 automatic lands on the engine Hopper can supply rather than reporting a missing
 Docker — Docker is not a requirement on macOS.
 
