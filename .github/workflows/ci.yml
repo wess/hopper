@@ -57,7 +57,9 @@ jobs:
             libxkbcommon-x11-dev
 
       - name: Test workspace
-        run: cargo test --workspace --locked
+        # Every crate runs even after one fails, so a platform-specific break
+        # reports all of its failures in one run instead of one crate at a time.
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: Lint workspace
         run: cargo clippy --workspace --all-targets --locked -- -D warnings

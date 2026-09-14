@@ -1029,7 +1029,12 @@ mod tests {
         // Running Hopper from somewhere else must not change what is mounted.
         let p = plan("services:\n  web:\n    image: nginx\n    volumes:\n      - ./src:/app\n");
         let mount = &service(&p, "web").run.volumes[0];
-        assert_eq!(mount.host, "/srv/shop/src");
+        // Compared as paths: Windows renders the joined host path with `\`,
+        // which is what a Windows daemon expects.
+        assert_eq!(
+            std::path::Path::new(&mount.host),
+            std::path::Path::new("/srv/shop/src")
+        );
         assert_eq!(mount.container, "/app");
         assert!(!mount.ro);
     }
@@ -1038,7 +1043,10 @@ mod tests {
     fn a_parent_relative_mount_is_collapsed_rather_than_left_literal() {
         let p =
             plan("services:\n  web:\n    image: nginx\n    volumes:\n      - ../shared:/data\n");
-        assert_eq!(service(&p, "web").run.volumes[0].host, "/srv/shared");
+        assert_eq!(
+            std::path::Path::new(&service(&p, "web").run.volumes[0].host),
+            std::path::Path::new("/srv/shared")
+        );
     }
 
     #[test]
