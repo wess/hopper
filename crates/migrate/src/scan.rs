@@ -236,6 +236,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(not(windows))]
     fn candidates_cover_the_engines_people_actually_run() {
         let paths: Vec<String> = candidate_endpoints("/Users/x")
             .iter()
@@ -352,7 +353,10 @@ mod tests {
         assert!(!message.contains("nothing to migrate"));
     }
 
+    // Unix only: Windows candidates are named pipes a Unix destination cannot
+    // filter out, and the Windows CI image runs Docker on `docker_engine`.
     #[tokio::test]
+    #[cfg(not(windows))]
     async fn a_scan_finds_no_source_when_every_candidate_is_the_destination_or_absent() {
         // Pin the destination to the one socket that might really exist on the
         // test machine, so it is filtered as the same engine; the home-based

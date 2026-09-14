@@ -25,19 +25,38 @@ fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
         MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
+    const ERROR_ACCESS_DENIED: i32 = 5;
+    const ERROR_SHARING_VIOLATION: i32 = 32;
+
     let from: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();
     let to: Vec<u16> = to.as_os_str().encode_wide().chain(Some(0)).collect();
-    let replaced = unsafe {
-        MoveFileExW(
-            from.as_ptr(),
-            to.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
-    };
-    if replaced == 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
+
+    // Windows refuses a replace while another writer's replace of the same
+    // document is in flight (access denied), or while something holds it open
+    // (sharing violation). Both clear in milliseconds, so wait them out rather
+    // than report a failed save for two settings writes that overlapped.
+    let mut attempt: u64 = 0;
+    loop {
+        let replaced = unsafe {
+            MoveFileExW(
+                from.as_ptr(),
+                to.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if replaced != 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        let transient = matches!(
+            error.raw_os_error(),
+            Some(ERROR_ACCESS_DENIED | ERROR_SHARING_VIOLATION)
+        );
+        if !transient || attempt >= 50 {
+            return Err(error);
+        }
+        attempt += 1;
+        std::thread::sleep(std::time::Duration::from_millis(2 * attempt.min(10)));
     }
 }
 
