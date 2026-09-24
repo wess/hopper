@@ -1,7 +1,7 @@
 // Hopper site — progressive enhancement only. Everything degrades to a static,
 // readable page if JS is off.
 
-// ── inline icons (lucide-flavored, matching the app's icon set) ──────────────
+// inline icons (lucide-flavored, matching the app's icon set)
 const ICONS = {
   grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   box: '<path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/>',
@@ -21,7 +21,7 @@ for (const el of document.querySelectorAll("[data-ic]")) {
   el.innerHTML = `<svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block">${paths}</svg>`;
 }
 
-// ── theme toggle (persisted, defaults to system) ─────────────────────────────
+// theme toggle (persisted, defaults to system)
 const root = document.documentElement;
 const stored = localStorage.getItem("hopper-theme");
 if (stored) {
@@ -35,7 +35,7 @@ document.getElementById("themeToggle")?.addEventListener("click", () => {
   localStorage.setItem("hopper-theme", next);
 });
 
-// ── nav: scrolled state + mobile menu ────────────────────────────────────────
+// nav: scrolled state + mobile menu
 const nav = document.getElementById("nav");
 const onScroll = () => nav.classList.toggle("scrolled", window.scrollY > 12);
 onScroll();
@@ -53,7 +53,7 @@ for (const a of document.querySelectorAll(".nav-links a")) {
   });
 }
 
-// ── scroll reveals ───────────────────────────────────────────────────────────
+// scroll reveals
 const io = new IntersectionObserver(
   (entries) => {
     for (const e of entries) {
@@ -67,7 +67,7 @@ const io = new IntersectionObserver(
 );
 for (const el of document.querySelectorAll(".reveal")) io.observe(el);
 
-// ── card spotlight follows the cursor ────────────────────────────────────────
+// card spotlight follows the cursor
 for (const card of document.querySelectorAll(".card")) {
   card.addEventListener("pointermove", (e) => {
     const r = card.getBoundingClientRect();
@@ -76,7 +76,7 @@ for (const card of document.querySelectorAll(".card")) {
   });
 }
 
-// ── copy-to-clipboard on the brew pills ──────────────────────────────────────
+// copy-to-clipboard on the brew pills
 for (const pill of document.querySelectorAll(".brew[data-copy]")) {
   pill.addEventListener("click", async () => {
     try {
@@ -89,7 +89,7 @@ for (const pill of document.querySelectorAll(".brew[data-copy]")) {
   });
 }
 
-// ── streaming "docker compose up" terminal ───────────────────────────────────
+// streaming "docker compose up" terminal
 const term = document.getElementById("termBody");
 if (term) {
   const LINES = [
@@ -141,6 +141,6 @@ if (term) {
   tio.observe(document.getElementById("terminal"));
 }
 
-// ── footer year ──────────────────────────────────────────────────────────────
+// footer year
 const yearEl = document.getElementById("year");
 if (yearEl) yearEl.textContent = `© ${new Date().getFullYear()}`;

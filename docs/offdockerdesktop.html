@@ -102,8 +102,10 @@ look right.</p>
 <h2>6. Then, and only then</h2>
 <pre><code class="language-sh">/Applications/Docker.app/Contents/MacOS/uninstall
 </code></pre>
-<p>Docker Desktop's uninstaller takes the <code>docker</code> CLI with it. Hopper bundles its
-own — <strong>Settings → Docker CLI</strong> puts it on your <code>PATH</code>.</p>
+<p>Docker Desktop's uninstaller takes its <code>docker</code> CLI with it. On Apple's runtime,
+use <code>container</code> from the terminal. Hopper bundles a separate Docker CLI for
+Docker-compatible engines, but it does not put that binary on your <code>PATH</code> or
+make Apple's runtime answer <code>docker</code> commands.</p>
 <hr />
 <h2>Before you commit</h2>
 <p>Some things do not survive the move, and it is better to know now:</p>
@@ -121,8 +123,8 @@ usual example. Each container is its own VM, so there is no host kernel to
 reach into.</li>
 <li><strong>x86-only images</strong> need an explicit <code>--platform linux/amd64</code>.</li>
 </ul>
-<p>None of these are Hopper limitations; they are the shape of Apple's runtime.
-Hopper's job is to tell you about them before you find out the hard way.</p>
+<p>Some are missing Hopper features; others come from Apple's runtime. Check the
+workloads you depend on before deleting Docker Desktop data.</p>
       <nav class="pager">
         <a class="prev" href="firstcontainer.html"><span>Previous</span>Run your first container</a>
         <a class="next" href="composestack.html"><span>Next</span>Run a Compose stack</a>

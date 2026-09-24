@@ -24,6 +24,11 @@ bin_name="hopper"
 bundle_id="io.wess.hopper"
 identity="${CODESIGN_IDENTITY:--}"
 
+[ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || {
+  echo "error: Hopper releases require an Apple silicon Mac" >&2
+  exit 1
+}
+
 version="$(sed -n 's/^version = "\([0-9][^"]*\)".*/\1/p' Cargo.toml | head -1)"
 [ -n "$version" ] || { echo "error: could not read version from Cargo.toml" >&2; exit 1; }
 echo "[bundle] $app_name $version"
@@ -46,9 +51,8 @@ if [ -f native/build/compose ]; then
   cp native/build/compose "$contents/MacOS/sidecars/compose"
 fi
 
-# The Docker CLI itself. Docker Desktop's uninstaller takes `docker` with it,
-# so shipping one is what makes Hopper an actual replacement rather than a
-# client that depends on the thing it replaces.
+# The Docker CLI is available for optional Docker-compatible engines. Apple's
+# runtime has no Docker socket for this CLI to target.
 if [ -f native/build/docker ]; then
   mkdir -p "$contents/MacOS/sidecars"
   cp native/build/docker "$contents/MacOS/sidecars/docker"
@@ -60,14 +64,9 @@ mkdir -p "$contents/MacOS/sidecars"
 cp target/release/hoppermcp "$contents/MacOS/sidecars/hoppermcp"
 
 # Never let a stale sidecar from another checkout or host architecture make it
-# into a signed app. `macos-14` is arm64 today, but this also keeps an eventual
-# Intel build honest; universal binaries pass when they contain the host arch.
+# into a signed app. Universal binaries pass when they contain arm64.
 if [ -d "$contents/MacOS/sidecars" ]; then
-  case "$(uname -m)" in
-    arm64 | aarch64) required_arch=arm64 ;;
-    x86_64) required_arch=x86_64 ;;
-    *) echo "error: unsupported macOS architecture: $(uname -m)" >&2; exit 1 ;;
-  esac
+  required_arch=arm64
   for sidecar in "$contents/MacOS/sidecars/"*; do
     [ -e "$sidecar" ] || continue
     [ -x "$sidecar" ] || {
@@ -104,7 +103,7 @@ cat > "$contents/Info.plist" << PLIST
 	<key>CFBundleVersion</key>
 	<string>$version</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>13.0</string>
+	<string>26.0</string>
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.developer-tools</string>
 	<key>NSHighResolutionCapable</key>

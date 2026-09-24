@@ -1,8 +1,7 @@
 //! Locating and running the Compose binary.
 //!
-//! Hopper bundles a standalone Compose v2 so stacks work with no user-installed
-//! `docker` CLI — that matters the moment someone actually uninstalls Docker
-//! Desktop and its CLI goes with it.
+//! Hopper bundles Compose for optional Docker-compatible engines. Apple's
+//! runtime has no Docker socket, so its stacks use the host's own planner.
 
 use crate::client::Client;
 use crate::error::{DockerError, Result};

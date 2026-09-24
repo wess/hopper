@@ -61,7 +61,6 @@ impl Host {
         let source = docker::client::Client::new(source_endpoint.into());
         source.set_timeout(Duration::from_secs(10));
 
-        // (images, networks, containers)
         let (images, networks, containers) = match self.backend() {
             #[cfg(target_os = "macos")]
             Backend::Apple(cli) => {

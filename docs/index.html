@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hopper — Docker, without the Desktop</title>
-  <meta name="description" content="A native Rust desktop app for containers. On macOS it runs them on Apple Containers, so Docker Desktop is not required — and imports your images across when you switch. On Linux it drives the Docker or Podman you already have.">
+  <meta name="description" content="A native Rust desktop app for Apple silicon Macs running macOS 26 or later. Run containers on Apple's runtime and import images from Docker Desktop.">
   <meta name="theme-color" content="#0c1018">
   <meta property="og:title" content="Hopper — Docker, without the Desktop">
   <meta property="og:description" content="Containers on macOS without Docker Desktop. Native Rust on Apple's container runtime, with an import that brings your Docker images across.">
@@ -40,9 +40,8 @@
       <p class="eyebrow" data-reveal><span class="dot"></span>Native Rust · gpui + guise · Apple Containers</p>
       <h1 class="title" data-reveal data-delay="1">Docker,<br>without the <em>Desktop.</em></h1>
       <p class="lede" data-reveal data-delay="2">
-        On macOS, Hopper runs your containers on <strong>Apple Containers</strong> — the
-        runtime Apple ships with macOS 26, where every container is its own lightweight VM.
-        On Linux it uses the <strong>Docker or Podman</strong> you already have. Either way,
+        On Apple silicon Macs running macOS 26 or later, Hopper runs your containers on
+        <strong>Apple Containers</strong>, where every container is its own lightweight VM.
         <strong>Import from Docker</strong> brings your images across first.
       </p>
       <div class="actions" data-reveal data-delay="3">
@@ -62,7 +61,7 @@
       <span><b>One binary.</b> No Electron, no browser.</span>
       <span><b>Apple's runtime.</b> No Docker Desktop.</span>
       <span><b>Zero telemetry.</b> Local by design.</span>
-      <span><b>Docker or Podman</b> on Linux.</span>
+      <span><b>Apple silicon.</b> macOS 26 or later.</span>
     </div>
 
     <!-- workflow / features -->
@@ -70,8 +69,9 @@
       <div class="section-head" data-reveal>
         <p class="kicker">The daily loop</p>
         <h2>Everything you reach for, <em>rendered natively.</em></h2>
-        <p>Containers, images, volumes, networks, and compose stacks — with a detail pane that
-          streams logs and stats, browses the filesystem, and opens a real shell.</p>
+        <p>Containers, images, volumes, networks, and compose stacks. Apple Containers supports
+          logs and inspect in the detail pane; Docker-compatible engines also offer stats, files,
+          and an interactive shell.</p>
       </div>
 
       <div style="margin-top: clamp(3rem, 7vh, 5rem)">
@@ -121,24 +121,20 @@
         </div>
 
         <ol class="pipeline" data-reveal>
-          <li><span class="n"></span><div><h4>Installs it for you</h4><p>If Apple's <code>container</code> is missing, Hopper fetches the package Apple signed and hands it to the system installer. Hopper never elevates.</p></div></li>
-          <li><span class="n"></span><div><h4>A VM per container</h4><p>Stronger isolation than a shared kernel, and on macOS 26 containers reach each other by name across isolated networks.</p></div></li>
-          <li><span class="n"></span><div><h4>Imports from Docker</h4><p>Copies your images, networks and containers out of Docker Desktop, Colima or Rancher Desktop. Nothing is removed from the source.</p></div></li>
-          <li><span class="n"></span><div><h4>Says what it cannot do</h4><p>Apple's runtime has no pause, rename, restart policy or healthchecks. Hopper hides those rather than offering a button that fails.</p></div></li>
+          <li><span class="n"></span><div><h3>Installs it for you</h3><p>If Apple's <code>container</code> is missing, Hopper fetches the package Apple signed and hands it to the system installer. Hopper never elevates.</p></div></li>
+          <li><span class="n"></span><div><h3>A VM per container</h3><p>Stronger isolation than a shared kernel, and on macOS 26 containers reach each other by name across isolated networks.</p></div></li>
+          <li><span class="n"></span><div><h3>Imports from Docker</h3><p>Copies your images, networks and containers out of Docker Desktop, Colima or Rancher Desktop. Nothing is removed from the source.</p></div></li>
+          <li><span class="n"></span><div><h3>Says what it cannot do</h3><p>Apple's runtime has no pause, rename, restart policy or healthchecks. Hopper hides those rather than offering a button that fails.</p></div></li>
         </ol>
 
         <div class="termcard" data-reveal data-delay="1">
-          <div class="bar"><i></i><i></i><i></i><b>zsh — no Docker Desktop installed</b></div>
-<pre><span class="c"># Hopper is serving its own engine</span>
-<span class="p">$</span> <span class="o">docker version --format '{{.Server.Version}} ({{.Server.Os}}/{{.Server.Arch}})'</span>
-27.5.1 (linux/arm64)
+          <div class="bar"><i></i><i></i><i></i><b>zsh — Apple Containers</b></div>
+<pre><span class="c"># Apple's runtime has its own CLI, not a Docker Engine API socket</span>
+<span class="p">$</span> <span class="o">container --version</span>
+<span class="g">container CLI version 1.2.2</span>
 
-<span class="p">$</span> <span class="o">docker run --rm -p 18080:80 nginx:alpine &amp;</span>
-<span class="p">$</span> <span class="o">curl -s localhost:18080 | head -1</span>
-<span class="g">HTTP/1.1 200 OK</span>
-
-<span class="p">$</span> <span class="o">docker run --rm -v /opt/data:/data alpine ls /data</span>
-<span class="g">your-actual-files.txt</span></pre>
+<span class="p">$</span> <span class="o">container system status --format json</span>
+<span class="g">{"status":"running", ...}</span></pre>
         </div>
       </div>
     </section>
@@ -150,11 +146,11 @@
         <h2>A real replacement — <em>not a viewer.</em></h2>
       </div>
       <div class="caps" data-reveal data-delay="1">
-        <div><h4>Build with BuildKit</h4><p>Dockerfiles with <code>--mount=cache</code>, secrets, and <code>--platform</code>, plus honest <code>.dockerignore</code> negations.</p></div>
-        <div><h4>Registries, signed in</h4><p>Push and pull with keychain-stored credentials; authenticated pulls lift Hub rate limits.</p></div>
-        <div><h4>Compose stacks</h4><p>Reconstructed from labels — stacks appear with no CLI, and start and stop label-driven.</p></div>
-        <div><h4>Migrate in</h4><p>Scan Docker Desktop, Colima, or Rancher and copy images, volumes, and networks over.</p></div>
-        <div><h4>MCP server</h4><p>A stdio Model Context Protocol server exposes Docker tools to AI clients.</p></div>
+        <div><h3>Build with BuildKit</h3><p>Dockerfiles with <code>--mount=cache</code>, secrets, and <code>--platform</code>, plus honest <code>.dockerignore</code> negations.</p></div>
+        <div><h3>Registries, signed in</h3><p>Push and pull with keychain-stored credentials; authenticated pulls lift Hub rate limits.</p></div>
+        <div><h3>Compose stacks</h3><p>Reconstructed from labels — stacks appear with no CLI, and start and stop label-driven.</p></div>
+        <div><h3>Migrate in</h3><p>Scan Docker Desktop, Colima, or Rancher and copy images, volumes, and networks over.</p></div>
+        <div><h3>MCP server</h3><p>A stdio Model Context Protocol server exposes Docker tools to AI clients.</p></div>
       </div>
     </section>
 

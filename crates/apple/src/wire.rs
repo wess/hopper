@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use model::{Container, ContainerState, Health, Image, Mount, Network, Port, Volume};
 use serde::Deserialize;
 
-// --- containers ----------------------------------------------------------
+// containers
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -145,7 +145,7 @@ impl Filesystem {
     }
 }
 
-// --- images / volumes / networks -----------------------------------------
+// images / volumes / networks
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -232,7 +232,7 @@ pub struct NetworkConfiguration {
     pub mode: Option<String>,
 }
 
-// --- conversion ----------------------------------------------------------
+// conversion
 
 /// ISO8601 to unix seconds. Apple renders dates through `.iso8601`, but a
 /// missing or odd value must not cost us the row.
@@ -375,11 +375,13 @@ impl ImageResource {
             .display_reference
             .clone()
             .unwrap_or_else(|| short_reference(&cfg.name));
-        let size = if cfg.descriptor.size > 0 {
-            cfg.descriptor.size
-        } else {
-            self.variants.iter().map(|v| v.size).max().unwrap_or(0)
-        };
+        let size = self
+            .variants
+            .iter()
+            .map(|v| v.size)
+            .max()
+            .filter(|size| *size > 0)
+            .unwrap_or(cfg.descriptor.size);
         let id = if self.id.is_empty() {
             cfg.descriptor.digest.clone()
         } else {

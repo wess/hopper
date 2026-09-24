@@ -182,6 +182,7 @@ impl Containers {
 
         div()
             .flex()
+            .flex_none()
             .items_center()
             .justify_between()
             .gap_3()
@@ -343,11 +344,12 @@ impl Render for Containers {
                 .on_click(move |_, _, cx| all_signal.update(cx, |v| *v = !*v)),
             );
 
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .child(header)
-            .child(div().flex_1().overflow_hidden().child(self.body(cx)))
+        div().flex().flex_col().size_full().child(header).child(
+            div()
+                .id("containers-list")
+                .flex_1()
+                .overflow_scroll()
+                .child(self.body(cx)),
+        )
     }
 }

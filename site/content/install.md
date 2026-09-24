@@ -13,8 +13,7 @@ brew install --cask wess/packages/hopper
 
 ## Download
 
-Grab the matching macOS asset from the [latest release](https://github.com/wess/hopper/releases/latest):
-`Hopper.dmg` for Apple silicon, or `Hopper-VERSION-intel.dmg` for Intel. Open it
+Grab `Hopper.dmg` from the [latest release](https://github.com/wess/hopper/releases/latest). Open it
 and drag **Hopper.app** to Applications.
 
 The build is signed with a Developer ID and notarized, so Gatekeeper opens it
@@ -30,17 +29,12 @@ spctl -a -t exec -vv /Applications/Hopper.app
 
 | | |
 |---|---|
-| **Architecture** | Apple Silicon (arm64) or Intel (x86_64) |
-| **macOS** | Sonoma or later to run the app |
-| **For Apple Containers** | Apple silicon Mac, macOS 26 or later |
+| **Architecture** | Apple silicon (arm64) |
+| **macOS** | 26 or later |
 
-The split matters. Hopper itself runs on Sonoma quite happily as a client for an
-engine you already have — Docker Desktop, Podman, Colima, Rancher Desktop, or a remote
-daemon. What needs macOS 26 is *Apple's* container runtime, because the vmnet
-APIs that give containers their own addresses only exist there.
-
-Hopper does not block the install over that. It tells you in-app which engines
-this machine can actually run.
+Apple's container runtime needs macOS 26 for the vmnet APIs that give containers
+their own addresses. Hopper can also attach to Docker Desktop, Podman, Colima,
+Rancher Desktop, or a remote daemon from a supported Mac.
 
 ## Hopper asks for very little
 

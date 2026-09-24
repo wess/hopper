@@ -82,7 +82,7 @@ em { font-style: normal; color: var(--accent); }
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* ───────────────────────── nav ───────────────────────── */
+/* nav */
 .nav {
   position: fixed;
   top: 0;
@@ -155,7 +155,7 @@ em { font-style: normal; color: var(--accent); }
 .hamburger[aria-expanded="true"] span:first-child { transform: translateY(3.5px) rotate(45deg); }
 .hamburger[aria-expanded="true"] span:last-child { transform: translateY(-3.5px) rotate(-45deg); }
 
-/* ───────────────────────── hero ───────────────────────── */
+/* hero */
 .hero { position: relative; padding: 150px clamp(18px, 4vw, 40px) 60px; overflow: hidden; }
 .hero-inner { position: relative; z-index: 3; max-width: 880px; margin: 0 auto; text-align: center; }
 
@@ -209,7 +209,7 @@ em { font-style: normal; color: var(--accent); }
 
 .hero-foot { margin-top: 26px; font-size: 13.5px; color: var(--fg-faint); }
 
-/* ─────────────────── the app mock ─────────────────── */
+/* the app mock */
 .app { position: relative; z-index: 3; max-width: 1000px; margin: 70px auto 0; perspective: 1800px; }
 .app-window {
   position: relative;
@@ -291,7 +291,7 @@ em { font-style: normal; color: var(--accent); }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
-/* ─────────────────── engines strip ─────────────────── */
+/* engines strip */
 .engines { max-width: var(--maxw); margin: 30px auto 0; padding: 40px clamp(18px, 4vw, 40px); text-align: center; }
 .engines-label { font-size: 13px; color: var(--fg-faint); font-family: var(--font-mono); letter-spacing: 0.04em; margin-bottom: 22px; }
 .engines-list { list-style: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 34px; }
@@ -302,7 +302,7 @@ em { font-style: normal; color: var(--accent); }
 .engines-list li:hover { color: var(--fg); }
 .engines-list li span { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); font-weight: 500; border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent); border-radius: 5px; padding: 1px 5px; align-self: center; }
 
-/* ─────────────────── sections ─────────────────── */
+/* sections */
 .section { max-width: var(--maxw); margin: 0 auto; padding: clamp(70px, 11vw, 130px) clamp(18px, 4vw, 40px); }
 .section-head { margin-bottom: 54px; max-width: 640px; }
 .section-head.center { margin-left: auto; margin-right: auto; text-align: center; }
@@ -331,7 +331,7 @@ em { font-style: normal; color: var(--accent); }
 .card p { color: var(--fg-muted); font-size: 0.97rem; }
 .card code { font-size: 0.86em; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 1px 6px; border-radius: 5px; }
 
-/* ─────────────────── compose spotlight ─────────────────── */
+/* compose spotlight */
 .spotlight { padding-top: clamp(40px, 7vw, 80px); }
 .spotlight-grid { display: grid; grid-template-columns: 1fr 1.05fr; gap: 56px; align-items: center; }
 .spotlight-lead { margin-top: 18px; color: var(--fg-muted); font-size: 1.08rem; }
@@ -362,7 +362,7 @@ em { font-style: normal; color: var(--accent); }
 .terminal-body .cursor { display: inline-block; width: 8px; height: 15px; background: var(--accent); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* ─────────────────── mcp / code ─────────────────── */
+/* mcp / code */
 .code { max-width: 680px; margin: 0 auto; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; box-shadow: 0 30px 70px -40px rgba(0, 0, 0, 0.7); }
 .code-bar { padding: 11px 16px; border-bottom: 1px solid var(--line); }
 .code-file { font-family: var(--font-mono); font-size: 12px; color: var(--fg-faint); }
@@ -371,14 +371,14 @@ em { font-style: normal; color: var(--accent); }
 .c-str { color: var(--green); }
 .c-pun { color: var(--fg-faint); }
 
-/* ─────────────────── under the hood ─────────────────── */
+/* under the hood */
 .under .section-head { max-width: 560px; }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .stat { border: 1px solid var(--line); border-radius: var(--radius); padding: 30px 24px; background: var(--panel); }
 .stat-n { display: block; font-family: var(--font-display); font-weight: 800; font-size: clamp(2rem, 4vw, 2.9rem); letter-spacing: -0.03em; color: var(--accent); }
 .stat-l { display: block; margin-top: 8px; font-size: 13.5px; color: var(--fg-muted); }
 
-/* ─────────────────── download ─────────────────── */
+/* download */
 .download { padding-bottom: clamp(80px, 12vw, 150px); }
 .download-card { position: relative; max-width: 880px; margin: 0 auto; text-align: center; border: 1px solid var(--line); border-radius: 26px; padding: clamp(44px, 7vw, 80px) clamp(24px, 5vw, 70px); background: linear-gradient(180deg, var(--panel), var(--bg-soft)); overflow: hidden; }
 .download-glow { position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse 60% 100% at 50% 0%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 60%); }
@@ -387,7 +387,7 @@ em { font-style: normal; color: var(--accent); }
 .download-card .hero-cta { position: relative; }
 
 /* platform picker */
-.dl-grid { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 26px; }
+.dl-grid { position: relative; display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 26px; }
 .dl {
   display: flex; flex-direction: column; align-items: center; gap: 4px;
   padding: 24px 18px; border: 1px solid var(--line); border-radius: 14px;
@@ -403,7 +403,7 @@ em { font-style: normal; color: var(--accent); }
 .dl-note { font-size: 12.5px; color: var(--fg-faint); max-width: 460px; }
 .dl-note code { font-family: var(--font-mono); font-size: 0.92em; color: var(--accent); }
 
-/* ─────────────────── footer ─────────────────── */
+/* footer */
 .footer { border-top: 1px solid var(--line); padding: 44px clamp(18px, 4vw, 40px); }
 .footer-inner { max-width: var(--maxw); margin: 0 auto; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
 .footer-links { display: flex; gap: 22px; }
@@ -411,7 +411,7 @@ em { font-style: normal; color: var(--accent); }
 .footer-links a:hover { color: var(--fg); }
 .footer-fine { margin-left: auto; font-size: 13px; color: var(--fg-faint); font-family: var(--font-mono); }
 
-/* ─────────────────── reveal animation ─────────────────── */
+/* reveal animation */
 .reveal { opacity: 0; transform: translateY(26px); transition: opacity 0.7s var(--ease), transform 0.7s var(--ease); }
 .reveal.in { opacity: 1; transform: none; }
 .hero .reveal:nth-child(1) { transition-delay: 0.02s; }
@@ -434,7 +434,7 @@ em { font-style: normal; color: var(--accent); }
   .app-window { opacity: 1; transform: none; }
 }
 
-/* ─────────────────── responsive ─────────────────── */
+/* responsive */
 @media (max-width: 920px) {
   .bento { grid-template-columns: repeat(2, 1fr); }
   .card.span-2 { grid-column: span 2; }

@@ -76,8 +76,10 @@ look right.
 /Applications/Docker.app/Contents/MacOS/uninstall
 ```
 
-Docker Desktop's uninstaller takes the `docker` CLI with it. Hopper bundles its
-own — **Settings → Docker CLI** puts it on your `PATH`.
+Docker Desktop's uninstaller takes its `docker` CLI with it. On Apple's runtime,
+use `container` from the terminal. Hopper bundles a separate Docker CLI for
+Docker-compatible engines, but it does not put that binary on your `PATH` or
+make Apple's runtime answer `docker` commands.
 
 ---
 
@@ -98,5 +100,5 @@ Some things do not survive the move, and it is better to know now:
   reach into.
 - **x86-only images** need an explicit `--platform linux/amd64`.
 
-None of these are Hopper limitations; they are the shape of Apple's runtime.
-Hopper's job is to tell you about them before you find out the hard way.
+Some are missing Hopper features; others come from Apple's runtime. Check the
+workloads you depend on before deleting Docker Desktop data.

@@ -127,6 +127,7 @@ impl Networks {
 
         div()
             .flex()
+            .flex_none()
             .items_center()
             .justify_between()
             .gap_3()
@@ -230,7 +231,13 @@ impl Render for Networks {
                             ),
                     ),
             )
-            .child(div().flex_1().overflow_hidden().child(body));
+            .child(
+                div()
+                    .id("networks-list")
+                    .flex_1()
+                    .overflow_scroll()
+                    .child(body),
+            );
 
         if let Some(id) = self.confirm_remove.clone() {
             root = root.child(

@@ -125,6 +125,8 @@ impl Images {
 
         div()
             .flex()
+            .flex_none()
+            .h(gpui::px(76.))
             .items_center()
             .justify_between()
             .gap_3()
@@ -132,25 +134,32 @@ impl Images {
             .border_b_1()
             .border_color(palette.border_subtle)
             .child(
-                Stack::new()
-                    .gap(Size::Xs)
-                    .child(
-                        Group::new()
-                            .gap(Size::Xs)
-                            .align(Align::Center)
-                            .child(Text::new(img.display_name()).size(Size::Sm).medium())
-                            .child(badges),
-                    )
-                    .child(
-                        Text::new(format!(
-                            "{}  ·  {}  ·  {}",
-                            img.short_id(),
-                            format::bytes(img.size),
-                            format::ago(img.created)
-                        ))
-                        .size(Size::Xs)
-                        .dimmed(),
-                    ),
+                div().flex_1().min_w_0().child(
+                    Stack::new()
+                        .gap(Size::Xs)
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap_2()
+                                .child(
+                                    div().whitespace_nowrap().child(
+                                        Text::new(img.display_name()).size(Size::Sm).medium(),
+                                    ),
+                                )
+                                .child(badges),
+                        )
+                        .child(
+                            Text::new(format!(
+                                "{}  ·  {}  ·  {}",
+                                img.short_id(),
+                                format::bytes(img.size),
+                                format::ago(img.created)
+                            ))
+                            .size(Size::Xs)
+                            .dimmed(),
+                        ),
+                ),
             )
             .child(
                 Group::new()
@@ -269,7 +278,13 @@ impl Render for Images {
                     )
                     .child(Text::new(format::bytes(total)).size(Size::Xs).dimmed()),
             )
-            .child(div().flex_1().overflow_hidden().child(body));
+            .child(
+                div()
+                    .id("images-list")
+                    .flex_1()
+                    .overflow_scroll()
+                    .child(body),
+            );
 
         if let Some(id) = self.confirm_remove.clone() {
             root = root.child(

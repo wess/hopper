@@ -34,7 +34,7 @@ pub struct Host {
     selection_generation: AtomicU64,
     /// Event watching must not begin against the client's construction-time
     /// endpoint while the initial provider selection is still in flight.
-    selected: tokio::sync::OnceCell<()>,
+    selected: tokio::sync::watch::Sender<bool>,
     /// Cached Engine API version for the active provider. Connectivity is
     /// probed frequently; version negotiation is only needed once per engine
     /// selection, not on every status tick.
@@ -57,7 +57,7 @@ impl Host {
             runtime: RwLock::new(RuntimeKind::default()),
             selection: tokio::sync::Mutex::new(()),
             selection_generation: AtomicU64::new(0),
-            selected: tokio::sync::OnceCell::new(),
+            selected: tokio::sync::watch::channel(false).0,
             engine_version: RwLock::new(None),
             settings: RwLock::new(settings),
             workspaces: RwLock::new(store::load_workspaces()),
@@ -94,7 +94,7 @@ impl Host {
         *self.runtime.read().unwrap()
     }
 
-    // --- engine ----------------------------------------------------------
+    // engine
 
     pub fn engines(&self) -> &crate::engine::Engines {
         &self.engines
@@ -110,7 +110,7 @@ impl Host {
         *self.runtime.write().unwrap() = self.engines.registry().active_runtime();
         *self.engine_version.write().unwrap() = None;
         self.selection_generation.fetch_add(1, Ordering::Relaxed);
-        let _ = self.selected.set(());
+        self.selected.send_replace(true);
         status
     }
 
@@ -125,7 +125,12 @@ impl Host {
     /// callers may legitimately use the client's construction-time endpoint
     /// without going through the app startup sequence.
     pub async fn wait_for_initial_selection(&self) {
-        self.selected.get_or_init(|| async {}).await;
+        let mut selected = self.selected.subscribe();
+        while !*selected.borrow_and_update() {
+            if selected.changed().await.is_err() {
+                break;
+            }
+        }
     }
 
     /// Whether the app's first provider selection has finished.
@@ -135,7 +140,7 @@ impl Host {
     /// bumps its refresh epoch immediately after selection, which starts the
     /// deferred loads against the selected backend.
     pub fn selection_ready(&self) -> bool {
-        self.selected.get().is_some()
+        *self.selected.borrow()
     }
 
     pub(crate) async fn lock_selection(&self) -> tokio::sync::MutexGuard<'_, ()> {
@@ -323,7 +328,7 @@ impl Host {
         system::prune_all(&self.client).await
     }
 
-    // --- containers ------------------------------------------------------
+    // containers
 
     /// List containers, scoped to the active workspace.
     pub async fn containers(&self, all: bool) -> docker::Result<Vec<Container>> {
@@ -449,7 +454,7 @@ impl Host {
         containers::run(&self.client, input).await
     }
 
-    // --- container filesystem (the Files tab) ----------------------------
+    // container filesystem (the Files tab)
 
     /// List a directory inside a container.
     pub async fn container_ls(&self, id: &str, dir: &str) -> docker::Result<Vec<FileEntry>> {
@@ -497,7 +502,7 @@ impl Host {
         archive::write_file(&self.client, id, path, content).await
     }
 
-    // --- interactive exec (the Terminal tab) -----------------------------
+    // interactive exec (the Terminal tab)
 
     /// Start an interactive shell session in a container.
     pub async fn exec_start<F>(
@@ -549,7 +554,7 @@ impl Host {
         out
     }
 
-    // --- images ----------------------------------------------------------
+    // images
 
     pub async fn images(&self, all: bool) -> docker::Result<Vec<Image>> {
         let list = match self.backend() {
@@ -629,7 +634,7 @@ impl Host {
         crate::registry::search(source, query).await
     }
 
-    // --- volumes / networks ----------------------------------------------
+    // volumes / networks
 
     pub async fn volumes(&self) -> docker::Result<Vec<Volume>> {
         #[cfg(target_os = "macos")]
@@ -739,7 +744,7 @@ impl Host {
         networks::prune(&self.client).await
     }
 
-    // --- streaming -------------------------------------------------------
+    // streaming
 
     pub async fn stream_logs<F>(
         &self,
@@ -832,7 +837,7 @@ impl Host {
         images::push(&self.client, request_id, reference, on).await
     }
 
-    // --- compose ---------------------------------------------------------
+    // compose
 
     /// Compose projects, reconstructed from container labels so stacks show up
     /// with no compose CLI installed.
@@ -886,7 +891,7 @@ impl Host {
         plan_files(&project.config_files, None, &opts, &self.capabilities())
     }
 
-    // --- settings / workspaces -------------------------------------------
+    // settings / workspaces
 
     pub fn settings(&self) -> Settings {
         self.settings.read().unwrap().clone()

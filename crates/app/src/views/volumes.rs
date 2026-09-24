@@ -112,6 +112,7 @@ impl Volumes {
 
         div()
             .flex()
+            .flex_none()
             .items_center()
             .justify_between()
             .gap_3()
@@ -216,7 +217,13 @@ impl Render for Volumes {
                             ),
                     ),
             )
-            .child(div().flex_1().overflow_hidden().child(body));
+            .child(
+                div()
+                    .id("volumes-list")
+                    .flex_1()
+                    .overflow_scroll()
+                    .child(body),
+            );
 
         if let Some(name) = self.confirm_remove.clone() {
             root = root.child(

@@ -8,14 +8,13 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"
 out="$root/native/build"
 ver="${COMPOSE_VERSION:-v2.32.4}"
 
-case "$(uname -m)" in
-  arm64 | aarch64) arch=aarch64 ;;
-  x86_64) arch=x86_64 ;;
-  *) arch="$(uname -m)" ;;
-esac
+[ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || {
+  echo "error: Compose sidecar requires an Apple silicon Mac" >&2
+  exit 1
+}
 
 mkdir -p "$out"
-url="https://github.com/docker/compose/releases/download/${ver}/docker-compose-darwin-${arch}"
+url="https://github.com/docker/compose/releases/download/${ver}/docker-compose-darwin-aarch64"
 echo "[compose] $url"
 curl -fsSL "$url" -o "$out/compose"
 chmod +x "$out/compose"

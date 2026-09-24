@@ -206,6 +206,7 @@ impl Registry {
                     return managed;
                 }
             }
+            self.activate(&provider).await;
             return self.enrich(status).await;
         }
 
@@ -321,10 +322,57 @@ mod tests {
     use super::*;
     use docker::Endpoint;
 
+    #[cfg(target_os = "macos")]
+    struct Stopped(&'static str);
+
+    #[cfg(target_os = "macos")]
+    #[async_trait::async_trait]
+    impl Provider for Stopped {
+        fn id(&self) -> &'static str {
+            self.0
+        }
+
+        fn label(&self) -> &'static str {
+            self.0
+        }
+
+        fn managed(&self) -> bool {
+            self.0 == "apple"
+        }
+
+        async fn available(&self) -> bool {
+            true
+        }
+
+        async fn endpoint(&self) -> Option<Endpoint> {
+            None
+        }
+
+        async fn status(&self) -> EngineStatus {
+            EngineStatus::new(EngineState::Stopped, self.0, "Stopped.").managed(self.managed())
+        }
+    }
+
     fn registry() -> Registry {
         Registry::new(Client::new(Endpoint::Unix {
             path: "/nonexistent-hopper.sock".into(),
         }))
+    }
+
+    #[tokio::test]
+    #[cfg(target_os = "macos")]
+    async fn stopped_probes_leave_the_reported_provider_active() {
+        let r = Registry {
+            client: Client::new(Endpoint::Unix {
+                path: "/nonexistent-hopper.sock".into(),
+            }),
+            providers: vec![Arc::new(Stopped("apple")), Arc::new(Stopped("existing"))],
+            active: std::sync::RwLock::new("existing".into()),
+        };
+
+        let status = r.select(None).await;
+        assert_eq!(status.provider, "apple");
+        assert_eq!(r.active_id(), status.provider);
     }
 
     #[test]

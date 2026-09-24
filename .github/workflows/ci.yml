@@ -10,16 +10,8 @@ permissions:
 
 jobs:
   check:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-14
-          - macos-15-intel
-          - windows-latest
+    name: macOS Apple silicon
+    runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v4
@@ -29,32 +21,6 @@ jobs:
           components: clippy
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Install Linux UI dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libfontconfig1-dev \
-            libegl1-mesa-dev \
-            libwayland-egl-backend-dev \
-            libwayland-dev \
-            libx11-dev \
-            libx11-xcb-dev \
-            libxcb1-dev \
-            libxcb-icccm4-dev \
-            libxcb-keysyms1-dev \
-            libxcb-randr0-dev \
-            libxcb-render0-dev \
-            libxcb-shm0-dev \
-            libxcb-shape0-dev \
-            libxcb-util-dev \
-            libxcb-xfixes0-dev \
-            libxcb-xkb-dev \
-            libxcb-xinerama0-dev \
-            libxi-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev
 
       - name: Test workspace
         # Every crate runs even after one fails, so a platform-specific break

@@ -88,7 +88,6 @@ pub fn parse(line: &str) -> Result<Request, Box<Response>> {
     })
 }
 
-/// The `initialize` result.
 pub fn initialize_result(name: &str, version: &str) -> Value {
     json!({
         "protocolVersion": PROTOCOL_VERSION,
