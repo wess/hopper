@@ -6,6 +6,7 @@ fn main() -> anyhow::Result<()> {
     devices::{flash as nor, serial},
     hypervisor as hv, platform, psci, smccc,
   };
+  use std::collections::VecDeque;
   use std::io::Write;
 
   let path = std::env::args()
@@ -30,7 +31,17 @@ fn main() -> anyhow::Result<()> {
   }
   let mut flash = hv::memory(&vm, 0, 0x4000000)?;
   hv::write(&mut flash, 0, &firmware)?;
-  let mut variables = nor::create(vec![0xff; 0x4000000], 0x40000)?;
+  hv::protect(&flash, 5)?;
+  let mut variable_data = vec![0xff; 0x4000000];
+  if let Some(path) = std::env::args().nth(3) {
+    let template = std::fs::read(path)?;
+    ensure!(
+      !template.is_empty() && template.len() <= variable_data.len(),
+      "Variable template exceeds its flash bank"
+    );
+    variable_data[..template.len()].copy_from_slice(&template);
+  }
+  let mut variables = nor::create(variable_data, 0x40000)?;
   let mut nvram = hv::memory(&vm, 0x4000000, 0x4000000)?;
   hv::write(&mut nvram, 0, nor::bytes(&variables))?;
   hv::protect(&nvram, 1)?;
@@ -42,6 +53,10 @@ fn main() -> anyhow::Result<()> {
   hv::enter(&mut cpu, 0)?;
   let mut console = serial::Console::default();
   let mut output = Vec::with_capacity(64);
+  let mut opened_menu = false;
+  let mut selected_shell = false;
+  let mut input = VecDeque::new();
+  let mut updates = 0usize;
   let start = std::time::Instant::now();
   hv::bounded(&mut cpu, std::time::Duration::from_secs(30), |cpu| {
     for _ in 0..1000000 {
@@ -61,9 +76,25 @@ fn main() -> anyhow::Result<()> {
               std::io::stdout().flush()?;
               if output.len() == 64 { output.remove(0); }
               output.push(byte);
-              if output.ends_with(b"Shell> ") { return Ok(()); }
+              if output.ends_with(b"Shell> ") {
+                ensure!(updates > 0, "Firmware did not update its variable flash");
+                ensure!(input.is_empty(), "Firmware left diagnostic input queued");
+                eprintln!("\nFirmware reached the shell with {updates} variable flash updates");
+                return Ok(());
+              }
+              if !opened_menu && output.ends_with(b"Boot Manager Menu.") {
+                input.push_back(b'\r');
+                opened_menu = true;
+              }
+              if opened_menu && !selected_shell && output.ends_with(b"ESC to exit") {
+                input.extend(b"\x1b[B\r");
+                selected_shell = true;
+              }
             }
           } else {
+            if let Some(byte) = input.front().copied() {
+              if serial::receive(&mut console, byte) { input.pop_front(); }
+            }
             let value = serial::read(&mut console, offset);
             if access.register != 31 {
               hv::set(cpu, access.register.into(), value.into())?;
@@ -79,6 +110,7 @@ fn main() -> anyhow::Result<()> {
             let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
             if let Some(changed) = nor::write(&mut variables, offset, value as u32)? {
               hv::write(&mut nvram, changed.start, &nor::bytes(&variables)[changed])?;
+              updates += 1;
             }
             hv::protect(&nvram, if nor::array(&variables) { 1 } else { 0 })?;
           } else {
@@ -114,14 +146,6 @@ fn main() -> anyhow::Result<()> {
       exit => {
         let pc = hv::get(cpu, 31)?;
         eprintln!("Firmware exit {exit:?} at PC 0x{pc:x}");
-        for register in 0..8 {
-          eprintln!("x{register}: 0x{:x}", hv::get(cpu, register)?);
-        }
-        if let Some(offset) = pc.checked_sub(platform::RAM) {
-          let mut code = [0u8; 32];
-          hv::read(&ram, offset as usize, &mut code)?;
-          std::fs::write("/tmp/hoppernativepc.bin", code)?;
-        }
         bail!("Unhandled firmware exit: {exit:?}");
       },
     }

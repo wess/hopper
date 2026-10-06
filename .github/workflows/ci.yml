@@ -32,3 +32,31 @@ jobs:
 
       - name: Release build workspace
         run: cargo build --workspace --release --locked
+
+  firmware:
+    name: Native ARM64 firmware
+    runs-on: macos-26
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install firmware build tools
+        run: brew install llvm lld acpica
+
+      - name: Build pinned firmware
+        run: |
+          scripts/build/firmware.sh > firmware.log 2>&1 || {
+            tail -n 50 firmware.log
+            exit 1
+          }
+          cat native/build/firmware/manifest.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nativefirmware
+          path: |
+            native/build/firmware/windows.fd
+            native/build/firmware/variables.fd
+            native/build/firmware/manifest.json
+            native/build/firmware/licenses
+          if-no-files-found: error

@@ -9,6 +9,10 @@ use async_trait::async_trait;
 use docker::Endpoint;
 use model::{EngineResources, EngineStats, EngineStatus, ReclaimResult, RuntimeKind};
 
+#[allow(
+    clippy::double_must_use,
+    reason = "async-trait adds must_use to methods that already return a must-use future"
+)]
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// Stable identifier, used in settings and in `HOPPER_ENGINE`.

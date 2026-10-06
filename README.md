@@ -100,6 +100,7 @@ crates/
   docker    Engine API client (hyper over unix/tcp/npipe) + every domain module
   apple     Apple Containers, driven through the `container` CLI
   engine    managed container engine + isolated desktop virtual machines
+  machine   native ARM64 VM execution and device models (under development)
   migrate   Docker Desktop → Hopper migration
   host      the async service facade the UI calls
   mcp       the stdio MCP server (hoppermcp)
@@ -140,6 +141,31 @@ For an explicit endpoint, set `DOCKER_HOST`; Hopper also understands Podman's
 standard `CONTAINER_HOST` when `DOCKER_HOST` is not set. A saved engine choice
 in Settings takes precedence over automatic discovery, while these environment
 variables are useful for remote daemons and shell-driven workflows.
+
+### Native VM development
+
+The replacement Windows runtime uses Hypervisor.framework directly. It is not
+connected to the app yet. Its firmware diagnostic boots ARM64 UEFI with a native
+GIC, serial console, CFI flash, and firmware service calls; this does not establish
+Windows installation or desktop support. The major release gates are in
+[PRODUCT.md](PRODUCT.md).
+
+On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
+`scripts/build/firmware.sh` builds pinned TianoCore source into
+`native/build/firmware/windows.fd` and `variables.fd`, with a provenance manifest
+and upstream notices. It uses ArmVirt's generic firmware platform drivers and
+does not run an emulator. `HOPPER_LLVM` can select the LLVM binary directory.
+
+```sh
+scripts/build/firmware.sh
+cargo build -p machine --example firmware
+codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/firmware
+target/debug/examples/firmware native/build/firmware/windows.fd /tmp/hopper.dtb native/build/firmware/variables.fd
+```
+
+The diagnostic selects the internal shell through the serial console, verifies
+variable flash writes, and enforces a 30-second deadline. Its variable writes
+remain in memory; no user VM is created or modified.
 
 ## Build a release
 
