@@ -172,9 +172,22 @@ The PCI root describes one bus, a 256 MiB memory aperture, a separate ECAM
 reservation, and four shared interrupt lines. CI uses ACPICA to interpret its
 resource buffers and verify every interrupt route. Disk I/O remains under development.
 
+The storage core handles split Virtio queues and file-backed sector reads, writes,
+flushes and disk identification. It checks DMA ranges, descriptor chains, ring
+wraparound and writable completion lengths. The separate native storage probe uses
+an ARM guest to submit a request and read its response from mapped RAM, then checks
+the interrupt signal. It opens its supplied test image read-only. The PCI transport
+is not connected yet, so this does not establish UEFI disk discovery or OS boot.
+
+```sh
+cargo build -p machine --example storage
+codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/storage
+target/debug/examples/storage /path/to/sector-aligned-test.img
+```
+
 `cargo run -p machine --example acpi -- /tmp/hopperacpi` exports the handoff and
-individual tables for ACPICA inspection. PCI, storage, graphics, and TPM devices
-are not implemented in the native runtime yet.
+individual tables for ACPICA inspection. PCI device transport, graphics, and TPM
+are still missing. Storage has not been integrated into the firmware or app.
 
 ## Build a release
 

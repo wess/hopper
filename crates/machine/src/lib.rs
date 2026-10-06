@@ -3,6 +3,7 @@
 pub mod arm;
 pub mod acpi;
 pub mod devices;
+pub mod dma;
 pub mod platform;
 pub mod psci;
 pub mod smccc;

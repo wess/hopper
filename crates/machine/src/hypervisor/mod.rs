@@ -139,6 +139,24 @@ pub fn protect(memory: &Memory<'_>, flags: u64) -> anyhow::Result<()> {
   )
 }
 
+impl crate::dma::Memory for Memory<'_> {
+  fn contains(&self, address: u64, length: usize) -> bool {
+    address.checked_sub(self.guest)
+      .and_then(|offset| offset.checked_add(length as u64))
+      .is_some_and(|end| end <= self.size as u64)
+  }
+
+  fn read(&self, address: u64, bytes: &mut [u8]) -> anyhow::Result<()> {
+    ensure!(self.contains(address, bytes.len()), "DMA read exceeds guest RAM");
+    read(self, (address - self.guest) as usize, bytes)
+  }
+
+  fn write(&mut self, address: u64, bytes: &[u8]) -> anyhow::Result<()> {
+    ensure!(self.contains(address, bytes.len()), "DMA write exceeds guest RAM");
+    write(self, (address - self.guest) as usize, bytes)
+  }
+}
+
 pub fn cpu(vm: &Vm) -> anyhow::Result<Cpu<'_>> {
   let mut id = 0;
   let mut exit = null_mut();
