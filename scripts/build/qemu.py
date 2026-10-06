@@ -83,7 +83,7 @@ def main():
                 subprocess.check_call(['install_name_tool', *changes, str(target)])
             return target
 
-        for formula, executable in [('qemu', 'qemu-system-aarch64'), ('qemu', 'qemu-img'), ('swtpm', 'swtpm')]:
+        for formula, executable in [('qemu', 'qemu-system-aarch64'), ('qemu', 'qemu-img'), ('swtpm', 'swtpm'), ('wimlib', 'wimlib-imagex'), ('cdrtools', 'mkisofs')]:
             prefix = package(formula)
             copy(prefix / 'bin' / executable, pathlib.Path('bin') / executable)
         firmware = package('qemu') / 'share/qemu'

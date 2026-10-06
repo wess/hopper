@@ -40,6 +40,8 @@ pub struct MachineStatus {
     pub machine: Machine,
     pub state: String,
     pub busy: bool,
+    #[serde(default)]
+    pub progress: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

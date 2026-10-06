@@ -54,3 +54,30 @@ async fn qmp_negotiation_skips_events_and_reports_input_errors() {
     assert!(error.to_string().contains("Unknown key"));
     server.await.unwrap();
 }
+
+#[tokio::test]
+async fn screenshots_request_a_guest_png_from_qemu() {
+    let root = tempfile::tempdir().unwrap();
+    let socket = root.path().join("qmp.sock");
+    let output = root.path().join("guest display.png");
+    let expected = output.clone();
+    let listener = tokio::net::UnixListener::bind(&socket).unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        writer.write_all(b"{\"QMP\":{}}\n").await.unwrap();
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        writer.write_all(b"{\"return\":{}}\n").await.unwrap();
+        line.clear();
+        reader.read_line(&mut line).await.unwrap();
+        let command: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(command["execute"], "screendump");
+        assert_eq!(command["arguments"]["format"], "png");
+        assert_eq!(command["arguments"]["filename"], expected.to_str().unwrap());
+        writer.write_all(b"{\"return\":{}}\n").await.unwrap();
+    });
+    screenshot(&socket, &output).await.unwrap();
+    server.await.unwrap();
+}

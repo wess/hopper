@@ -412,6 +412,13 @@ impl Machines {
                             ),
                     ),
             )
+            .when(row.busy && row.progress.is_some(), |view| {
+                view.child(
+                    Text::new(row.progress.clone().unwrap())
+                        .size(Size::Xs)
+                        .dimmed(),
+                )
+            })
             .child(controls)
     }
 }
@@ -557,37 +564,22 @@ impl Render for Machines {
                         .size(Size::Xs),
                 );
             }
-            if profile.installer_required {
-                let url = profile.download_url.clone().unwrap();
-                form = form
-                    .child(
-                        Group::new()
-                            .gap(Size::Sm)
-                            .wrap(true)
-                            .child(
-                                Button::new("download-windows", "Download from Microsoft")
-                                    .size(Size::Sm)
-                                    .variant(Variant::Light)
-                                    .on_click(move |_, _, cx| cx.open_url(&url)),
-                            )
-                            .child(
-                                Button::new("choose-installer", "Choose ARM64 ISO…")
-                                    .size(Size::Sm)
-                                    .disabled(create_busy)
-                                    .on_click(cx.listener(|this, _, _, cx| this.installer(cx))),
-                            ),
-                    )
-                    .child(
-                        Text::new(self.installer.clone().unwrap_or_else(|| {
-                            "Download the English (United States) ISO, then choose it here.".into()
-                        }))
-                        .size(Size::Xs)
-                        .dimmed(),
-                    );
+            if profile.guest == model::GuestOs::Windows {
+                form = form.child(Group::new().gap(Size::Sm).wrap(true)
+                    .child(Button::new("choose-installer", "Use a local ARM64 ISO…")
+                        .size(Size::Sm).variant(Variant::Subtle).disabled(create_busy)
+                        .on_click(cx.listener(|this, _, _, cx| this.installer(cx))))
+                    .when(self.installer.is_some(), |group| group.child(
+                        Button::new("automatic-installer", "Use automatic download")
+                            .size(Size::Sm).variant(Variant::Subtle).disabled(create_busy)
+                            .on_click(cx.listener(|this, _, _, cx| { this.installer = None; cx.notify(); })))))
+                    .child(Text::new(self.installer.clone().unwrap_or_else(||
+                        "Windows downloads from Microsoft and prepares its installer automatically on first start.".into()))
+                        .size(Size::Xs).dimmed());
             }
-            form=form.child(Text::new("Linux and macOS images download automatically on first start. No host folders are shared. Stop a VM before cloning or taking a disk snapshot.").size(Size::Xs).dimmed())
+            form=form.child(Text::new("OS images download automatically on first start. No host folders are shared. Stop a VM before cloning or taking a disk snapshot.").size(Size::Xs).dimmed())
                 .child(div().w(px(180.0)).child(Button::new("create-vm",self.busy.get("create").cloned().unwrap_or_else(||"Create VM".into()))
-                    .size(Size::Sm).color(ColorName::Blue).disabled(create_busy || (profile.installer_required && self.installer.is_none()))
+                    .size(Size::Sm).color(ColorName::Blue).disabled(create_busy)
                     .on_click(cx.listener(|this,_,_,cx|this.create(cx)))));
             body = body.child(
                 div()

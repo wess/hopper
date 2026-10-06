@@ -20,6 +20,10 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
 fs2 = "0.4"
+reqwest = { workspace = true }
+tempfile = { workspace = true }
+quick-xml = { version = "0.41", features = ["serialize"] }
+sha1_smol = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Apple Containers, the macOS engine. It publishes no socket, so this is a CLI
@@ -27,5 +31,4 @@ fs2 = "0.4"
 apple = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

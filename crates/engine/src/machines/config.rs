@@ -1,4 +1,4 @@
-use anyhow::{bail, Context};
+use anyhow::bail;
 use model::{GuestOs, Machine, MachineProfile};
 use serde_json::json;
 
@@ -26,9 +26,9 @@ pub fn profiles() -> Vec<MachineProfile> {
             "windows",
             "Windows 11",
             GuestOs::Windows,
-            "Windows 11 ARM64. Requires an English (United States) installer ISO.",
+            "Windows 11 ARM64. Downloads and prepares an English (United States) installer on first start.",
             Some("https://www.microsoft.com/en-us/software-download/windows11arm64"),
-            true,
+            false,
             true,
         ),
     ]
@@ -89,16 +89,14 @@ systemctl restart lightdm
 "#}]);
     }
     if machine.guest == GuestOs::Windows {
-        let installer = machine
-            .installer
-            .as_deref()
-            .context("Choose a Windows ARM64 installer ISO first")?;
-        if !std::path::Path::new(installer).is_absolute()
-            || !std::path::Path::new(installer).is_file()
-        {
-            bail!("The Windows installer must be an existing absolute file path");
+        if let Some(installer) = &machine.installer {
+            if !std::path::Path::new(installer).is_absolute()
+                || !std::path::Path::new(installer).is_file()
+            {
+                bail!("The Windows installer must be an existing absolute file path");
+            }
+            config["images"] = json!([{"location":installer,"arch":"aarch64"}]);
         }
-        config["images"] = json!([{"location":installer,"arch":"aarch64"}]);
     }
     Ok(serde_yaml::to_string(&config)?)
 }

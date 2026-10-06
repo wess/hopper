@@ -7,6 +7,7 @@ members = [
     "crates/compose",
     "crates/apple",
     "crates/engine",
+    "crates/machine",
     "crates/host",
     "crates/mcp",
     "crates/migrate",
@@ -15,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.15.0"
+version = "0.15.1"
 edition = "2021"
 license = "MIT"
 authors = ["Wess Cope <opensource@wess.io>"]

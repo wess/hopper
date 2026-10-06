@@ -5,11 +5,11 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 #[cfg(unix)]
-pub async fn input(socket: &Path, events: Vec<Value>) -> anyhow::Result<()> {
+pub async fn execute(socket: &Path, command: Value) -> anyhow::Result<()> {
     tokio::time::timeout(Duration::from_secs(10), async {
         let stream = tokio::net::UnixStream::connect(socket)
             .await
-            .context("The VM input socket is unavailable")?;
+            .context("The VM control socket is unavailable")?;
         let (reader, mut writer) = stream.into_split();
         let mut reader = BufReader::new(reader);
         response(&mut reader, true).await?;
@@ -17,7 +17,6 @@ pub async fn input(socket: &Path, events: Vec<Value>) -> anyhow::Result<()> {
             .write_all(b"{\"execute\":\"qmp_capabilities\"}\r\n")
             .await?;
         response(&mut reader, false).await?;
-        let command = json!({"execute":"input-send-event", "arguments":{"events":events}});
         writer
             .write_all(format!("{command}\r\n").as_bytes())
             .await?;
@@ -25,12 +24,28 @@ pub async fn input(socket: &Path, events: Vec<Value>) -> anyhow::Result<()> {
         Ok(())
     })
     .await
-    .context("VM input timed out")?
+    .context("VM control timed out")?
 }
 
 #[cfg(not(unix))]
-pub async fn input(_: &Path, _: Vec<Value>) -> anyhow::Result<()> {
-    bail!("VM input requires a Unix host")
+pub async fn execute(_: &Path, _: Value) -> anyhow::Result<()> {
+    bail!("VM control requires a Unix host")
+}
+
+pub async fn input(socket: &Path, events: Vec<Value>) -> anyhow::Result<()> {
+    execute(
+        socket,
+        json!({"execute":"input-send-event", "arguments":{"events":events}}),
+    )
+    .await
+}
+
+pub async fn screenshot(socket: &Path, path: &Path) -> anyhow::Result<()> {
+    execute(
+        socket,
+        json!({"execute":"screendump", "arguments":{"filename":path,"format":"png"}}),
+    )
+    .await
 }
 
 async fn response(
@@ -41,14 +56,14 @@ async fn response(
         let mut line = Vec::new();
         let count = reader.take(65537).read_until(b'\n', &mut line).await?;
         if count == 0 {
-            bail!("VM input connection closed");
+            bail!("VM control connection closed");
         }
         if count > 65536 {
-            bail!("VM input response was too large");
+            bail!("VM control response was too large");
         }
         let value: Value = serde_json::from_slice(&line)?;
         if let Some(error) = value.get("error") {
-            bail!("VM input failed: {error}");
+            bail!("VM control failed: {error}");
         }
         if value.get(if greeting { "QMP" } else { "return" }).is_some() {
             return Ok(());

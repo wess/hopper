@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD, Engine};
 use host::{Host, MachineActor};
-use model::{CreateMachine, EngineResources, GuestOs, MachineInput};
+use model::{CreateMachine, EngineResources, MachineInput};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -10,8 +10,8 @@ pub fn catalogue() -> Vec<Value> {
     [
         ("vm.profiles", "List downloadable guest OS profiles and their requirements.", json!({}), vec![]),
         ("vm.list", "List VMs that permit agent access. VMs with access disabled are excluded.", json!({}), vec![]),
-        ("vm.create", "Create a Linux or macOS VM. Images download on vm.start and are verified by the VM helper. New VMs enable agent access by default; set agentAccess=false to disable it. Select a Windows installer in Hopper before managing a Windows VM.",json!({"name":string,"profile":string,"cpus":{"type":"integer","minimum":1,"maximum":64},"memoryGiB":{"type":"integer","minimum":1,"maximum":256},"diskGiB":{"type":"integer","minimum":10,"maximum":2048},"agentAccess":{"type":"boolean"}}),vec!["name","profile"]),
-        ("vm.start", "Start a VM and open its dedicated display window. First boot downloads and provisions the guest and can take several minutes.",json!({"id":id}),vec!["id"]),
+        ("vm.create", "Create a Linux, macOS, or Windows VM. Images download on vm.start and are verified by the VM helper. New VMs enable agent access by default; set agentAccess=false to disable it.",json!({"name":string,"profile":string,"cpus":{"type":"integer","minimum":1,"maximum":64},"memoryGiB":{"type":"integer","minimum":1,"maximum":256},"diskGiB":{"type":"integer","minimum":10,"maximum":2048},"agentAccess":{"type":"boolean"}}),vec!["name","profile"]),
+        ("vm.start", "Start a VM and open its dedicated display window. First boot downloads and prepares the guest and can take several minutes. Windows setup may need to finish in the viewer before guest commands and files become available.",json!({"id":id}),vec!["id"]),
         ("vm.stop", "Gracefully stop a VM; its disk is retained.",json!({"id":id}),vec!["id"]),
         ("vm.exec", "Execute a command inside the guest, never on the host. argv is an array of command arguments, such as [\"uname\",\"-a\"]. Output is bounded and commands time out after 120 seconds.",json!({"id":id,"argv":{"type":"array","items":{"type":"string"},"minItems":1}}),vec!["id","argv"]),
         ("vm.screenshot", "Capture the VM display as a PNG image. The VM must be running with its display visible.",json!({"id":id}),vec!["id"]),
@@ -61,13 +61,6 @@ async fn run(host: &Arc<Host>, name: &str, args: &Value) -> anyhow::Result<Value
     }
     if name == "vm.create" {
         let profile = arg(args, "profile")?;
-        if machines
-            .profiles()
-            .iter()
-            .any(|p| p.id == profile && p.guest == GuestOs::Windows)
-        {
-            anyhow::bail!("Choose the Windows ARM64 ISO in Hopper first; then use vm.list to manage that machine");
-        }
         let machine = machines
             .create(CreateMachine {
                 name: arg(args, "name")?.into(),

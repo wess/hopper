@@ -4,6 +4,7 @@ mod cli;
 pub mod config;
 mod input;
 mod macos;
+pub mod media;
 mod qmp;
 mod snapshots;
 
@@ -84,6 +85,10 @@ impl Machines {
     }
 
     fn lock(&self, id: &str) -> anyhow::Result<std::fs::File> {
+        self.guard(id, "")
+    }
+
+    fn guard(&self, id: &str, suffix: &str) -> anyhow::Result<std::fs::File> {
         validate_id(id)?;
         let dir = self.root.join("locks");
         std::fs::create_dir_all(&dir)?;
@@ -92,7 +97,7 @@ impl Machines {
             .truncate(false)
             .read(true)
             .write(true)
-            .open(dir.join(id))?;
+            .open(dir.join(format!("{id}{suffix}")))?;
         file.try_lock_exclusive()
             .context("Another operation is in progress for this VM")?;
         Ok(file)
@@ -159,9 +164,14 @@ impl Machines {
                 Err(error) => return Err(error),
             };
             result.push(MachineStatus {
-                machine,
                 state,
+                progress: busy
+                    .then(|| {
+                        std::fs::read_to_string(self.root.join("progress").join(&machine.id)).ok()
+                    })
+                    .flatten(),
                 busy,
+                machine,
             });
         }
         result.sort_by(|a, b| {
@@ -208,13 +218,39 @@ impl Machines {
 
     pub async fn start(&self, id: &str, actor: Actor) -> anyhow::Result<()> {
         let _lock = self.lock(id)?;
-        let machine = self.machine(id, actor)?;
+        let mut machine = self.machine(id, actor)?;
         if machine.guest == model::GuestOs::Windows && !cli::windows_ready() {
             bail!(
                 "The Windows runtime is missing. Hopper needs QEMU and swtpm bundled with the app."
             );
         }
+        let progress = self.root.join("progress").join(id);
+        std::fs::create_dir_all(progress.parent().unwrap())?;
+        struct Progress(PathBuf);
+        impl Drop for Progress {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+        let _progress = Progress(progress.clone());
         let cli = self.cli()?;
+        if !cli.home.join(id).exists()
+            && machine.guest == model::GuestOs::Windows
+            && machine.installer.is_none()
+        {
+            machine.installer = Some(
+                media::prepare(&self.root, &progress)
+                    .await?
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+            std::fs::write(
+                self.root.join("configs").join(format!("{id}.yaml")),
+                config::render(&machine)?,
+            )?;
+            store::json::write(&self.record(id)?, &machine)?;
+        }
+        std::fs::write(&progress, "Starting VM and preparing its desktop…")?;
         if !cli.home.join(id).exists() {
             let path = self.root.join("configs").join(format!("{id}.yaml"));
             cli.run(
@@ -229,12 +265,33 @@ impl Machines {
             )
             .await?;
         }
-        cli.run(
-            id,
-            &["start".into(), id.into(), "--timeout=30m".into()],
-            Duration::from_secs(31 * 60),
-        )
-        .await
+        let windows = machine.guest == model::GuestOs::Windows;
+        let timeout = if windows {
+            "--timeout=15s"
+        } else {
+            "--timeout=30m"
+        };
+        let result = cli
+            .run(
+                id,
+                &["start".into(), id.into(), timeout.into()],
+                Duration::from_secs(31 * 60),
+            )
+            .await;
+        if result.is_err() && windows {
+            // Windows setup can wait for user input before SSH becomes available.
+            // A live display is enough to return control to the viewer and agents.
+            if qmp::execute(
+                &cli.home.join(id).join("qmp.sock"),
+                serde_json::json!({"execute":"query-status"}),
+            )
+            .await
+            .is_ok()
+            {
+                return Ok(());
+            }
+        }
+        result
     }
 
     pub async fn viewer_pid(&self, id: &str) -> anyhow::Result<i32> {
@@ -288,9 +345,20 @@ impl Machines {
     }
 
     pub async fn screenshot(&self, id: &str, actor: Actor, path: &Path) -> anyhow::Result<()> {
-        let _lock = self.lock(id)?;
+        let machine = self.machine(id, actor)?;
+        let _lock = self.guard(
+            id,
+            if machine.guest == model::GuestOs::Windows {
+                ".display"
+            } else {
+                ""
+            },
+        )?;
         let machine = self.machine(id, actor)?;
         let cli = self.cli()?;
+        if machine.guest == model::GuestOs::Windows {
+            return qmp::screenshot(&cli.home.join(id).join("qmp.sock"), path).await;
+        }
         if machine.guest == model::GuestOs::Linux {
             let guest = format!("/tmp/hopper-screen-{}.png", model::new_uuid());
             cli.output(&["shell".into(),id.into(),"--".into(),"sh".into(),"-c".into(),"export DISPLAY=:0 XAUTHORITY=\"$HOME/.Xauthority\"; exec scrot --overwrite \"$1\"".into(),"hopper-screen".into(),guest.clone()],Duration::from_secs(15)).await?;

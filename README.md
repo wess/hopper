@@ -18,9 +18,9 @@ quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and 
 
 - **Virtual machines** — Ubuntu Desktop, macOS, and Windows 11 ARM64 profiles,
   dedicated viewer windows, disk snapshots, recovery, and independent clones.
-  Linux and macOS images download on first start; Windows uses an English
-  (United States) ISO from Microsoft, selected in Hopper. macOS and Windows
-  guest support is experimental. Windows has no accelerated 3D graphics.
+  OS images download on first start. Windows fetches Microsoft installation media
+  and prepares its bootable ARM64 installer automatically; a local English US ISO
+  is optional. macOS and Windows guest support is experimental. Windows has no accelerated 3D graphics.
   Guest VMs live under `~/.hopper/machines`, share no host folders, and remain
   running when Hopper quits.
 - **Agent access** — enabled for new VMs, revocable per VM. The MCP server

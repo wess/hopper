@@ -157,14 +157,18 @@ fn ids_cannot_escape_the_machine_directory() {
 }
 
 #[test]
-fn windows_requires_a_real_installer_and_keeps_tpm_enabled() {
+fn windows_downloads_by_default_and_accepts_a_local_installer() {
     let mut machine = machine();
     machine.guest = GuestOs::Windows;
     machine.resources.disk_gib = 64;
-    assert!(config::render(&machine)
-        .unwrap_err()
-        .to_string()
-        .contains("installer"));
+    assert!(config::render(&machine).is_ok());
+    assert!(
+        !config::profiles()
+            .iter()
+            .find(|p| p.id == "windows")
+            .unwrap()
+            .installer_required
+    );
     let file = tempfile::NamedTempFile::new().unwrap();
     machine.installer = Some(file.path().to_string_lossy().into_owned());
     let value: serde_yaml::Value =
