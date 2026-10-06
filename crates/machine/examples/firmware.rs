@@ -3,7 +3,7 @@ fn main() -> anyhow::Result<()> {
   use anyhow::{bail, ensure, Context};
   use machine::{
     arm,
-    devices::{flash as nor, serial},
+    devices::{flash as nor, pci, serial},
     acpi, hypervisor as hv, platform, psci, smccc,
   };
   use std::collections::VecDeque;
@@ -59,6 +59,8 @@ fn main() -> anyhow::Result<()> {
   let mut selected_shell = false;
   let mut input = VecDeque::new();
   let mut updates = 0usize;
+  let mut bus = pci::Bus::default();
+  let mut pci_reads = 0usize;
   let mut listed_acpi = false;
   let mut seen_acpi = [false; 4];
   let mut checked_acpi = [false; 2];
@@ -94,7 +96,8 @@ fn main() -> anyhow::Result<()> {
                 if listed_acpi {
                   ensure!(seen_acpi.iter().all(|seen| *seen), "UEFI did not expose all ACPI tables");
                   ensure!(checked_acpi.iter().all(|seen| *seen), "UEFI found ACPI errors or warnings");
-                  eprintln!("\nFirmware verified ACPI tables and {updates} variable flash updates");
+                  ensure!(pci_reads > 0, "Firmware did not enumerate PCI configuration space");
+                  eprintln!("\nFirmware verified ACPI tables, {pci_reads} PCI reads and {updates} variable flash updates");
                   return Ok(());
                 }
                 input.extend(b"acpiview\r");
@@ -117,6 +120,19 @@ fn main() -> anyhow::Result<()> {
             if access.register != 31 {
               hv::set(cpu, access.register.into(), value.into())?;
             }
+          }
+          let pc = hv::get(cpu, 31)?;
+          hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
+        }
+        arm::Trap::DataAbort(Some(access)) if (platform::ECAM..platform::ECAM + pci::ECAM_SIZE).contains(&physical_address) => {
+          let offset = physical_address - platform::ECAM;
+          if access.write {
+            let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
+            bus.write(offset, access.bytes.into(), value as u32)?;
+          } else {
+            let value = bus.read(offset, access.bytes.into())?;
+            pci_reads += 1;
+            if access.register != 31 { hv::set(cpu, access.register.into(), value as u64)?; }
           }
           let pc = hv::get(cpu, 31)?;
           hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;

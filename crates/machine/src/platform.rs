@@ -7,6 +7,9 @@ pub const RAM: u64 = 0x40000000;
 pub const UART: u64 = 0x09000000;
 pub const DISTRIBUTOR: u64 = 0x08000000;
 pub const REDISTRIBUTOR: u64 = 0x0a000000;
+pub const ECAM: u64 = 0x10000000;
+pub const PCI_MEMORY: u64 = 0x20000000;
+pub const PCI_MEMORY_SIZE: u64 = 0x10000000;
 
 pub struct Topology {
   pub memory: u64,
@@ -109,6 +112,26 @@ pub fn tree(topology: &Topology) -> anyhow::Result<Vec<u8>> {
   fdt.property_array_u64("reg", &[0, 0x4000000, 0x4000000, 0x4000000])?;
   fdt.property_u32("bank-width", 4)?;
   fdt.end_node(flash)?;
+  let pci = fdt.begin_node("pci@10000000")?;
+  fdt.property_string("compatible", "pci-host-ecam-generic")?;
+  fdt.property_string("device_type", "pci")?;
+  fdt.property_u32("#address-cells", 3)?;
+  fdt.property_u32("#size-cells", 2)?;
+  fdt.property_array_u64("reg", &[ECAM, crate::devices::pci::ECAM_SIZE])?;
+  fdt.property_array_u32("bus-range", &[0, 0])?;
+  fdt.property_array_u32(
+    "ranges",
+    &[
+      0x02000000,
+      0,
+      PCI_MEMORY as u32,
+      0,
+      PCI_MEMORY as u32,
+      0,
+      PCI_MEMORY_SIZE as u32,
+    ],
+  )?;
+  fdt.end_node(pci)?;
   let chosen = fdt.begin_node("chosen")?;
   fdt.property_string("stdout-path", "/uart@9000000")?;
   fdt.end_node(chosen)?;
