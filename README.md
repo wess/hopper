@@ -1,6 +1,6 @@
 # Hopper
 
-A native desktop app for running and managing containers — a Docker Desktop
+A native desktop app for running containers and desktop virtual machines — a Docker Desktop
 replacement written in Rust. The UI is [gpui](https://github.com/zed-industries/zed)
 + [guise](https://github.com/wess/guise); the async layer is Tokio.
 
@@ -12,9 +12,22 @@ on the Mac, and **Import from Docker** brings your images and containers across.
 
 No bundled browser or Electron. The VM runs in a separate helper process, so a
 UI crash does not take down containers. Settings controls whether a normal app
-quit stops the engine. Releases bundle the VM helper, Docker CLI, and Compose.
+quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and the Windows QEMU/TPM runtime.
 
 ## Features
+
+- **Virtual machines** — Ubuntu Desktop, macOS, and Windows 11 ARM64 profiles,
+  dedicated viewer windows, disk snapshots, recovery, and independent clones.
+  Linux and macOS images download on first start; Windows uses an English
+  (United States) ISO from Microsoft, selected in Hopper. macOS and Windows
+  guest support is experimental. Windows has no accelerated 3D graphics.
+  Guest VMs live under `~/.hopper/machines`, share no host folders, and remain
+  running when Hopper quits.
+- **Agent access** — enabled for new VMs, revocable per VM. The MCP server
+  exposes guest commands, screenshots, files, input, cloning, and snapshots.
+  Linux supports text, keyboard, and mouse input. Windows supports QEMU keys
+  and mouse input; macOS input requires Accessibility permission inside the guest.
+  Snapshots and clones require a stopped VM. Clones inherit agent access.
 
 - **Dashboard** — running/total containers, image/volume/network counts, disk
   usage with reclaimable meters, and one-click "Clean up" (system prune).
@@ -43,7 +56,8 @@ quit stops the engine. Releases bundle the VM helper, Docker CLI, and Compose.
   while selected volume contents are called out for manual transfer rather
   than being silently lost.
 - **MCP server** — a standalone stdio Model Context Protocol server
-  (`hoppermcp`) exposing Docker tools to AI clients.
+  (`hoppermcp`) exposing Docker and VM tools to clients. Requests run concurrently; cancellation
+  stops the request without shutting down the VM.
 
 ### Engines
 
@@ -85,7 +99,7 @@ crates/
   store     ~/.hopper/ JSON persistence + OS keychain
   docker    Engine API client (hyper over unix/tcp/npipe) + every domain module
   apple     Apple Containers, driven through the `container` CLI
-  engine    managed Linux VM / Apple / Docker-or-Podman / existing
+  engine    managed container engine + isolated desktop virtual machines
   migrate   Docker Desktop → Hopper migration
   host      the async service facade the UI calls
   mcp       the stdio MCP server (hoppermcp)
@@ -111,12 +125,16 @@ cargo run -p mcp            # the stdio MCP server
 For development, run `scripts/build/lima.sh` once to fetch the pinned VM helper
 and matching templates. `HOPPER_LIMA_BIN` overrides its path. The helper is bundled
 automatically by `scripts/bundle.sh`; users do not need Homebrew or Lima installed.
+`scripts/build/qemu.sh` fetches official Homebrew bottles and relocates the Windows
+QEMU/TPM runtime, firmware, dependencies, and licenses without installing packages.
+`cargo run -p engine --example machine -- create ubuntu "Desktop"` exercises
+user VM creation; `start <id>` downloads and opens its viewer.
 `cargo run -p engine --example vm -- start` exercises the managed VM directly.
 
 An engine must be reachable. That can be Apple's `container`, Docker,
 Podman, Colima, Rancher Desktop, or another Docker-compatible endpoint;
-Hopper's first-run panel offers Apple's signed installer when that runtime is
-missing.
+Hopper's first-run panel provisions its managed Docker VM. Virtual machines
+remain available independently of the container engine.
 
 For an explicit endpoint, set `DOCKER_HOST`; Hopper also understands Podman's
 standard `CONTAINER_HOST` when `DOCKER_HOST` is not set. A saved engine choice

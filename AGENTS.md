@@ -2,6 +2,16 @@
 
 Repository guidance for agent sessions.
 
+## Desktop virtual machines
+
+User VMs are managed by `engine::machines`, separate from the managed Docker VM.
+Linux and macOS use Lima/VZ; Windows ARM64 uses bundled QEMU and swtpm. macOS
+and Windows guests are experimental. Release hosts remain Apple silicon macOS 26+.
+Each VM has a dedicated viewer. Agent access defaults on for new VMs and clones
+inherit it. MCP operations recheck the persisted access setting, use per-VM
+cross-process locks, and expose only guest files/input. Snapshots require a
+stopped VM and use APFS copies, with a rollback snapshot on restore.
+
 ## What this is
 
 Hopper is a native desktop app for running and managing containers — a Docker

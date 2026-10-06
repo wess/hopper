@@ -72,6 +72,10 @@ impl Host {
         self.client.clone()
     }
 
+    pub fn machines(&self) -> ::engine::machines::Machines {
+        ::engine::machines::Machines::default()
+    }
+
     /// Point the whole app at a different daemon.
     pub fn set_endpoint(&self, ep: docker::Endpoint, provider: &str, managed: bool) {
         self.client.set_endpoint(ep);

@@ -17,6 +17,7 @@ pub mod status;
 
 pub use facade::Host;
 
+pub use ::engine::machines::{Actor as MachineActor, Machines};
 /// Re-export the interactive exec session so the UI can hold one without
 /// depending on the docker crate directly.
 pub use docker::exec as docker_exec;

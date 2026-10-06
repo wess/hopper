@@ -33,3 +33,5 @@ tracing-subscriber = { workspace = true }
 [target.'cfg(target_os = "macos")'.dependencies]
 # For the Apple Containers first-run panel.
 apple = { workspace = true }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSRunningApplication", "NSApplication"] }

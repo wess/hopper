@@ -49,6 +49,8 @@ mkdir -p "$contents/MacOS" "$contents/Resources"
 [ -x native/build/lima/bin/limactl ] || scripts/build/lima.sh
 [ -f native/build/docker ] || scripts/build/docker.sh
 [ -f native/build/compose ] || scripts/build/compose.sh
+[ -x native/build/qemu/bin/swtpm ] || scripts/build/qemu.sh
+cp -R native/build/qemu "$contents/Resources/qemu"
 mkdir -p "$contents/Resources/lima/bin" "$contents/Resources/lima/share/doc/lima"
 cp native/build/lima/bin/limactl "$contents/Resources/lima/bin/limactl"
 cp -R native/build/lima/share/lima "$contents/Resources/lima/share/"
@@ -91,7 +93,7 @@ if [ -d "$contents/MacOS/sidecars" ]; then
       echo "error: sidecar $sidecar does not contain host architecture $required_arch (has: ${arches:-unknown})" >&2
       exit 1
     }
-  done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" -type f -perm -111)
+  done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/qemu/bin" "$contents/Resources/qemu/lib" -type f -perm -111)
 fi
 
 cat > "$contents/Info.plist" << PLIST
@@ -138,7 +140,7 @@ while IFS= read -r sidecar; do
   chmod u+w "$sidecar"
   codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
     --preserve-metadata=entitlements --sign "$identity" "$sidecar"
-done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" -type f -perm -111)
+done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/qemu/bin" "$contents/Resources/qemu/lib" -type f -perm -111)
 codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
   --entitlements assets/hopper.entitlements \
   --sign "$identity" "$contents/MacOS/$bin_name"

@@ -1,12 +1,6 @@
 name: Release
 
-# Ships a notarized, Rust-only Hopper. The version lives in the workspace
-# Cargo.toml (not package.json — that is the retired Bun build); pushing a bump
-# to main tags and releases.
-#
-# Hopper ships no engine of its own any more. On macOS the engine is Apple's
-# `container`, which the user installs and which does its own virtualization,
-# so there is no guest kernel to compile here and no entitlement to sign in.
+# releases follow the workspace version and include both container and desktop VM helpers.
 
 on:
   push:
@@ -118,6 +112,7 @@ jobs:
           scripts/build/compose.sh
           scripts/build/lima.sh
           scripts/build/docker.sh
+          scripts/build/qemu.sh
 
       - name: Import signing certificate
         env:
@@ -162,6 +157,15 @@ jobs:
           helper="$app/Resources/lima/bin/limactl"
           test -x "$helper"
           test -f "$app/Resources/lima/share/lima/lima-guestagent.Linux-aarch64.gz"
+          qemu="$app/Resources/qemu/bin/qemu-system-aarch64"
+          test -x "$qemu"
+          test -x "$app/Resources/qemu/bin/swtpm"
+          test -f "$app/Resources/qemu/share/qemu/edk2-aarch64-code.fd"
+          python3 scripts/build/probe.py "$app/Resources/qemu"
+          "$qemu" --version
+          "$app/Resources/qemu/bin/swtpm" --version
+          codesign --verify --strict "$qemu"
+          codesign -d --entitlements - "$qemu" 2>/dev/null | grep -q com.apple.security.hypervisor
           codesign --verify --strict "$helper"
           codesign -d --entitlements - "$helper" 2>/dev/null | grep -q 'com.apple.security.virtualization'
           # Only the VM helper needs virtualization privileges.
