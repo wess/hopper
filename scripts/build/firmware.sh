@@ -42,6 +42,7 @@ git -C "$source" submodule update --init --depth 1 \
   TcgTpmPkg/Library/TpmLib/TPM
 
 cd "$source"
+export PYTHONDONTWRITEBYTECODE=1
 python3 "$root/scripts/build/firmware.py" "$source" configure
 export PYTHON_COMMAND=python3
 export WORKSPACE="$source"
@@ -54,7 +55,7 @@ set -u
 make -C BaseTools/Source/C -j "${HOPPER_BUILD_JOBS:-4}"
 # ArmVirt supplies the generic ARM platform drivers; execution is Hopper's.
 build -a AARCH64 -t CLANGPDB -b DEBUG -p HopperPkg/firmware.dsc \
-  -n "${HOPPER_BUILD_JOBS:-4}" -D FIRMWARE_VER=Hopper-UEFI-202608
+  -n "${HOPPER_BUILD_JOBS:-4}" -D FIRMWARE_VER=Hopper-UEFI-202608 -D ACPIVIEW_ENABLE=TRUE
 
 image=Build/Hopper-AArch64/DEBUG_CLANGPDB/FV/QEMU_EFI.fd
 variables=Build/Hopper-AArch64/DEBUG_CLANGPDB/FV/QEMU_VARS.fd

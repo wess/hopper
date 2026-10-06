@@ -40,8 +40,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: dtolnay/rust-toolchain@stable
+
       - name: Install firmware build tools
         run: brew install llvm lld acpica
+
+      - name: Decode ARM64 hardware tables
+        run: |
+          for cpus in 1 256; do
+            tables="$RUNNER_TEMP/hopperacpi$cpus"
+            cargo run -p machine --example acpi --locked -- "$tables" "$cpus"
+            iasl -we -d "$tables/"*.dat
+            iasl -we -p "$tables/roundtrip" -tc "$tables/dsdt.dsl"
+          done
 
       - name: Build pinned firmware
         run: |

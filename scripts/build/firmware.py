@@ -3,36 +3,14 @@
 import hashlib
 import json
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
+from firmwareprofile import configure
 
 
 def git(source, *args):
   return subprocess.check_output(["git", "-C", str(source), *args], text=True).rstrip()
-
-
-def configure(source):
-  profile = (source / "ArmVirtPkg/ArmVirtQemu.dsc").read_text()
-  for field, value in {
-    "PLATFORM_NAME": "Hopper",
-    "PLATFORM_GUID": "c7179281-6978-4488-af8c-499e572f09ca",
-    "OUTPUT_DIRECTORY": "Build/Hopper-AArch64",
-  }.items():
-    profile, count = re.subn(
-      rf"^(\s*{field}\s*=\s*)[^\n]+", rf"\g<1>{value}", profile, flags=re.MULTILINE,
-    )
-    if count != 1:
-      raise RuntimeError(f"Expected one upstream {field} definition")
-  for library in ["QemuFwCfgMmioDxeLib", "QemuFwCfgMmioPeiLib"]:
-    old = f"OvmfPkg/Library/QemuFwCfgLib/{library}.inf"
-    if profile.count(old) != 1:
-      raise RuntimeError(f"Expected one upstream {library} instance")
-    profile = profile.replace(old, "OvmfPkg/Library/QemuFwCfgLib/QemuFwCfgLibNull.inf")
-  target = source / "HopperPkg/firmware.dsc"
-  target.parent.mkdir(exist_ok=True)
-  target.write_text(profile)
 
 
 def main():
@@ -69,6 +47,11 @@ def main():
     "epoch": int(git(source, "show", "-s", "--format=%ct", "HEAD")),
     "platform": "HopperPkg/firmware.dsc",
     "profileSha256": hashlib.sha256((source / "HopperPkg/firmware.dsc").read_bytes()).hexdigest(),
+    "generatedSources": {
+      name: hashlib.sha256((source / "HopperPkg" / name).read_bytes()).hexdigest()
+      for name in ["firmware.dsc", "common.dsc.inc", "firmware.fdf", "main.fdf.inc",
+                   "pei/PlatformPeiLib.c", "pei/PlatformPeiLib.inf"]
+    },
     "target": "DEBUG",
     "toolchain": "CLANGPDB",
     "clang": subprocess.check_output([str(out / "toolchain/clang"), "--version"], text=True),

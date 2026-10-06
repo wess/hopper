@@ -4,7 +4,7 @@ fn main() -> anyhow::Result<()> {
   use machine::{
     arm,
     devices::{flash as nor, serial},
-    hypervisor as hv, platform, psci, smccc,
+    acpi, hypervisor as hv, platform, psci, smccc,
   };
   use std::collections::VecDeque;
   use std::io::Write;
@@ -47,6 +47,8 @@ fn main() -> anyhow::Result<()> {
   hv::protect(&nvram, 1)?;
   let mut ram = hv::memory(&vm, platform::RAM, topology.memory as usize)?;
   hv::write(&mut ram, 0, &tree)?;
+  let tables = acpi::bundle(&topology)?;
+  hv::write(&mut ram, (acpi::BASE - platform::RAM) as usize, &tables)?;
   let mut cpu = hv::cpu(&vm)?;
   hv::affinity(&mut cpu, 0)?;
   hv::set(&mut cpu, 0, platform::RAM)?;
@@ -57,6 +59,9 @@ fn main() -> anyhow::Result<()> {
   let mut selected_shell = false;
   let mut input = VecDeque::new();
   let mut updates = 0usize;
+  let mut listed_acpi = false;
+  let mut seen_acpi = [false; 4];
+  let mut checked_acpi = [false; 2];
   let start = std::time::Instant::now();
   hv::bounded(&mut cpu, std::time::Duration::from_secs(30), |cpu| {
     for _ in 0..1000000 {
@@ -76,11 +81,24 @@ fn main() -> anyhow::Result<()> {
               std::io::stdout().flush()?;
               if output.len() == 64 { output.remove(0); }
               output.push(byte);
+              if listed_acpi {
+                for (index, signature) in [b"FACP", b"APIC", b"GTDT", b"DSDT"].iter().enumerate() {
+                  seen_acpi[index] |= output.ends_with(*signature);
+                }
+                checked_acpi[0] |= output.ends_with(b"\t0 Error(s)");
+                checked_acpi[1] |= output.ends_with(b"\t0 Warning(s)");
+              }
               if output.ends_with(b"Shell> ") {
                 ensure!(updates > 0, "Firmware did not update its variable flash");
                 ensure!(input.is_empty(), "Firmware left diagnostic input queued");
-                eprintln!("\nFirmware reached the shell with {updates} variable flash updates");
-                return Ok(());
+                if listed_acpi {
+                  ensure!(seen_acpi.iter().all(|seen| *seen), "UEFI did not expose all ACPI tables");
+                  ensure!(checked_acpi.iter().all(|seen| *seen), "UEFI found ACPI errors or warnings");
+                  eprintln!("\nFirmware verified ACPI tables and {updates} variable flash updates");
+                  return Ok(());
+                }
+                input.extend(b"acpiview\r");
+                listed_acpi = true;
               }
               if !opened_menu && output.ends_with(b"Boot Manager Menu.") {
                 input.push_back(b'\r');
@@ -151,7 +169,11 @@ fn main() -> anyhow::Result<()> {
     }
     }
     bail!("Firmware diagnostic exhausted its exit budget")
-  })
+  })?;
+  let mut retained = vec![0; acpi::SIZE];
+  hv::read(&ram, (acpi::BASE - platform::RAM) as usize, &mut retained)?;
+  ensure!(retained == tables, "Firmware overwrote its reserved ACPI handoff");
+  Ok(())
 }
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]

@@ -15,7 +15,7 @@ pub struct Topology {
   pub redistributor_size: u64,
 }
 
-pub fn tree(topology: &Topology) -> anyhow::Result<Vec<u8>> {
+pub fn validate(topology: &Topology) -> anyhow::Result<()> {
   ensure!(
     topology.memory >= 0x1000000 && RAM.checked_add(topology.memory).is_some(),
     "Guest memory range is invalid"
@@ -33,6 +33,11 @@ pub fn tree(topology: &Topology) -> anyhow::Result<Vec<u8>> {
       && topology.redistributor_size <= 0x10000000 - REDISTRIBUTOR,
     "Interrupt redistributor region is invalid"
   );
+  Ok(())
+}
+
+pub fn tree(topology: &Topology) -> anyhow::Result<Vec<u8>> {
+  validate(topology)?;
   let mut fdt = FdtWriter::new()?;
   let root = fdt.begin_node("")?;
   fdt.property_string("compatible", "hopper,arm64")?;

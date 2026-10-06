@@ -146,8 +146,8 @@ variables are useful for remote daemons and shell-driven workflows.
 
 The replacement Windows runtime uses Hypervisor.framework directly. It is not
 connected to the app yet. Its firmware diagnostic boots ARM64 UEFI with a native
-GIC, serial console, CFI flash, and firmware service calls; this does not establish
-Windows installation or desktop support. The major release gates are in
+GIC, serial console, CFI flash, ACPI handoff, and firmware service calls. This does
+not establish Windows installation or desktop support. The major release gates are in
 [PRODUCT.md](PRODUCT.md).
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
@@ -163,9 +163,14 @@ codesign --force --sign - --entitlements assets/machine.entitlements target/debu
 target/debug/examples/firmware native/build/firmware/windows.fd /tmp/hopper.dtb native/build/firmware/variables.fd
 ```
 
-The diagnostic selects the internal shell through the serial console, verifies
-variable flash writes, and enforces a 30-second deadline. Its variable writes
-remain in memory; no user VM is created or modified.
+The diagnostic selects the internal shell through the serial console, uses
+`acpiview` to verify the installed CPU/interrupt/timer/power tables, checks reserved
+memory and variable flash writes, and enforces a 30-second deadline. Its variable
+writes remain in memory; no user VM is created or modified.
+
+`cargo run -p machine --example acpi -- /tmp/hopperacpi` exports the handoff and
+individual tables for ACPICA inspection. PCI, storage, graphics, and TPM devices
+are not implemented in the native runtime yet.
 
 ## Build a release
 
