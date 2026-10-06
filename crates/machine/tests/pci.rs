@@ -1,7 +1,18 @@
-use machine::devices::pci::{Bus, Function, ECAM_SIZE};
+use machine::devices::pci::{interrupt, Bus, Function, ECAM_SIZE};
 
 fn function() -> Function {
   Function::new(0x1af4, 0x1042, 0x010000, 1).unwrap()
+}
+
+#[test]
+fn legacy_interrupt_pins_swizzle_over_four_shared_lines() {
+  assert_eq!(interrupt(0, 1).unwrap(), 33);
+  assert_eq!(interrupt(0, 4).unwrap(), 36);
+  assert_eq!(interrupt(1, 1).unwrap(), 34);
+  assert_eq!(interrupt(31, 4).unwrap(), 35);
+  assert!(interrupt(32, 1).is_err());
+  assert!(interrupt(0, 0).is_err());
+  assert!(interrupt(0, 5).is_err());
 }
 
 #[test]

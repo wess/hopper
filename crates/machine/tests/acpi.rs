@@ -43,7 +43,7 @@ fn root_addresses_lengths_and_checksums_form_a_complete_handoff() {
   assert_eq!(u32_at(&blob, 16), 0);
   let xsdt = table(&blob, u64_at(&blob, 24));
   assert_eq!(&xsdt[..4], b"XSDT");
-  assert_eq!(xsdt.len(), 60);
+  assert_eq!(xsdt.len(), 68);
   let fadt = table(&blob, u64_at(xsdt, 36));
   assert_eq!(&fadt[..4], b"FACP");
   assert_eq!(fadt.len(), 276);
@@ -54,6 +54,43 @@ fn root_addresses_lengths_and_checksums_form_a_complete_handoff() {
   assert!(dsdt.windows(9).any(|bytes| bytes == b"ACPI0007\0"));
   assert_eq!(&table(&blob, u64_at(xsdt, 44))[..4], b"APIC");
   assert_eq!(&table(&blob, u64_at(xsdt, 52))[..4], b"GTDT");
+}
+
+#[test]
+fn pci_configuration_and_apertures_match_the_native_bus() {
+  use machine::{devices::pci::ECAM_SIZE, platform};
+  let blob = acpi::bundle(&topology(1)).unwrap();
+  let xsdt = table(&blob, u64_at(&blob, 24));
+  let mcfg = table(&blob, u64_at(xsdt, 60));
+  assert_eq!(&mcfg[..4], b"MCFG");
+  assert_eq!(mcfg.len(), 60);
+  assert_eq!(mcfg[8], 1);
+  assert_eq!(&mcfg[36..44], &[0; 8]);
+  assert_eq!(u64_at(mcfg, 44), platform::ECAM);
+  assert_eq!(&mcfg[52..60], &[0; 8]);
+  let fadt = table(&blob, u64_at(xsdt, 36));
+  let dsdt = table(&blob, u64_at(fadt, 140));
+  for identity in [b"PNP0A08\0", b"PNP0A03\0", b"PNP0C02\0"] {
+    assert!(dsdt.windows(identity.len()).any(|bytes| bytes == identity));
+  }
+  let memory = dsdt
+    .windows(4)
+    .position(|bytes| bytes == [0x87, 23, 0, 0])
+    .unwrap();
+  assert_eq!(dsdt[memory + 4], 0x0c);
+  assert_eq!(dsdt[memory + 5], 1);
+  assert_eq!(u32_at(dsdt, memory + 10), platform::PCI_MEMORY as u32);
+  assert_eq!(
+    u32_at(dsdt, memory + 14),
+    (platform::PCI_MEMORY + platform::PCI_MEMORY_SIZE - 1) as u32
+  );
+  assert_eq!(u32_at(dsdt, memory + 22), platform::PCI_MEMORY_SIZE as u32);
+  let ecam = dsdt
+    .windows(4)
+    .position(|bytes| bytes == [0x86, 9, 0, 1])
+    .unwrap();
+  assert_eq!(u32_at(dsdt, ecam + 4), platform::ECAM as u32);
+  assert_eq!(u32_at(dsdt, ecam + 8), ECAM_SIZE as u32);
 }
 
 #[test]

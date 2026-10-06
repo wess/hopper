@@ -117,6 +117,7 @@ pub fn tree(topology: &Topology) -> anyhow::Result<Vec<u8>> {
   fdt.property_string("device_type", "pci")?;
   fdt.property_u32("#address-cells", 3)?;
   fdt.property_u32("#size-cells", 2)?;
+  fdt.property_u32("#interrupt-cells", 1)?;
   fdt.property_array_u64("reg", &[ECAM, crate::devices::pci::ECAM_SIZE])?;
   fdt.property_array_u32("bus-range", &[0, 0])?;
   fdt.property_array_u32(
@@ -131,6 +132,25 @@ pub fn tree(topology: &Topology) -> anyhow::Result<Vec<u8>> {
       PCI_MEMORY_SIZE as u32,
     ],
   )?;
+  fdt.property_array_u32("interrupt-map-mask", &[0xf800, 0, 0, 7])?;
+  let mut routes = Vec::new();
+  for device in 0..32u8 {
+    for pin in 1..=4u8 {
+      routes.extend([
+        (device as u32) << 11,
+        0,
+        0,
+        pin as u32,
+        1,
+        0,
+        0,
+        0,
+        crate::devices::pci::interrupt(device, pin)? - 32,
+        4,
+      ]);
+    }
+  }
+  fdt.property_array_u32("interrupt-map", &routes)?;
   fdt.end_node(pci)?;
   let chosen = fdt.begin_node("chosen")?;
   fdt.property_string("stdout-path", "/uart@9000000")?;

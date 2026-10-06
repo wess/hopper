@@ -1,4 +1,4 @@
-fn package(opcode: &[u8], body: &[u8]) -> Vec<u8> {
+pub(super) fn package(opcode: &[u8], body: &[u8]) -> Vec<u8> {
   let count = if body.len() < 63 {
     1
   } else if body.len() < 4094 {
@@ -20,7 +20,7 @@ fn package(opcode: &[u8], body: &[u8]) -> Vec<u8> {
   bytes
 }
 
-pub(super) fn cpus(count: u32) -> Vec<u8> {
+pub(super) fn namespace(count: u32) -> Vec<u8> {
   let mut scope = b"\\_SB_".to_vec();
   for index in 0..count {
     let mut device = format!("C{index:03X}").into_bytes();
@@ -30,5 +30,6 @@ pub(super) fn cpus(count: u32) -> Vec<u8> {
     device.extend(b"\x08_STA\x0a\x0f");
     scope.extend(package(&[0x5b, 0x82], &device));
   }
+  scope.extend(super::pci::namespace());
   package(&[0x10], &scope)
 }

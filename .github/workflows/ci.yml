@@ -52,6 +52,7 @@ jobs:
             cargo run -p machine --example acpi --locked -- "$tables" "$cpus"
             iasl -we -d "$tables/"*.dat
             iasl -we -p "$tables/roundtrip" -tc "$tables/dsdt.dsl"
+            python3 scripts/check/acpi.py "$tables/dsdt.dat"
           done
 
       - name: Build pinned firmware

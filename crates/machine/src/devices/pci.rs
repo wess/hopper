@@ -4,6 +4,15 @@ use anyhow::{ensure, Context};
 use std::collections::BTreeMap;
 
 pub const ECAM_SIZE: u64 = 1 << 20;
+pub const FIRST_IRQ: u32 = 33;
+
+pub fn interrupt(device: u8, pin: u8) -> anyhow::Result<u32> {
+  ensure!(
+    device < 32 && (1..=4).contains(&pin),
+    "Invalid PCI interrupt pin"
+  );
+  Ok(FIRST_IRQ + (device as u32 + pin as u32 - 1) % 4)
+}
 
 struct Bar {
   slot: usize,

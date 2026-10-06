@@ -164,9 +164,13 @@ target/debug/examples/firmware native/build/firmware/windows.fd /tmp/hopper.dtb 
 ```
 
 The diagnostic selects the internal shell through the serial console, uses
-`acpiview` to verify the installed CPU/interrupt/timer/power tables, checks reserved
+`acpiview` to verify the installed CPU/interrupt/timer/power/PCI tables, checks reserved
 memory, PCI enumeration and variable flash writes, and enforces a 30-second deadline.
 Its variable writes remain in memory; no user VM is created or modified.
+
+The PCI root describes one bus, a 256 MiB memory aperture, a separate ECAM
+reservation, and four shared interrupt lines. CI uses ACPICA to interpret its
+resource buffers and verify every interrupt route. Disk I/O remains under development.
 
 `cargo run -p machine --example acpi -- /tmp/hopperacpi` exports the handoff and
 individual tables for ACPICA inspection. PCI, storage, graphics, and TPM devices

@@ -62,7 +62,7 @@ fn main() -> anyhow::Result<()> {
   let mut bus = pci::Bus::default();
   let mut pci_reads = 0usize;
   let mut listed_acpi = false;
-  let mut seen_acpi = [false; 4];
+  let mut seen_acpi = [false; 5];
   let mut checked_acpi = [false; 2];
   let start = std::time::Instant::now();
   hv::bounded(&mut cpu, std::time::Duration::from_secs(30), |cpu| {
@@ -84,7 +84,7 @@ fn main() -> anyhow::Result<()> {
               if output.len() == 64 { output.remove(0); }
               output.push(byte);
               if listed_acpi {
-                for (index, signature) in [b"FACP", b"APIC", b"GTDT", b"DSDT"].iter().enumerate() {
+                for (index, signature) in [b"FACP", b"APIC", b"GTDT", b"DSDT", b"MCFG"].iter().enumerate() {
                   seen_acpi[index] |= output.ends_with(*signature);
                 }
                 checked_acpi[0] |= output.ends_with(b"\t0 Error(s)");
