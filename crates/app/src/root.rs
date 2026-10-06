@@ -87,8 +87,13 @@ impl Root {
                 }
                 // gpui waits for shutdown hooks, so the managed engine gets a
                 // chance to release host resources before the process exits.
-                if let Err(error) = host.stop_engine().await {
-                    tracing::warn!("engine shutdown failed: {error}");
+                match bridge::runtime()
+                    .spawn(async move { host.stop_engine().await })
+                    .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(error)) => tracing::warn!("engine shutdown failed: {error}"),
+                    Err(error) => tracing::warn!("engine shutdown task failed: {error}"),
                 }
             }
         })

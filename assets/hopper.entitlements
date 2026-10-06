@@ -2,10 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- Hopper no longer runs a VM of its own. On macOS the engine is Apple's
-	     `container`, which does its own virtualization in its own privileged
-	     helpers, so `com.apple.security.virtualization` is not needed here —
-	     and without it an ad-hoc dev build behaves like the signed one. -->
+	<!-- The detached VM helper carries its own virtualization entitlement. -->
 
 	<!-- Bind-mounted host directories, and the tars an import stages on disk. -->
 	<key>com.apple.security.files.user-selected.read-write</key>

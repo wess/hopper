@@ -48,6 +48,10 @@ impl Engines {
         self.registry.active().map(|p| p.managed()).unwrap_or(false)
     }
 
+    pub fn starting(&self) -> bool {
+        self.registry.active().is_some_and(|p| p.starting())
+    }
+
     pub async fn start(&self, resources: EngineResources) -> anyhow::Result<()> {
         match self.registry.active() {
             Some(provider) => provider.start(resources).await,

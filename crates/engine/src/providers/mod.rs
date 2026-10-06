@@ -5,6 +5,7 @@ pub mod apple;
 pub mod existing;
 pub mod linux;
 pub mod named;
+pub mod vm;
 
 #[cfg(target_os = "macos")]
 pub use apple::AppleContainers;

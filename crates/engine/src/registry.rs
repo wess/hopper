@@ -31,8 +31,9 @@ impl Registry {
         #[allow(unused_mut)]
         let mut providers: Vec<Arc<dyn Provider>> = Vec::new();
 
-        // macOS runs on Apple's runtime. It comes first because on a machine
-        // that has it, it is the engine Hopper is for.
+        // Hopper's private VM leads; Apple's runtime remains an explicit choice.
+        #[cfg(target_os = "macos")]
+        providers.push(Arc::new(crate::providers::vm::Vm::default()));
         #[cfg(target_os = "macos")]
         providers.push(Arc::new(crate::providers::AppleContainers::new()));
 
@@ -382,9 +383,10 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn apple_containers_is_registered_and_ordered_first_on_macos() {
+    fn hopper_vm_is_registered_and_ordered_first_on_macos() {
         let ids = registry().ids();
-        assert_eq!(ids.first(), Some(&"apple"));
+        assert_eq!(ids.first(), Some(&"vm"));
+        assert!(ids.contains(&"apple"));
         assert_eq!(
             ids.last(),
             Some(&"existing"),
@@ -554,23 +556,17 @@ mod tests {
     #[tokio::test]
     #[cfg(target_os = "macos")]
     async fn a_mac_falls_forward_to_the_engine_hopper_can_supply() {
-        // Docker is not a requirement on macOS, so a fallback with nothing
-        // behind it has to lead to Apple's runtime — installed or not.
-        //
-        // A Mac too old for that runtime is the one case with nowhere to go,
-        // and declining is the documented answer. CI runs macOS 14 and a dev
-        // machine runs 26, so both halves have to be asserted — but `None` is
-        // only allowed for that reason, or a real regression would pass here.
+        // an absent external daemon leads to Hopper's own VM
         let r = registry();
         match r.fall_forward().await {
             Some(status) => {
-                assert_eq!(status.provider, "apple");
+                assert_eq!(status.provider, "vm");
                 assert!(status.managed);
-                assert_eq!(r.active_id(), "apple", "and it becomes the active provider");
+                assert_eq!(r.active_id(), "vm", "and it becomes the active provider");
             }
             None => assert!(
-                apple::system::too_old().is_some(),
-                "a Mac new enough for Apple's runtime must not refuse to fall forward"
+                std::env::consts::ARCH != "aarch64",
+                "an Apple silicon Mac must be offered Hopper's VM"
             ),
         }
     }

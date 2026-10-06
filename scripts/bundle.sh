@@ -6,11 +6,8 @@
 # CODESIGN_IDENTITY when set (a real Developer ID for a notarizable build),
 # otherwise ad-hoc ("-") so it still runs locally.
 #
-# There is no always-running sidecar or VM: on macOS the engine is Apple's
-# `container`, installed separately and running under its own privileged
-# helpers. The bundled CLI and Compose binaries are invoked only on demand.
-# Hopper asks for no virtualization entitlement, and an ad-hoc build behaves
-# like the signed one.
+# Lima's detached helper owns the Linux VM. Its virtualization entitlement
+# stays on the helper; Hopper itself only needs files and networking.
 #
 # Usage: scripts/bundle.sh
 set -euo pipefail
@@ -23,6 +20,12 @@ src_bin="hopperdev"
 bin_name="hopper"
 bundle_id="io.wess.hopper"
 identity="${CODESIGN_IDENTITY:--}"
+profile="${HOPPER_BUILD_PROFILE:-release}"
+case "$profile" in
+  release) target_dir=target/release ;;
+  dev) target_dir=target/debug ;;
+  *) echo "error: HOPPER_BUILD_PROFILE must be release or dev" >&2; exit 1 ;;
+esac
 
 [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || {
   echo "error: Hopper releases require an Apple silicon Mac" >&2
@@ -33,15 +36,25 @@ version="$(sed -n 's/^version = "\([0-9][^"]*\)".*/\1/p' Cargo.toml | head -1)"
 [ -n "$version" ] || { echo "error: could not read version from Cargo.toml" >&2; exit 1; }
 echo "[bundle] $app_name $version"
 
-echo "[bundle] cargo build --release -p app -p mcp --locked"
-cargo build --release -p app -p mcp --locked
+echo "[bundle] cargo build --profile $profile -p app -p mcp --locked"
+cargo build --profile "$profile" -p app -p mcp --locked
 
-app="dist/$app_name.app"
+mkdir -p dist
+stage="$(mktemp -d dist/.hopper.XXXXXX)"
+trap 'rm -rf "$stage"' EXIT
+app="$stage/$app_name.app"
 contents="$app/Contents"
-rm -rf "$app"
 mkdir -p "$contents/MacOS" "$contents/Resources"
 
-cp "target/release/$src_bin" "$contents/MacOS/$bin_name"
+[ -x native/build/lima/bin/limactl ] || scripts/build/lima.sh
+[ -f native/build/docker ] || scripts/build/docker.sh
+[ -f native/build/compose ] || scripts/build/compose.sh
+mkdir -p "$contents/Resources/lima/bin" "$contents/Resources/lima/share/doc/lima"
+cp native/build/lima/bin/limactl "$contents/Resources/lima/bin/limactl"
+cp -R native/build/lima/share/lima "$contents/Resources/lima/share/"
+cp native/build/lima/share/doc/lima/LICENSE "$contents/Resources/lima/share/doc/lima/"
+
+cp "$target_dir/$src_bin" "$contents/MacOS/$bin_name"
 [ -f assets/icon.icns ] && cp assets/icon.icns "$contents/Resources/icon.icns"
 
 # The standalone Compose binary, so stacks work with no user-installed docker
@@ -61,13 +74,13 @@ fi
 # The MCP server is part of the release, too. Keeping it beside the app gives
 # AI clients a stable executable path without requiring a global install.
 mkdir -p "$contents/MacOS/sidecars"
-cp target/release/hoppermcp "$contents/MacOS/sidecars/hoppermcp"
+cp "$target_dir/hoppermcp" "$contents/MacOS/sidecars/hoppermcp"
 
 # Never let a stale sidecar from another checkout or host architecture make it
 # into a signed app. Universal binaries pass when they contain arm64.
 if [ -d "$contents/MacOS/sidecars" ]; then
   required_arch=arm64
-  for sidecar in "$contents/MacOS/sidecars/"*; do
+  while IFS= read -r sidecar; do
     [ -e "$sidecar" ] || continue
     [ -x "$sidecar" ] || {
       echo "error: sidecar is not executable: $sidecar" >&2
@@ -78,7 +91,7 @@ if [ -d "$contents/MacOS/sidecars" ]; then
       echo "error: sidecar $sidecar does not contain host architecture $required_arch (has: ${arches:-unknown})" >&2
       exit 1
     }
-  done
+  done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" -type f -perm -111)
 fi
 
 cat > "$contents/Info.plist" << PLIST
@@ -120,11 +133,12 @@ if [ "$identity" != "-" ]; then
 fi
 
 echo "[bundle] codesign ($identity)"
-for sidecar in "$contents/MacOS/sidecars/"*; do
+while IFS= read -r sidecar; do
   [ -e "$sidecar" ] || continue
+  chmod u+w "$sidecar"
   codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
-    --sign "$identity" "$sidecar"
-done
+    --preserve-metadata=entitlements --sign "$identity" "$sidecar"
+done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" -type f -perm -111)
 codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
   --entitlements assets/hopper.entitlements \
   --sign "$identity" "$contents/MacOS/$bin_name"
@@ -133,4 +147,6 @@ codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
   --sign "$identity" "$app"
 
 codesign --verify --strict --verbose=2 "$app"
-echo "[bundle] -> $app"
+rm -rf "dist/$app_name.app"
+mv "$app" "dist/$app_name.app"
+echo "[bundle] -> dist/$app_name.app"
