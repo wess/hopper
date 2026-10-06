@@ -54,6 +54,7 @@ pub enum Offer {
 /// agree when the user switches between Docker, Podman, and Apple's runtime.
 pub fn provider_label(provider: &str) -> &'static str {
     match provider {
+        "vm" => "Hopper Engine",
         "apple" => "Apple Containers",
         "docker" => "Docker",
         "podman" => "Podman",
@@ -86,7 +87,9 @@ pub fn describe(e: &EngineStatus) -> Setup {
         Starting => Setup {
             icon: IconName::HardDriveDownload,
             tone: ColorName::Blue,
-            title: if apple {
+            title: if e.provider == "vm" {
+                "Starting Hopper's engine".into()
+            } else if apple {
                 "Starting Apple Containers".into()
             } else {
                 format!("Connecting to {provider}")
@@ -149,11 +152,7 @@ pub fn describe(e: &EngineStatus) -> Setup {
             body,
             hint,
             busy: false,
-            offer: if e.managed {
-                Offer::Start
-            } else {
-                Offer::Nothing
-            },
+            offer: Offer::Nothing,
         },
         Unreachable => Setup {
             icon: IconName::CircleAlert,
@@ -285,7 +284,13 @@ impl EngineSetup {
 impl Render for EngineSetup {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
-        let setup = describe(&self.state.engine.get(cx));
+        let engine = self.state.engine.get(cx);
+        let mut setup = describe(&engine);
+        if self.starting {
+            setup.busy = true;
+            setup.offer = Offer::Nothing;
+            setup.title = format!("Starting {}", provider_label(&engine.provider));
+        }
         // Read the offer before the card consumes the setup's strings.
         let (can_install, can_start) = (setup.can_install(), setup.can_start());
 
@@ -357,8 +362,10 @@ impl Render for EngineSetup {
             card = card.child(
                 Button::new(
                     "engine-setup-start",
-                    if self.starting {
-                        "Starting…"
+                    if engine.state == EngineState::Unreachable {
+                        "Retry engine startup"
+                    } else if engine.provider == "apple" {
+                        "Start Apple Containers"
                     } else {
                         "Start Hopper's engine"
                     },
@@ -379,7 +386,8 @@ impl Render for EngineSetup {
             .p_6()
             .child(
                 div()
-                    .w(px(460.0))
+                    .w_full()
+                    .max_w(px(460.0))
                     .p_6()
                     .rounded_lg()
                     .bg(palette.bg_subtle)

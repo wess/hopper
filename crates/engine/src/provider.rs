@@ -22,6 +22,10 @@ pub trait Provider: Send + Sync {
         false
     }
 
+    fn starting(&self) -> bool {
+        false
+    }
+
     /// Which client this engine is driven by. Almost every engine speaks the
     /// Engine API; Apple's speaks nothing, and needs its own.
     fn runtime(&self) -> RuntimeKind {
@@ -70,6 +74,7 @@ pub trait Provider: Send + Sync {
 pub fn candidates_for(os: &str) -> Vec<&'static str> {
     let mut out: Vec<&'static str> = Vec::new();
     if os == "macos" {
+        out.push("vm");
         out.push("apple");
     }
     out.extend(crate::daemons::ids(os));
@@ -110,9 +115,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn macos_leads_with_apple_containers_but_can_fall_back() {
+    fn macos_leads_with_hoppers_vm_but_can_fall_back() {
         let order = candidates_for("macos");
-        assert_eq!(order.first(), Some(&"apple"));
+        assert_eq!(order.first(), Some(&"vm"));
         assert_eq!(
             order.last(),
             Some(&"existing"),
@@ -131,10 +136,10 @@ mod tests {
     }
 
     #[test]
-    fn a_mac_is_offered_the_engines_that_run_there_led_by_apples() {
+    fn a_mac_is_offered_the_engines_that_run_there_led_by_hoppers_vm() {
         assert_eq!(
             candidates_for("macos"),
-            vec!["apple", "docker", "podman", "colima", "rancher", "existing"]
+            vec!["vm", "apple", "docker", "podman", "colima", "rancher", "existing"]
         );
     }
 
@@ -162,7 +167,7 @@ mod tests {
 
     #[test]
     fn with_no_preference_the_platform_default_wins() {
-        assert_eq!(preferred(None, None, "macos"), "apple");
+        assert_eq!(preferred(None, None, "macos"), "vm");
         assert_eq!(preferred(None, None, "linux"), "podman");
     }
 
@@ -181,7 +186,7 @@ mod tests {
 
     #[test]
     fn blank_preferences_are_ignored_rather_than_selecting_nothing() {
-        assert_eq!(preferred(Some("  "), None, "macos"), "apple");
+        assert_eq!(preferred(Some("  "), None, "macos"), "vm");
         assert_eq!(preferred(Some(""), Some("   "), "linux"), "podman");
     }
 }

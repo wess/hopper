@@ -112,18 +112,12 @@ jobs:
             fi
           done
 
-      - name: Fetch Compose + Docker CLI (host binaries)
+      - name: Fetch VM helper, Compose, and Docker CLI
         run: |
           set -euo pipefail
           scripts/build/compose.sh
-          # Keep the Docker CLI available for optional Engine API providers.
-          # Apple's runtime has no Docker socket for this CLI to target.
-          ver="27.5.1"
-          test "$(uname -m)" = arm64
-          curl -fsSL "https://download.docker.com/mac/static/stable/aarch64/docker-${ver}.tgz" \
-            | tar -xz -C /tmp
-          mkdir -p native/build
-          cp /tmp/docker/docker native/build/docker
+          scripts/build/lima.sh
+          scripts/build/docker.sh
 
       - name: Import signing certificate
         env:
@@ -163,11 +157,16 @@ jobs:
           app="dist/Hopper.app/Contents"
           codesign --verify --strict --verbose=2 dist/Hopper.app
           test -x "$app/MacOS/hopper" || { echo "FATAL: app binary missing"; exit 1; }
-          # Hopper no longer ships a VM, so it no longer asks for the
-          # entitlement that used to gate it. Carrying it would widen the
-          # sandbox for nothing, so assert it is *absent*.
+          test -x "$app/MacOS/sidecars/docker"
+          test -x "$app/MacOS/sidecars/compose"
+          helper="$app/Resources/lima/bin/limactl"
+          test -x "$helper"
+          test -f "$app/Resources/lima/share/lima/lima-guestagent.Linux-aarch64.gz"
+          codesign --verify --strict "$helper"
+          codesign -d --entitlements - "$helper" 2>/dev/null | grep -q 'com.apple.security.virtualization'
+          # Only the VM helper needs virtualization privileges.
           if codesign -d --entitlements - "$app/MacOS/hopper" 2>/dev/null | grep -q virtualization; then
-            echo "FATAL: the virtualization entitlement is back; Apple's runtime does its own"
+            echo "FATAL: virtualization entitlement belongs on the helper"
             exit 1
           fi
           echo "OK: signed, and asking for no virtualization entitlement"

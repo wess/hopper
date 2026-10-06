@@ -197,7 +197,7 @@ impl Host {
     /// re-running it is what keeps that offer current in both directions.
     pub async fn poll_engine(&self) -> EngineStatus {
         let status = self.engine_status().await;
-        if status.connected {
+        if status.connected || status.state == model::EngineState::Starting {
             return status;
         }
         self.select_engine().await
@@ -205,6 +205,10 @@ impl Host {
 
     /// Probe the engine and describe what we found.
     pub async fn engine_status(&self) -> EngineStatus {
+        // a VM boot holds selection stable, but its progress must remain visible
+        if self.engines.starting() {
+            return self.engines.status().await;
+        }
         // Keep a status probe from racing a provider switch. The client is
         // shared by all providers, so changing its endpoint while a ping or
         // version negotiation is in flight could report the wrong daemon.
@@ -213,6 +217,12 @@ impl Host {
         // its provider reports on the services instead.
         if self.runtime_kind() == RuntimeKind::Apple {
             return self.engines.status().await;
+        }
+        if self.engines.active_id() == "vm" {
+            let status = self.engines.status().await;
+            if !status.connected {
+                return status;
+            }
         }
 
         let provider = self.provider.read().unwrap().clone();

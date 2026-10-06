@@ -4,6 +4,7 @@ pub mod daemons;
 pub mod provider;
 pub mod providers;
 pub mod registry;
+pub mod vm;
 
 pub use provider::Provider;
 pub use registry::Registry;

@@ -5,14 +5,14 @@ replacement written in Rust. The UI is [gpui](https://github.com/zed-industries/
 + [guise](https://github.com/wess/guise); the async layer is Tokio.
 
 Hopper currently targets **Apple silicon Macs running macOS 26 or later**. Its
-engine is [Apple's `container`](https://github.com/apple/container): every
-container is its own lightweight VM, maintained by Apple. Hopper installs and
-drives the runtime for you. It can also attach to a Docker-compatible endpoint
+engine is a persistent Linux VM running Docker, managed through a bundled
+[Lima](https://lima-vm.io/) Virtualization.framework helper. Hopper creates,
+starts, and stops the VM for you. It can also attach to a Docker-compatible endpoint
 on the Mac, and **Import from Docker** brings your images and containers across.
 
-No bundled browser or Electron, no always-running sidecar or VM, and no
-entitlements beyond files and networking. Release builds may include the
-standalone Docker CLI and Compose binaries used on demand for compatibility.
+No bundled browser or Electron. The VM runs in a separate helper process, so a
+UI crash does not take down containers. Settings controls whether a normal app
+quit stops the engine. Releases bundle the VM helper, Docker CLI, and Compose.
 
 ## Features
 
@@ -34,9 +34,9 @@ standalone Docker CLI and Compose binaries used on demand for compatibility.
   protected).
 - **Stacks** — compose projects reconstructed from container labels, so they
   appear with no compose CLI and start/stop label-driven.
-- **Settings** — choose Automatic, Apple Containers, Docker, Podman, Colima,
+- **Settings** — choose Automatic, Hopper Engine, Apple Containers, Docker, Podman, Colima,
   Rancher Desktop, or an existing endpoint; control lifecycle, appearance,
-  per-container resource guidance, and Docker CLI integration.
+  VM CPU/memory/disk resources, and Docker CLI integration.
 - **Migration** — scan a source engine (Docker Desktop / Colima / Rancher) and
   copy images, networks, and container configuration into Hopper's engine;
   named volumes referenced by recreated containers are created as needed,
@@ -47,7 +47,15 @@ standalone Docker CLI and Compose binaries used on demand for compatibility.
 
 ### Engines
 
-- **macOS — Apple Containers.** Needs an Apple silicon Mac running macOS 26. If it is not installed, Hopper
+- **macOS — Hopper Engine.** A single headless Linux VM runs a rootful Docker
+  daemon. First startup downloads Linux and provisions Docker; subsequent starts
+  reuse the disk. VM data lives under `~/.hopper/engine/lima`, separate from any
+  existing Lima or Colima installation (`HOPPER_DIR` overrides the root).
+  The user's home folder is shared through virtiofs. Published TCP ports are
+  forwarded to localhost. CPU and memory apply after stopping and starting;
+  disk size applies at creation. Retry restarts an unresponsive VM and keeps its
+  disk. Startup diagnostics are in `~/.hopper/engine/lima/engine.log`.
+- **Apple Containers (optional).** Needs an Apple silicon Mac running macOS 26. If it is not installed, Hopper
   offers to fetch Apple's signed installer and hands it to the system installer;
   Hopper never elevates. After that it starts and stops the services itself.
 - **Existing engines.** On macOS, Hopper can attach to Docker Desktop, Podman,
@@ -77,7 +85,7 @@ crates/
   store     ~/.hopper/ JSON persistence + OS keychain
   docker    Engine API client (hyper over unix/tcp/npipe) + every domain module
   apple     Apple Containers, driven through the `container` CLI
-  engine    provider abstraction; Apple / Docker-or-Podman / existing
+  engine    managed Linux VM / Apple / Docker-or-Podman / existing
   migrate   Docker Desktop → Hopper migration
   host      the async service facade the UI calls
   mcp       the stdio MCP server (hoppermcp)
@@ -99,6 +107,11 @@ cargo test                  # the whole suite
 cargo clippy --all-targets  # lint
 cargo run -p mcp            # the stdio MCP server
 ```
+
+For development, run `scripts/build/lima.sh` once to fetch the pinned VM helper
+and matching templates. `HOPPER_LIMA_BIN` overrides its path. The helper is bundled
+automatically by `scripts/bundle.sh`; users do not need Homebrew or Lima installed.
+`cargo run -p engine --example vm -- start` exercises the managed VM directly.
 
 An engine must be reachable. That can be Apple's `container`, Docker,
 Podman, Colima, Rancher Desktop, or another Docker-compatible endpoint;

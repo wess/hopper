@@ -9,9 +9,11 @@ Desktop replacement written entirely in Rust. The UI is
 [gpui](https://github.com/zed-industries/zed) + [guise](https://github.com/wess/guise);
 the async layer is Tokio.
 
-It speaks to two kinds of engine. On **macOS** it drives
-[Apple's `container`](https://github.com/apple/container) runtime, which needs
-macOS 26 — each container is its own lightweight VM, maintained by Apple. On
+It speaks to two kinds of engine. On **macOS** its default managed engine is a
+headless Linux VM running rootful Docker. A bundled Lima helper drives Apple's
+Virtualization.framework and owns guest provisioning, file sharing, and port
+forwarding. VM data lives under `~/.hopper/engine/lima`, isolated from other
+Lima installations. Apple's `container` runtime remains an optional backend. On
 **Linux** it attaches to whichever of Docker or Podman is installed. Anything
 that answers the Docker Engine API (Docker Desktop, Colima, Rancher Desktop, a
 remote daemon over TCP) works everywhere as a fallback.
@@ -21,8 +23,8 @@ workspace layered bottom-up, gpui-free core crates, one Tokio↔gpui bridge.
 
 > Ported from an earlier TypeScript/Bun + React build, and from a hand-rolled
 > Virtualization.framework VM that Apple's runtime now supersedes on macOS.
-> Nothing in the repo depends on Bun, Node, `butter`, `basket`, or a guest
-> kernel any more.
+> Nothing in the repo depends on Bun, Node, `butter`, or `basket`. Lima supplies
+> the guest boot machinery; Hopper does not build a kernel or initramfs.
 
 ## Commands
 
@@ -64,13 +66,15 @@ the gpui-free core never imports gpui.
   `exec.rs` hijacks the socket for an interactive TTY (needs the
   `Upgrade: tcp` / `Connection: Upgrade` headers or the daemon won't 101);
   `archive.rs` copies files in/out and browses container filesystems.
-- **`apple`** — Apple Containers, the macOS engine. `container` talks to its
+- **`apple`** — the optional Apple Containers backend. `container` talks to its
   apiserver over XPC and publishes no Docker Engine API (the request to expose
   one was closed as not planned), so `cli.rs` drives the binary and `wire.rs`
   maps its JSON onto the same `model` types the Engine API path produces. Be
   liberal in what you accept there: Apple promises stability only within a
   patch version.
 - **`engine`** — the provider abstraction (attach to an engine, or supply one).
+  `providers/vm.rs` manages Hopper's private Lima VM; `vm/` holds its CLI and
+  profile. Docker readiness, rather than VM boot alone, determines connection.
   `providers/apple.rs` is the macOS engine, `providers/linux.rs` finds Docker or
   Podman (rootless sockets first), `providers/existing.rs` is the
   always-available fallback.

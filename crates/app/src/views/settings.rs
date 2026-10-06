@@ -12,7 +12,7 @@
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{div, px, Context, SharedString, UpdateGlobal, Window};
+use gpui::{div, px, Context, Entity, SharedString, UpdateGlobal, Window};
 use guise::prelude::*;
 
 use crate::bridge;
@@ -72,6 +72,10 @@ pub struct Settings {
     state: AppState,
     busy: bool,
     notice: Option<String>,
+    resource_notice: Option<Result<String, String>>,
+    cpus: Entity<NumberInput>,
+    memory: Entity<NumberInput>,
+    disk: Entity<NumberInput>,
     /// Engines this machine could be pointed at.
     choices: Vec<EngineChoice>,
     /// The pinned engine id, or `None` for automatic.
@@ -93,10 +97,38 @@ impl Settings {
         watch(cx, &state.settings);
         let settings = state.host.settings();
         let preference = settings.engine_preference.clone();
+        let cpus = cx.new(|cx| {
+            NumberInput::new(cx)
+                .min(1.0)
+                .max(64.0)
+                .step(1.0)
+                .value(settings.resources.cpus as f64)
+                .label("CPU cores")
+        });
+        let memory = cx.new(|cx| {
+            NumberInput::new(cx)
+                .min(1.0)
+                .max(256.0)
+                .step(1.0)
+                .value(settings.resources.memory_gib as f64)
+                .label("Memory (GiB)")
+        });
+        let disk = cx.new(|cx| {
+            NumberInput::new(cx)
+                .min(10.0)
+                .max(2048.0)
+                .step(1.0)
+                .value(settings.resources.disk_gib as f64)
+                .label("Disk (GiB)")
+        });
         let mut view = Self {
             state,
             busy: false,
             notice: None,
+            resource_notice: None,
+            cpus,
+            memory,
+            disk,
             choices: Vec::new(),
             preference,
             loading_choices: false,
@@ -119,6 +151,50 @@ impl Settings {
         } else {
             self.state.settings.set(cx, settings);
             self.notice = None;
+        }
+        cx.notify();
+    }
+
+    fn save_resources(&mut self, cx: &mut Context<Self>) {
+        let mut settings = self.state.host.settings();
+        let (Some(cpus), Some(memory), Some(disk)) = (
+            self.cpus.read(cx).value_f64(),
+            self.memory.read(cx).value_f64(),
+            self.disk.read(cx).value_f64(),
+        ) else {
+            self.resource_notice = Some(Err(
+                "Enter a number in each VM resource field before saving.".into(),
+            ));
+            cx.notify();
+            return;
+        };
+        if [cpus, memory, disk]
+            .iter()
+            .any(|value| !value.is_finite() || value.fract() != 0.0)
+            || !(1.0..=64.0).contains(&cpus)
+            || !(1.0..=256.0).contains(&memory)
+            || !(10.0..=2048.0).contains(&disk)
+        {
+            self.resource_notice = Some(Err(
+                "Use whole numbers: 1–64 CPU cores, 1–256 GiB memory, and 10–2048 GiB disk.".into(),
+            ));
+            cx.notify();
+            return;
+        }
+        settings.resources = model::EngineResources {
+            cpus: cpus as u32,
+            memory_gib: memory as u32,
+            disk_gib: disk as u32,
+        }
+        .bounded();
+        match self.state.host.save_settings(settings.clone()) {
+            Ok(()) => {
+                self.state.settings.set(cx, settings);
+                self.resource_notice = Some(Ok(format!("Saved: {cpus} cores, {memory} GiB memory, {disk} GiB initial disk. Stop and start the engine to apply CPU and memory changes.")));
+            }
+            Err(error) => {
+                self.resource_notice = Some(Err(format!("Could not save VM resources: {error}")))
+            }
         }
         cx.notify();
     }
@@ -407,14 +483,23 @@ impl Render for Settings {
                 Group::new()
                     .gap(Size::Xs)
                     .child(
-                        Button::new("engine-start", "Start engine")
-                            .size(Size::Xs)
-                            .variant(Variant::Light)
-                            .color(ColorName::Green)
-                            // Only a managed engine can be started from here;
-                            // an engine someone else runs is theirs to control.
-                            .disabled(self.busy || !can_start)
-                            .on_click(cx.listener(|this, _, _, cx| this.start_engine(cx))),
+                        Button::new(
+                            "engine-start",
+                            if self.busy {
+                                "Working…"
+                            } else if engine.state == EngineState::Unreachable {
+                                "Retry startup"
+                            } else {
+                                "Start engine"
+                            },
+                        )
+                        .size(Size::Xs)
+                        .variant(Variant::Light)
+                        .color(ColorName::Green)
+                        // Only a managed engine can be started from here;
+                        // an engine someone else runs is theirs to control.
+                        .disabled(self.busy || !can_start)
+                        .on_click(cx.listener(|this, _, _, cx| this.start_engine(cx))),
                     )
                     .child(
                         Button::new("engine-stop", "Stop engine")
@@ -426,6 +511,9 @@ impl Render for Settings {
                     ),
             );
 
+        if let Some(detail) = &engine.detail {
+            engine_body = engine_body.child(Text::new(detail.clone()).size(Size::Xs).dimmed());
+        }
         if let Some(notice) = &self.notice {
             let red = guise::theme::theme(cx).color(ColorName::Red, 6);
             engine_body = engine_body.child(Text::new(notice.clone()).size(Size::Xs).color(red));
@@ -436,6 +524,7 @@ impl Render for Settings {
         // to provide one.
         let mut buttons = Group::new()
             .gap(Size::Xs)
+            .wrap(true)
             .child(self.engine_button(None, "Automatic", cx))
             .child(
                 Button::new(
@@ -459,8 +548,7 @@ impl Render for Settings {
         let mut choice_body = Stack::new().gap(Size::Sm).child(buttons).child(
             Text::new(match self.preference.as_deref() {
                 None => {
-                    "Hopper picks the engine this machine is best on, and \
-                         falls back to whatever is already running."
+                    "Hopper uses a connected engine when available, otherwise its own Linux VM."
                 }
                 Some(_) => "Pinned. Hopper will not move off this engine on its own.",
             })
@@ -511,7 +599,7 @@ impl Render for Settings {
         // Gated on the Mac being able to run it: an install cannot fix macOS 25.
         #[cfg(target_os = "macos")]
         if cfg!(target_arch = "aarch64")
-            && self.choices.iter().any(|c| c.managed && !c.available)
+            && self.choices.iter().any(|c| c.id == "apple" && !c.available)
             && apple::system::too_old().is_none()
         {
             choice_body = choice_body.child(
@@ -597,7 +685,24 @@ impl Render for Settings {
                     .child(Switch::new("keep-engine-alive").size(Size::Sm).checked(settings.keep_engine_on_quit).on_change(cx.listener(|this, _, _, cx| this.toggle(ToggleField::KeepAlive, cx))))
                     .child(Stack::new().gap(Size::Xs).child(Text::new("Keep the engine running after closing Hopper").size(Size::Xs)).child(Text::new("Useful for CLI and CI workloads; uses resources until stopped.").size(Size::Xs).dimmed())),
             );
-        let resource_body = if self.state.host.runtime_kind() == RuntimeKind::Apple {
+        let resource_body = if engine.provider == "vm" {
+            Stack::new().gap(Size::Sm)
+                .child(Text::new("One Linux VM runs your containers. CPU and memory changes apply after stopping and starting the engine.").size(Size::Xs))
+                .child(Group::new().gap(Size::Sm).align(Align::Start)
+                    .child(div().w(px(180.0)).h(px(84.0)).child(self.cpus.clone()))
+                    .child(div().w(px(180.0)).h(px(84.0)).child(self.memory.clone()))
+                    .child(div().w(px(180.0)).h(px(84.0)).child(self.disk.clone())))
+                .child(Text::new("Disk size applies when the VM is first created. Existing disks and volumes are kept. Your home folder is shared with the VM; published ports are available on localhost.").size(Size::Xs).dimmed())
+                .child(Button::new("engine-save-resources", "Save VM resources")
+                    .size(Size::Xs).variant(Variant::Light).color(ColorName::Blue)
+                    .disabled(self.busy)
+                    .on_click(cx.listener(|this, _, _, cx| this.save_resources(cx))))
+                .children(self.resource_notice.as_ref().map(|notice| match notice {
+                    Ok(message) => Text::new(message.clone()).size(Size::Xs).dimmed(),
+                    Err(message) => Text::new(message.clone()).size(Size::Xs).color(guise::theme::theme(cx).color(ColorName::Red, 6)),
+                }))
+                .into_any_element()
+        } else if self.state.host.runtime_kind() == RuntimeKind::Apple {
             Stack::new()
                 .gap(Size::Xs)
                 .child(
@@ -653,7 +758,15 @@ impl Render for Settings {
                             .child(self.section("Which engine", choice_body, cx))
                             .child(self.section("Docker CLI", cli_body, cx))
                             .child(self.section("Lifecycle", lifecycle_body, cx))
-                            .child(self.section("Container resources", resource_body, cx))
+                            .child(self.section(
+                                if engine.provider == "vm" {
+                                    "VM resources"
+                                } else {
+                                    "Container resources"
+                                },
+                                resource_body,
+                                cx,
+                            ))
                             .child(self.section("Appearance", theme_body, cx)),
                     ),
                 ),
