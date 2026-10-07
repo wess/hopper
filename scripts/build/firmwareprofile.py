@@ -10,6 +10,8 @@ def replace(text, old, new):
 
 
 def configure(source):
+  from firmwaregraphics import configure as graphics
+
   target = source / "HopperPkg"
   target.mkdir(exist_ok=True)
   profile = (source / "ArmVirtPkg/ArmVirtQemu.dsc").read_text()
@@ -125,3 +127,9 @@ SetupVirtioSerial (""")
                  "  BuildMemoryAllocationHob (0x40200000, 0x10000, EfiReservedMemoryType);\n\n"
                  "  FdtSize  = FdtTotalSize (Base)")
   (pei / "PlatformPeiLib.c").write_text(code)
+  graphics(source)
+  for name in ["firmware.dsc", "main.fdf.inc"]:
+    file = target / name
+    text = replace(file.read_text(), "OvmfPkg/VirtioGpuDxe/VirtioGpu.inf",
+                    "HopperPkg/gpu/gpu.inf")
+    file.write_text(text)

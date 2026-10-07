@@ -2,6 +2,9 @@
 
 mod ffi;
 pub mod gic;
+mod watch;
+
+pub use watch::{bounded, paced};
 
 use anyhow::{bail, ensure, Context};
 use std::marker::PhantomData;
@@ -218,39 +221,6 @@ pub fn run(cpu: &mut Cpu<'_>) -> anyhow::Result<Exit> {
     },
     2 => Exit::Timer,
     _ => Exit::Unknown,
-  })
-}
-
-/// Request a native CPU exit at the deadline. The worker must return on cancellation.
-pub fn bounded<T>(
-  cpu: &mut Cpu<'_>,
-  timeout: std::time::Duration,
-  work: impl FnOnce(&mut Cpu<'_>) -> anyhow::Result<T>,
-) -> anyhow::Result<T> {
-  std::thread::scope(|scope| {
-    let (done, receiver) = std::sync::mpsc::sync_channel(1);
-    let mut id = cpu.id;
-    let timer = scope.spawn(move || -> anyhow::Result<bool> {
-      if receiver.recv_timeout(timeout) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
-        check(
-          unsafe { ffi::hv_vcpus_exit(&mut id, 1) },
-          "Interrupt CPU at deadline",
-        )?;
-        return Ok(true);
-      }
-      Ok(false)
-    });
-    let result = work(cpu);
-    let _ = done.send(());
-    let expired = timer
-      .join()
-      .map_err(|_| anyhow::anyhow!("CPU deadline worker panicked"))??;
-    if expired {
-      return result
-        .and_then(|_| anyhow::bail!("Guest execution deadline expired"))
-        .context("Guest execution deadline expired");
-    }
-    result
   })
 }
 

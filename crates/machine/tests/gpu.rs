@@ -252,6 +252,23 @@ fn resource_count_is_bounded_and_unref_reclaims_capacity() {
 }
 
 #[test]
+fn native_virtio_mode_replaces_the_firmware_linear_framebuffer() {
+  let mut display = gpu::create(640, 480).unwrap();
+  let mut ram = Ram::default();
+  for (index, value) in [BASE as u32 + 0x3000, 0, 2, 2, 2, 1].into_iter().enumerate() {
+    gpu::linear_write(&mut display, &ram, 8 + index as u64 * 4, value).unwrap();
+  }
+  gpu::refresh(&mut display, &ram).unwrap();
+  assert_eq!(gpu::frame(&display).unwrap().width, 2);
+  ok(&mut display, &mut ram, 0x101, &words(&[1, 2, 3, 3]));
+  ok(&mut display, &mut ram, 0x103, &words(&[0, 0, 3, 3, 0, 1]));
+  assert_eq!(gpu::linear_read(&display, 28), 0);
+  assert_eq!(gpu::frame(&display).unwrap().width, 3);
+  gpu::reset(&mut display);
+  assert!(gpu::frame(&display).is_none());
+}
+
+#[test]
 fn cursor_image_hotspot_motion_and_hiding_are_independent_of_scanout() {
   let mut display = gpu::create(1024, 768).unwrap();
   let mut ram = Ram::default();

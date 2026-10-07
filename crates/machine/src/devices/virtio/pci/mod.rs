@@ -91,6 +91,14 @@ pub fn display(device: &Device) -> Option<&gpu::Display> {
   }
 }
 
+/// Sample the physical framebuffer with every guest CPU stopped.
+pub fn refresh(device: &mut Device, memory: &impl Memory) -> anyhow::Result<()> {
+  if let Backend::Gpu(display) = &mut device.backend {
+    gpu::refresh(display, memory)?;
+  }
+  Ok(())
+}
+
 fn build(backend: Backend) -> anyhow::Result<Device> {
   let (id, class, count, specific) = match &backend {
     Backend::Disk(_) => (0x1042, 0x010000, 1, 64),
@@ -181,6 +189,11 @@ pub(super) fn access(offset: u64, width: usize) -> anyhow::Result<()> {
 
 pub fn read(device: &mut Device, offset: u64, width: usize) -> anyhow::Result<u32> {
   access(offset, width)?;
+  if (gpu::linear::BASE..gpu::linear::BASE + 32).contains(&offset) && width == 4 {
+    if let Backend::Gpu(display) = &device.backend {
+      return Ok(gpu::linear_read(display, offset - gpu::linear::BASE));
+    }
+  }
   if offset < 56 && offset + width as u64 <= 56 {
     return registers::read(device, offset as usize, width);
   }
@@ -215,7 +228,13 @@ pub fn write(
 ) -> anyhow::Result<()> {
   access(offset, width)?;
   let value = value & (u32::MAX >> ((4 - width) * 8));
-  let result = if offset < 56 && offset + width as u64 <= 56 {
+  let result = if (gpu::linear::BASE..gpu::linear::BASE + 32).contains(&offset) && width == 4 {
+    if let Backend::Gpu(display) = &mut device.backend {
+      gpu::linear_write(display, memory, offset - gpu::linear::BASE, value)
+    } else {
+      Ok(())
+    }
+  } else if offset < 56 && offset + width as u64 <= 56 {
     registers::write(device, memory, offset as usize, width, value)
   } else if (NOTIFY..NOTIFY + device.queues.len() as u64 * 4).contains(&offset)
     && offset.is_multiple_of(4)

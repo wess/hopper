@@ -211,6 +211,15 @@ target/debug/examples/firmware native/build/firmware/windows.fd /tmp/hopper.dtb 
 Frame export refuses to overwrite a file. This verifies firmware graphics and disk
 access together; Windows display drivers and 3D acceleration remain unverified.
 
+Hopper's derived GOP driver also exposes a 32-bit BGRX physical framebuffer.
+Its pages use UEFI reserved memory, so the OS cannot reclaim them after firmware
+handoff. A versioned mailbox at GPU BAR0 offset `0x3800` publishes the address,
+dimensions and stride. Capture validates and samples this guest RAM while every
+CPU is paused. The layout survives Virtio reset; a new Virtio scanout takes over
+when an OS driver selects one. Tests cover direct writes, reset, row padding,
+invalid layouts and driver takeover. This is the pre-driver display path,
+not accelerated Windows graphics.
+
 Native keyboard and absolute-pointer devices expose guest capabilities and bounded
 event queues through PCI. Input waits for guest receive buffers and bus mastering;
 release-all discards unsent transitions and releases delivered keys or buttons.
@@ -219,6 +228,16 @@ The firmware profile connects its Virtio keyboard to the UEFI console. Add
 events. This check allows 60 seconds and paces keys because the upstream firmware
 driver retains one key per poll. Pointer interaction with a guest application and
 Windows input drivers remain unverified.
+
+`--boot-media` is a separate installer diagnostic: it maps 4 GiB of guest RAM,
+attaches keyboard/pointer controllers, and sends Enter after Microsoft's ARM64
+CD boot program loads. Supply the cached installer as its disk argument and use
+`--frame` to preserve the display when the 60-second probe fails. The cached ISO
+is opened read-only. This currently loads the boot program and then times out;
+it does not reach Windows Setup. The reserved physical framebuffer replaces the
+previous `PixelBltOnly` mode, but has not yet established Windows boot compatibility.
+The probe requests a native CPU exit every 20 milliseconds so the owner thread
+can deliver input even when guest execution makes no device accesses.
 
 `cargo run -p machine --example acpi -- /tmp/hopperacpi` exports the handoff and
 individual tables for ACPICA inspection. TPM is still missing. The native runtime,

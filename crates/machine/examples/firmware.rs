@@ -1,6 +1,9 @@
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "support/input.rs"]
 mod keyboard;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "support/frame.rs"]
+mod frame;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() -> anyhow::Result<()> {
@@ -16,6 +19,8 @@ fn main() -> anyhow::Result<()> {
   let path = std::env::args()
     .nth(1)
     .context("Provide an ARM64 EDK2 firmware image")?;
+  let arguments: Vec<_> = std::env::args().collect();
+  let boot_media = arguments.iter().any(|argument| argument == "--boot-media");
   let firmware = std::fs::read(path)?;
   ensure!(
     !firmware.is_empty() && firmware.len() <= 0x4000000,
@@ -24,7 +29,7 @@ fn main() -> anyhow::Result<()> {
   let vm = hv::create()?;
   let gic = hv::gic::create(&vm, platform::DISTRIBUTOR, platform::REDISTRIBUTOR)?;
   let topology = platform::Topology {
-    memory: 0x10000000,
+    memory: if boot_media { 0x100000000 } else { 0x10000000 },
     cpus: 1,
     distributor_size: gic.distributor_size as u64,
     redistributor_size: gic.redistributor_size as u64,
@@ -67,16 +72,18 @@ fn main() -> anyhow::Result<()> {
   let disk = std::env::args().nth(4).filter(|path| path != "-").map(|path| {
     vpci::create(block::open(std::path::Path::new(&path), true, [0; 20])?)
   }).transpose()?;
-  let arguments: Vec<_> = std::env::args().collect();
   let check_storage = arguments.iter().any(|argument| argument == "--check-storage");
   let check_input = arguments.iter().any(|argument| argument == "--check-input");
-  let check_graphics = check_input || arguments.iter().any(|argument| argument == "--check-graphics");
+  let check_graphics = boot_media || check_input || arguments.iter().any(|argument| argument == "--check-graphics");
   let graphics = if check_graphics { Some(vpci::graphics(gpu::create(1024, 768)?)?) } else { None };
 
   ensure!(!check_storage || disk.is_some(), "Storage check requires a disk image");
-  let keyboard = if check_input { Some(vpci::controller(vinput::create(vinput::Kind::Keyboard))?) } else { None };
-  let pointer = if check_input { Some(vpci::controller(vinput::create(vinput::Kind::Tablet))?) } else { None };
+  let keyboard = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Keyboard))?) } else { None };
+  let pointer = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Tablet))?) } else { None };
   let mut devices = [disk, graphics, keyboard, pointer];
+  ensure!(!boot_media || devices[0].is_some(), "Media boot requires an installer image");
+  ensure!(!boot_media || (!check_input && !check_storage), "Media boot and shell checks are separate modes");
+  let mut media_key = None;
   let mut text_input = VecDeque::new();
   let mut next_input = std::time::Instant::now();
   let mut read_input = false;
@@ -88,9 +95,16 @@ fn main() -> anyhow::Result<()> {
   let mut seen_acpi = [false; 5];
   let mut checked_acpi = [false; 2];
   let start = std::time::Instant::now();
-  let deadline = if check_input { 60 } else { 30 };
-  let boot = hv::bounded(&mut cpu, std::time::Duration::from_secs(deadline), |cpu| {
+  let deadline = if check_input || boot_media { 60 } else { 30 };
+  let mut pulses = 0;
+  let boot = hv::paced(&mut cpu, std::time::Duration::from_secs(deadline), std::time::Duration::from_millis(20), |cpu| {
     for _ in 0..2000000 {
+      if media_key.is_some_and(|time| time <= std::time::Instant::now()) {
+        vpci::send_input(devices[2].as_mut().context("Missing keyboard")?, &mut ram, &keyboard::text(b"\r")?)?;
+        hv::gic::signal(&gic, pci::interrupt(2, 1)?, vpci::interrupt(devices[2].as_ref().context("Missing keyboard")?))?;
+        media_key = None;
+        eprintln!("Firmware queued the installer Enter key");
+      }
       if read_input && !text_input.is_empty() && next_input <= std::time::Instant::now() {
         let byte = text_input.pop_front().context("Missing diagnostic key")?;
         vpci::send_input(devices[2].as_mut().context("Missing keyboard")?, &mut ram, &keyboard::text(&[byte])?)?;
@@ -102,6 +116,7 @@ fn main() -> anyhow::Result<()> {
         "Firmware diagnostic reached its deadline"
       );
       match hv::run(cpu)? {
+      hv::Exit::Canceled => { pulses += 1; continue; }
       hv::Exit::Exception { syndrome, physical_address, .. } => match arm::decode(syndrome) {
         arm::Trap::DataAbort(Some(access)) if (platform::UART..platform::UART + 0x1000).contains(&physical_address) => {
           let offset = physical_address - platform::UART;
@@ -113,6 +128,9 @@ fn main() -> anyhow::Result<()> {
               std::io::stdout().flush()?;
               if output.len() == 64 { output.remove(0); }
               output.push(byte);
+              if boot_media && output.ends_with(b"cdboot.efi") {
+                media_key = Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
+              }
               if listed_acpi {
                 for (index, signature) in [b"FACP", b"APIC", b"GTDT", b"DSDT", b"MCFG"].iter().enumerate() {
                   seen_acpi[index] |= output.ends_with(*signature);
@@ -159,7 +177,7 @@ fn main() -> anyhow::Result<()> {
                   listed_acpi = true;
                 }
               }
-              if !opened_menu && output.ends_with(b"Boot Manager Menu.") {
+              if !boot_media && !opened_menu && output.ends_with(b"Boot Manager Menu.") {
                 input.push_back(b'\r');
                 opened_menu = true;
               }
@@ -268,23 +286,22 @@ fn main() -> anyhow::Result<()> {
     }
     bail!("Firmware diagnostic exhausted its exit budget")
   });
-  boot.with_context(|| {
+  let boot = boot.with_context(|| {
     devices[0].as_ref().map(|disk| format!("Storage completed {} requests; fault: {:?}", vpci::completed(disk), vpci::fault(disk)))
       .unwrap_or_else(|| "Boot native firmware".into())
-  })?;
-  if let Some(graphics) = &devices[1] {
-    ensure!(vpci::fault(graphics).is_none(), "Virtio GPU fault: {:?}", vpci::fault(graphics));
-    let frame = vpci::display(graphics).and_then(gpu::frame).context("Firmware produced no GPU frame")?;
-    ensure!(vpci::completed(graphics) > 0 && frame.rgba.as_chunks::<4>().0.iter()
-      .any(|pixel| pixel[..3] != [0, 0, 0]), "Firmware produced no visible graphics");
-    eprintln!("Firmware rendered {}x{} frame in {} GPU requests", frame.width, frame.height, vpci::completed(graphics));
-    if let Some(index) = arguments.iter().position(|argument| argument == "--frame") {
-      let path = arguments.get(index + 1).context("Provide a frame output path")?;
-      let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
-      write!(file, "P6\n{} {}\n255\n", frame.width, frame.height)?;
-      for pixel in frame.rgba.as_chunks::<4>().0 { file.write_all(&pixel[..3])?; }
+  });
+  eprintln!("Firmware serviced {pulses} host polling exits");
+  if boot_media {
+    for device in devices[2..].iter().flatten() {
+      eprintln!("Installer completed {} input events; fault: {:?}", vpci::completed(device), vpci::fault(device));
     }
   }
+  if let Some(graphics) = &mut devices[1] {
+    let capture = vpci::refresh(graphics, &ram).and_then(|_| frame::export(graphics, &arguments));
+    if boot.is_ok() { capture?; }
+    else if let Err(error) = capture { eprintln!("Frame capture failed: {error:#}"); }
+  }
+  boot?;
   if check_input {
     ensure!(read_input && checked_input, "Firmware did not execute the keyboard input check");
     for device in devices[2..].iter().flatten() {

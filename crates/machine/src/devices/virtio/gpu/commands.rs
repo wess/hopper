@@ -109,6 +109,7 @@ pub(super) fn execute(
         display.scanout = Some((id, area));
         flush(display, id, area)?;
       }
+      super::linear::disable(&mut display.linear);
     }
     0x104 => {
       let data = bytes(memory, spans, 48)?;

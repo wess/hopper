@@ -1,5 +1,6 @@
 mod commands;
 mod cursor;
+pub mod linear;
 mod resource;
 
 use super::queue::Chain;
@@ -20,6 +21,7 @@ pub struct Display {
   frame: Option<Frame>,
   generation: u64,
   cursor: cursor::Cursor,
+  linear: linear::Linear,
 }
 
 pub use cursor::{execute as execute_cursor, Cursor};
@@ -48,11 +50,37 @@ pub fn create(width: u32, height: u32) -> anyhow::Result<Display> {
     frame: None,
     generation: 0,
     cursor: Cursor::default(),
+    linear: linear::Linear::default(),
   })
 }
 
 pub fn frame(display: &Display) -> Option<&Frame> {
-  display.frame.as_ref()
+  if linear::active(&display.linear) {
+    display.linear.frame.as_ref()
+  } else {
+    display.frame.as_ref()
+  }
+}
+
+pub fn refresh(display: &mut Display, memory: &impl Memory) -> anyhow::Result<()> {
+  linear::refresh(&mut display.linear, memory)
+}
+
+pub fn linear_read(display: &Display, offset: u64) -> u32 {
+  linear::read(&display.linear, offset)
+}
+
+pub fn linear_write(
+  display: &mut Display,
+  memory: &impl Memory,
+  offset: u64,
+  value: u32,
+) -> anyhow::Result<()> {
+  ensure!(
+    offset < 32 && offset.is_multiple_of(4),
+    "Invalid linear framebuffer register"
+  );
+  linear::write(&mut display.linear, memory, offset, value)
 }
 
 pub fn reset(display: &mut Display) {
