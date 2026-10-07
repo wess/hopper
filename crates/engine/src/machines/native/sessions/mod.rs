@@ -8,6 +8,7 @@ use std::{collections::HashMap, path::Path, sync::Arc};
 use tokio::sync::{watch, Mutex};
 
 mod guest;
+pub mod input;
 mod install;
 mod owner;
 mod reboot;
@@ -20,6 +21,7 @@ struct Slot {
   session: Arc<Mutex<Option<Session>>>,
   state: watch::Sender<State>,
   generation: Arc<std::sync::Mutex<u64>>,
+  input: Arc<Mutex<Option<u64>>>,
 }
 
 struct Registry {
@@ -56,6 +58,7 @@ impl Sessions {
             session: Arc::new(Mutex::new(None)),
             state,
             generation: Arc::new(std::sync::Mutex::new(0)),
+            input: Arc::new(Mutex::new(None)),
           })
         })
         .clone(),

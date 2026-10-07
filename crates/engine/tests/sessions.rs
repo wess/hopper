@@ -73,33 +73,34 @@ async fn revoked_capture_is_drained_without_returning_guest_pixels() {
 async fn queued_input_rechecks_policy_after_a_cancelled_frame() {
   let f = Fixture::new();
   f.start("cancel").await;
+  let owner = f.sessions.acquire_input(ID, Actor::Agent).await.unwrap();
   let sessions = f.sessions.clone();
   let capture = tokio::spawn(async move { sessions.capture(ID, Actor::Agent).await });
   f.marker("partial").await;
   capture.abort();
   assert!(matches!(capture.await, Err(error) if error.is_cancelled()));
-  let sessions = f.sessions.clone();
-  let pending = tokio::spawn(async move { sessions.request(ID, Actor::Agent, input()).await });
+  let pending = tokio::spawn(async move { owner.send(input()).await });
   wait_lock(&f.lock(""), true).await;
   f.manager.set_agent_access(ID, false).unwrap();
   f.signal("continue");
   assert!(pending.await.unwrap().is_err());
   f.sessions.stop(ID, Actor::Person).await.unwrap();
-  assert_eq!(f.trace(), "capture\nstop\n");
+  assert!(!f.trace().lines().any(|line| line == "input"));
 }
 
 #[tokio::test]
 async fn revocation_after_input_dispatch_releases_held_input() {
   let f = Fixture::new();
   f.start("inputdelay").await;
-  let sessions = f.sessions.clone();
-  let pending = tokio::spawn(async move { sessions.request(ID, Actor::Agent, input()).await });
+  let owner = f.sessions.acquire_input(ID, Actor::Agent).await.unwrap();
+  let pending = tokio::spawn(async move { owner.send(input()).await });
   f.marker("inputreceived").await;
   f.manager.set_agent_access(ID, false).unwrap();
   f.signal("inputcontinue");
   assert!(pending.await.unwrap().is_err());
   f.sessions.stop(ID, Actor::Person).await.unwrap();
-  assert_eq!(f.trace(), "input\nrelease\nstop\n");
+  assert!(f.trace().starts_with("input\nrelease\n"));
+  assert!(f.trace().ends_with("stop\n"));
 }
 
 #[tokio::test]

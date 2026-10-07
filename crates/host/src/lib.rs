@@ -24,3 +24,5 @@ pub use ::engine::machines::{Actor as MachineActor, Machines};
 pub use docker::exec as docker_exec;
 
 pub use ::engine::machines::native::{deployment::Phase as MachinePhase, Frame as MachineFrame, State as MachineState};
+
+pub use ::engine::machines::native::sessions::input::Input as MachineInputLease;

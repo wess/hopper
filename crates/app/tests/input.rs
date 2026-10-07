@@ -135,6 +135,24 @@ fn focus_release_discards_queued_input_and_overflow_releases_before_viewer_drop(
     )));
     driver.release();
     drop(driver);
+    let reopened = input::create(host.clone(), id.into());
+    assert!(reopened.send(input::events(
+      InputDevice::Keyboard,
+      vec![input::key(33, 1)]
+    )));
+    tokio::time::timeout(Duration::from_secs(2), async {
+      while reopened.error.borrow().is_none() {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+      }
+    })
+    .await
+    .unwrap();
+    assert!(reopened
+      .error
+      .borrow()
+      .as_ref()
+      .unwrap()
+      .contains("controlled by another connection"));
     std::fs::write(guest.join("inputcontinue"), "").unwrap();
     tokio::time::timeout(Duration::from_secs(2), async {
       while !std::fs::read_to_string(guest.join("trace"))
@@ -150,6 +168,42 @@ fn focus_release_discards_queued_input_and_overflow_releases_before_viewer_drop(
     tokio::time::sleep(Duration::from_millis(50)).await;
     let trace = std::fs::read_to_string(guest.join("trace")).unwrap();
     assert_eq!(trace.lines().filter(|line| *line == "input").count(), 1);
+    assert!(reopened.send(input::events(
+      InputDevice::Keyboard,
+      vec![input::key(34, 1)]
+    )));
+    tokio::time::timeout(Duration::from_secs(2), async {
+      while std::fs::read_to_string(guest.join("trace"))
+        .unwrap()
+        .lines()
+        .filter(|line| *line == "input")
+        .count()
+        != 2
+      {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+      }
+    })
+    .await
+    .unwrap();
+    let connected = std::fs::read_to_string(guest.join("trace")).unwrap();
+    assert!(connected.ends_with("input\n"));
+    tokio::time::sleep(Duration::from_millis(30)).await;
+    assert_eq!(
+      std::fs::read_to_string(guest.join("trace")).unwrap(),
+      connected
+    );
+    reopened.release();
+    drop(reopened);
+    tokio::time::timeout(Duration::from_secs(2), async {
+      while !std::fs::read_to_string(guest.join("trace"))
+        .unwrap()
+        .ends_with("release\n")
+      {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+      }
+    })
+    .await
+    .unwrap();
     assert_eq!(
       host
         .native_machines()

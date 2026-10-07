@@ -14,13 +14,52 @@ impl Sessions {
       ),
       "Use the dedicated native lifecycle or capture operation"
     );
+    ensure!(
+      !matches!(command, Command::Input { .. } | Command::Release {}),
+      "Guest input requires an exclusive input lease"
+    );
+    self.request_using(id, actor, command, None).await
+  }
+
+  pub(super) async fn request_owned(
+    &self,
+    id: &str,
+    actor: Actor,
+    command: Command,
+    owner: super::super::Check,
+  ) -> anyhow::Result<Reply> {
+    self.request_using(id, actor, command, Some(owner)).await
+  }
+
+  async fn request_using(
+    &self,
+    id: &str,
+    actor: Actor,
+    command: Command,
+    owner: Option<super::super::Check>,
+  ) -> anyhow::Result<Reply> {
     let slot = self.slot(id).await?;
     let session = slot.session.lock().await;
     let _operation = self.inner.manager.lock(id)?;
-    let check = self.check(id, actor);
-    check()?;
     let active = session.as_ref().context("VM is not running")?;
     let client = &active.client;
+    let state = client.state.clone();
+    let input = matches!(command, Command::Input { .. });
+    let policy = self.check(id, actor);
+    let check: super::super::Check = Arc::new(move || {
+      policy()?;
+      if let Some(owner) = &owner {
+        owner()?;
+      }
+      if input {
+        ensure!(
+          matches!(*state.borrow(), State::Running),
+          "Guest input requires a running VM"
+        );
+      }
+      Ok(())
+    });
+    check()?;
     Ok(
       super::super::transact(client, command, Some(check))
         .await?

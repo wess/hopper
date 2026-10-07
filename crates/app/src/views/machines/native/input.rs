@@ -1,5 +1,5 @@
 use crate::bridge;
-use host::{Host, MachineActor};
+use host::{Host, MachineActor, MachineInputLease};
 use model::native::{Command, InputDevice, InputEvent};
 use std::sync::{
   atomic::{AtomicU64, Ordering},
@@ -21,34 +21,35 @@ pub(super) fn create(host: Arc<Host>, id: String) -> Input {
   let generation = epoch.clone();
   let (errors, error) = watch::channel(None);
   bridge::runtime().spawn(async move {
+    let mut owner = None;
     loop {
       tokio::select! {
         biased;
         result = released.changed() => {
-          let _ = host.native_machines().request(&id, MachineActor::Person, Command::Release {}).await;
+          close(&mut owner, &errors).await;
           if result.is_err() { break; }
         }
         item = incoming.recv() => {
           let Some((epoch, command)) = item else {
-            let _ = host.native_machines().request(&id, MachineActor::Person, Command::Release {}).await;
+            close(&mut owner, &errors).await;
             break;
           };
           if epoch != generation.load(Ordering::Acquire) { continue; }
           let result = tokio::select! {
             biased;
             changed = released.changed() => {
-              let _ = host.native_machines().request(&id, MachineActor::Person, Command::Release {}).await;
+              close(&mut owner, &errors).await;
               if changed.is_err() { break; }
               continue;
             }
-            result = host.native_machines().request(&id, MachineActor::Person, command) => result,
+            result = dispatch(&mut owner, &host, &id, command) => result,
           };
           match result {
             Ok(_) => { errors.send_replace(None); }
             Err(error) => {
               generation.fetch_add(1, Ordering::AcqRel);
               errors.send_replace(Some(format!("Guest input failed: {error:#}")));
-              let _ = host.native_machines().request(&id, MachineActor::Person, Command::Release {}).await;
+              close(&mut owner, &errors).await;
             }
           }
         }
@@ -61,6 +62,34 @@ pub(super) fn create(host: Arc<Host>, id: String) -> Input {
     release,
     error,
   }
+}
+
+async fn close(owner: &mut Option<MachineInputLease>, errors: &watch::Sender<Option<String>>) {
+  if let Some(owner) = owner.take() {
+    if let Err(error) = owner.close().await {
+      errors.send_replace(Some(format!("Guest input release failed: {error:#}")));
+    }
+  }
+}
+
+async fn dispatch(
+  owner: &mut Option<MachineInputLease>,
+  host: &Host,
+  id: &str,
+  command: Command,
+) -> anyhow::Result<model::native::Result> {
+  if owner.as_ref().is_some_and(|owner| !owner.is_active()) {
+    owner.take().unwrap().close().await?;
+  }
+  if owner.is_none() {
+    *owner = Some(
+      host
+        .native_machines()
+        .acquire_input(id, MachineActor::Person)
+        .await?,
+    );
+  }
+  owner.as_ref().unwrap().send(command).await
 }
 
 impl Input {

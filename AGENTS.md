@@ -11,7 +11,8 @@ preserved for migration and are not started through the native path. macOS and W
 guests are experimental. Release hosts remain
 Apple silicon macOS 26+.
 Each VM has a dedicated viewer. Agent access defaults on for new VMs and clones
-inherit it. Native Windows guest tools and input ownership are still pending. MCP lists and creates
+inherit it. Native Windows guest tools and remote input delivery are still pending. Core input
+ownership and the viewer path use exclusive leases tied to a worker generation. MCP lists and creates
 Windows through the native facade. Screenshots connect to the app-owned native registry;
 other Windows tools return an explicit unavailable error after authorization, preventing
 fallback to the previous runtime. The app hosts a same-user private Unix socket under
@@ -22,6 +23,15 @@ socket/directory ownership are checked on both sides. The service does not retai
 registry while idle, cannot accept boot paths or input, and is removed on host teardown.
 Disconnected requests cancel while the worker protocol drains. Inside-guest connections,
 remote lifecycle, input and guest-tool transport remain pending.
+Native input cannot bypass its lease through the public request API. An owner is invalidated
+on cancellation, policy revocation, pause/stop/restart or five seconds of inactivity. Its
+exclusive gate remains held through asynchronous held-key/button release; cleanup never
+crosses worker generations. Competing claims check the gate before waiting for the VM
+session. Release failure blocks reuse in that generation until the worker is replaced.
+Idle input leases retain only weak registry references. Viewer focus loss/drop and queue
+overflow close the lease; reconnect waits for prior cleanup and cannot release another
+owner's keys. The private agent socket still accepts status/capture only; control delivery
+must hold a connection-scoped lease when implemented.
 Prototype MCP operations recheck the persisted access setting, use per-VM
 cross-process locks, and expose only guest files/input. Snapshots require a
 stopped VM and use APFS copies, with a rollback snapshot on restore.
