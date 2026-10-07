@@ -13,9 +13,11 @@ pub fn catalogue() -> Vec<Value> {
     [
         ("vm.profiles", "List downloadable guest OS profiles and their requirements.", json!({}), vec![]),
         ("vm.list", "List VMs that permit agent access. VMs with access disabled are excluded.", json!({}), vec![]),
-        ("vm.create", "Create a Linux, macOS, or Windows VM. Windows uses the native runtime; its remote lifecycle and guest tools are not available yet. Linux and macOS images download on vm.start. New VMs enable agent access by default; set agentAccess=false to disable it.",json!({"name":string,"profile":string,"cpus":{"type":"integer","minimum":1,"maximum":64},"memoryGiB":{"type":"integer","minimum":1,"maximum":256},"diskGiB":{"type":"integer","minimum":10,"maximum":2048},"agentAccess":{"type":"boolean"}}),vec!["name","profile"]),
+        ("vm.create", "Create a Linux, macOS, or Windows VM. Windows uses the native runtime; remote startup and guest tools are not available yet. Pause, resume and stop connect to the running Hopper app. Linux and macOS images download on vm.start. New VMs enable agent access by default; set agentAccess=false to disable it.",json!({"name":string,"profile":string,"cpus":{"type":"integer","minimum":1,"maximum":64},"memoryGiB":{"type":"integer","minimum":1,"maximum":256},"diskGiB":{"type":"integer","minimum":10,"maximum":2048},"agentAccess":{"type":"boolean"}}),vec!["name","profile"]),
         ("vm.start", "Start a VM and open its dedicated display window. First boot downloads and prepares the guest and can take several minutes. Windows startup currently requires the Hopper app.",json!({"id":id}),vec!["id"]),
-        ("vm.stop", "Gracefully stop a VM; its disk is retained.",json!({"id":id}),vec!["id"]),
+        ("vm.stop", "Stop a VM; its disk is retained. Native Windows stops its hardware through the running Hopper app rather than asking the guest OS to shut down.",json!({"id":id}),vec!["id"]),
+        ("vm.pause", "Pause native Windows hardware while retaining guest memory. Requires the running Hopper app. Linux and macOS prototype pause is unavailable.",json!({"id":id}),vec!["id"]),
+        ("vm.resume", "Resume paused native Windows hardware through the running Hopper app. Linux and macOS prototype resume is unavailable.",json!({"id":id}),vec!["id"]),
         ("vm.exec", "Execute a command inside the guest, never on the host. argv is an array of command arguments, such as [\"uname\",\"-a\"]. Output is bounded and commands time out after 120 seconds.",json!({"id":id,"argv":{"type":"array","items":{"type":"string"},"minItems":1}}),vec!["id","argv"]),
         ("vm.screenshot", "Capture the VM display as a PNG image. Native Windows captures connect to the running Hopper app and do not require a visible viewer.",json!({"id":id}),vec!["id"]),
         ("vm.input", "Send guest input. Linux uses xdotool key names. Native Windows uses US key names joined by + (for example ctrl+alt+delete) and pointer actions; another input owner returns a busy error. Pointer x/y are normalized 0–32767. macOS uses guest key names (super is Command) and requires guest Accessibility permission for osascript. Windows text input requires guest tools and is unavailable.",json!({"id":id,"input":{"oneOf":[{"type":"object","properties":{"type":{"const":"key"},"keys":string},"required":["type","keys"]},{"type":"object","properties":{"type":{"const":"text"},"text":string},"required":["type","text"]},{"type":"object","properties":{"type":{"const":"pointer"},"x":{"type":"integer","minimum":0,"maximum":32767},"y":{"type":"integer","minimum":0,"maximum":32767},"button":{"enum":["left","right","middle"]}},"required":["type","x","y"]}]}}),vec!["id","input"]),
@@ -92,6 +94,16 @@ async fn run(host: &Arc<Host>, name: &str, args: &Value) -> anyhow::Result<Value
     let machine = machines.machine(id, actor)?;
     if machine.guest == model::GuestOs::Windows {
         #[cfg(unix)]
+        if matches!(name, "vm.pause" | "vm.resume" | "vm.stop") {
+            let action = match name {
+                "vm.pause" => host::MachineLifecycle::Pause,
+                "vm.resume" => host::MachineLifecycle::Resume,
+                _ => host::MachineLifecycle::Stop,
+            };
+            host.native_machine_lifecycle(id, action).await?;
+            return Ok(text("Done".to_owned()));
+        }
+        #[cfg(unix)]
         if name == "vm.input" {
             let action: MachineInput = serde_json::from_value(args.get("input").cloned().ok_or_else(|| anyhow::anyhow!("Provide `input`"))?)?;
             input::native(host, id, action).await?;
@@ -106,6 +118,7 @@ async fn run(host: &Arc<Host>, name: &str, args: &Value) -> anyhow::Result<Value
         );
     }
     match name {
+        "vm.pause" | "vm.resume" => anyhow::bail!("Pause and resume require the native Windows runtime; this guest still uses the prototype"),
         "vm.start" => machines.start(id, actor).await?,
         "vm.stop" => machines.stop(id, actor).await?,
         "vm.exec" => {

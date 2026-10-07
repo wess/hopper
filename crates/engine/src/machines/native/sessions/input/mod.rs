@@ -58,6 +58,24 @@ impl Input {
 
 impl Sessions {
   pub async fn acquire_input(&self, id: &str, actor: Actor) -> anyhow::Result<Input> {
+    self.acquire_using(id, actor, None).await
+  }
+
+  pub(super) async fn acquire_input_owned(
+    &self,
+    id: &str,
+    actor: Actor,
+    policy: super::super::Check,
+  ) -> anyhow::Result<Input> {
+    self.acquire_using(id, actor, Some(policy)).await
+  }
+
+  async fn acquire_using(
+    &self,
+    id: &str,
+    actor: Actor,
+    policy: Option<super::super::Check>,
+  ) -> anyhow::Result<Input> {
     let slot = self.slot(id).await?;
     self.inner.manager.machine(id, actor)?;
     let gate = slot
@@ -67,6 +85,9 @@ impl Sessions {
       .map_err(|_| anyhow::anyhow!("VM input is controlled by another connection"))?;
     let session = slot.session.lock().await;
     let machine = self.inner.manager.machine(id, actor)?;
+    if let Some(policy) = policy {
+      policy()?;
+    }
     let client = &session.as_ref().context("VM is not running")?.client;
     ensure!(
       matches!(super::super::state(client), super::super::State::Running),

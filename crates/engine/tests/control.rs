@@ -19,7 +19,7 @@ async fn raw(f: &Fixture) -> UnixStream {
     .unwrap();
   write_message(
     &mut stream,
-    serde_json::json!({"vmId": ID, "operation": "control"}),
+    serde_json::json!({"vmId": ID, "operation": "control", "agentGeneration": f.manager.machine(ID, Actor::Agent).unwrap().agent_generation}),
   )
   .await;
   let mut prefix = [0; 8];

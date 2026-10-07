@@ -74,7 +74,6 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
   std::fs::write(&disk, b"retained prior guest disk").unwrap();
   for tool in [
     "vm.start",
-    "vm.stop",
     "vm.exec",
     "vm.read_file",
     "vm.write_file",
@@ -93,6 +92,11 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
   }
   let missing = mcp::tools::call(&host, "vm.screenshot", &json!({"id":machine.id})).await;
   assert_eq!(missing["isError"], true);
+  for tool in ["vm.stop", "vm.pause", "vm.resume"] {
+    let missing = mcp::tools::call(&host, tool, &json!({"id":machine.id})).await;
+    assert_eq!(missing["isError"], true, "{missing}");
+    assert_eq!(std::fs::read(&disk).unwrap(), b"retained prior guest disk");
+  }
   let mut native = machine.clone();
   native.id = model::new_uuid();
   std::fs::write(
@@ -153,6 +157,8 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
   let mut output = tokio::io::BufReader::new(client.stdout.take().unwrap());
   let requests = [
     ("vm.screenshot", json!({"id":native.id}), false),
+    ("vm.pause", json!({"id":native.id}), false),
+    ("vm.resume", json!({"id":native.id}), false),
     (
       "vm.input",
       json!({"id":native.id,"input":{"type":"key","keys":"ctrl+alt+delete"}}),
@@ -169,11 +175,11 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
       json!({"id":native.id,"input":{"type":"key","keys":"a"}}),
       true,
     ),
+    ("vm.stop", json!({"id":native.id}), true),
+    ("vm.stop", json!({"id":native.id}), false),
   ];
   for (index, (name, arguments, denied)) in requests.into_iter().enumerate() {
-    if denied {
-      manager.set_agent_access(&native.id, false).unwrap();
-    }
+    manager.set_agent_access(&native.id, !denied).unwrap();
     let number = index + 1;
     let request = json!({"jsonrpc":"2.0", "id":number, "method":"tools/call", "params":{"name":name, "arguments":arguments}});
     input
@@ -243,14 +249,18 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
       .unwrap()
       .success()
   );
+  assert!(host
+    .native_machines()
+    .state(&native.id, MachineActor::Person)
+    .await
+    .unwrap()
+    .is_none());
+  assert!(std::fs::read_to_string(probe.join("trace"))
+    .unwrap()
+    .ends_with("stop\n"));
   manager.set_agent_access(&native.id, false).unwrap();
   let denied = mcp::tools::call(&host, "vm.screenshot", &json!({"id":native.id})).await;
   assert_eq!(denied["isError"], true);
-  host
-    .native_machines()
-    .stop(&native.id, MachineActor::Person)
-    .await
-    .unwrap();
   manager.set_agent_access(&machine.id, false).unwrap();
   let listed = mcp::tools::call(&host, "vm.list", &json!({})).await;
   let rows: Vec<model::MachineStatus> = serde_json::from_str(content(&listed)).unwrap();

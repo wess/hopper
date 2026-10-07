@@ -79,7 +79,7 @@ async fn connection(
     .await
     .context("Native agent request timed out")??;
   if matches!(request.operation, Operation::Control) {
-    return super::control::serve(stream, registry, request.vm_id).await;
+    return super::control::serve(stream, registry, request.vm_id, request.agent_generation).await;
   }
   tokio::time::timeout(
     Duration::from_secs(165),
@@ -106,10 +106,31 @@ async fn single(
   let operation = async {
     let machine = registry.manager.machine(&request.vm_id, Actor::Agent)?;
     ensure!(
+      request
+        .agent_generation
+        .is_none_or(|generation| generation == machine.agent_generation),
+      "VM agent policy has changed"
+    );
+    ensure!(
+      matches!(request.operation, Operation::Status | Operation::Capture)
+        || request.agent_generation.is_some(),
+      "Native lifecycle requires an agent policy generation"
+    );
+    ensure!(
       machine.guest == model::GuestOs::Windows,
       "Native agent operation requires a Windows VM"
     );
     policy = Some(machine.agent_generation);
+    let manager = registry.manager.clone();
+    let id = request.vm_id.clone();
+    let generation = machine.agent_generation;
+    let guard: crate::machines::native::Check = Arc::new(move || {
+      ensure!(
+        manager.machine(&id, Actor::Agent)?.agent_generation == generation,
+        "VM agent policy has changed"
+      );
+      Ok(())
+    });
     match request.operation {
       Operation::Control => unreachable!("control was dispatched before registry retention"),
       Operation::Status => {
@@ -126,7 +147,9 @@ async fn single(
       }
       Operation::Capture => {
         capture_lease = Some(captures.acquire_owned().await?);
-        let frame = sessions.capture(&request.vm_id, Actor::Agent).await?;
+        let frame = sessions
+          .capture_owned(&request.vm_id, Actor::Agent, guard)
+          .await?;
         ensure!(
           frame.rgba.len() == wire::frame_size(frame.width, frame.height)?,
           "Invalid native frame payload"
@@ -138,6 +161,43 @@ async fn single(
             generation: frame.generation,
           },
           frame.rgba,
+        ))
+      }
+      Operation::Pause | Operation::Resume => {
+        let pause = matches!(request.operation, Operation::Pause);
+        let command = if pause {
+          model::native::Command::Pause {}
+        } else {
+          model::native::Command::Resume {}
+        };
+        let reply = sessions
+          .request_owned(&request.vm_id, Actor::Agent, command, guard)
+          .await?;
+        ensure!(
+          matches!(
+            (pause, reply),
+            (true, model::native::Result::Paused {}) | (false, model::native::Result::Running {})
+          ),
+          "Native worker did not confirm the requested state"
+        );
+        let state = if pause {
+          Status::Paused {}
+        } else {
+          Status::Running {}
+        };
+        Ok((Reply::State { state: Some(state) }, Vec::new()))
+      }
+      Operation::Stop => {
+        sessions
+          .stop_owned(&request.vm_id, Actor::Agent, guard)
+          .await?;
+        Ok((
+          Reply::State {
+            state: Some(Status::Stopped {
+              reason: model::native::StopReason::Requested,
+            }),
+          },
+          Vec::new(),
         ))
       }
     }

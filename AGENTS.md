@@ -17,13 +17,14 @@ to both the worker generation and a persisted agent-policy generation. MCP lists
 Windows through the native facade. Screenshots connect to the app-owned native registry;
 other Windows tools return an explicit unavailable error after authorization, preventing
 fallback to the previous runtime. The app hosts a same-user private Unix socket under
-`machines/agents/native.sock`; HPA1 accepts status, capture and leased control. Headers are limited to
+`machines/agents/native.sock`; HPA1 accepts status, capture, leased control, pause, resume and stop. Headers are limited to
 4 KiB, frames to 64 MiB, connections to 16 and buffered captures to one. Policy is rechecked
 before dispatch, after completion and during pixel delivery. Peer credentials and private
 socket/directory ownership are checked on both sides. The service does not retain the VM
 registry while idle, cannot accept boot paths, and is removed on host teardown.
 Disconnected requests cancel while the worker protocol drains. Inside-guest connections,
-remote lifecycle and guest-tool transport remain pending.
+remote startup and guest-tool transport remain pending. Pause/resume/stop operate only
+on the registry-owned worker; stop waits for process exit and ownership cleanup.
 Native input cannot bypass its lease through the public request API. An owner is invalidated
 on cancellation, policy revocation, pause/stop/restart or five seconds of inactivity. Its
 exclusive gate remains held through asynchronous held-key/button release; cleanup never
@@ -34,7 +35,10 @@ overflow close the lease; reconnect waits for prior cleanup and cannot release a
 owner's keys. Remote control accepts at most 64 input events per packet, refuses pipelining
 and closes ownership on malformed frames, disconnect or cancellation. Actual policy
 changes increment a persisted counter; off/on toggles invalidate existing agent leases
-and operations. Exhaustion still permits revocation and prevents re-enabling access.
+and operations. Mutating requests carry the caller's policy generation and check it
+before ownership acquisition or lifecycle dispatch. Original request policy also scopes
+queued captures. Legacy status/capture requests may omit it; mutations must include it.
+Exhaustion still permits revocation and prevents re-enabling access.
 Prototype MCP operations recheck the persisted access setting, use per-VM
 cross-process locks, and expose only guest files/input. Snapshots require a
 stopped VM and use APFS copies, with a rollback snapshot on restore.

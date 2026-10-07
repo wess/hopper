@@ -3,6 +3,14 @@ use model::{CreateMachine, Machine, MachineStatus};
 
 impl Host {
   #[cfg(unix)]
+  pub async fn native_machine_lifecycle(
+    &self,
+    id: &str,
+    action: ::engine::machines::native::sessions::remote::Lifecycle,
+  ) -> anyhow::Result<()> {
+    ::engine::machines::native::sessions::remote::lifecycle(&self.machines(), id, action).await
+  }
+  #[cfg(unix)]
   pub fn serve_machine_agents(&self) -> anyhow::Result<()> {
     let mut server = self
       .machine_agents

@@ -69,10 +69,28 @@ impl Sessions {
   }
 
   pub async fn capture(&self, id: &str, actor: Actor) -> anyhow::Result<Frame> {
+    self.capture_using(id, actor, None).await
+  }
+
+  pub(super) async fn capture_owned(
+    &self,
+    id: &str,
+    actor: Actor,
+    policy: super::super::Check,
+  ) -> anyhow::Result<Frame> {
+    self.capture_using(id, actor, Some(policy)).await
+  }
+
+  async fn capture_using(
+    &self,
+    id: &str,
+    actor: Actor,
+    policy: Option<super::super::Check>,
+  ) -> anyhow::Result<Frame> {
     let slot = self.slot(id).await?;
     let session = slot.session.lock().await;
     let _operation = self.inner.manager.lock(id)?;
-    let check = self.check(id, actor)?;
+    let check = self.scoped_check(id, actor, policy)?;
     check()?;
     let active = session.as_ref().context("VM is not running")?;
     let client = &active.client;
@@ -80,10 +98,28 @@ impl Sessions {
   }
 
   pub async fn stop(&self, id: &str, actor: Actor) -> anyhow::Result<()> {
+    self.stop_using(id, actor, None).await
+  }
+
+  pub(super) async fn stop_owned(
+    &self,
+    id: &str,
+    actor: Actor,
+    policy: super::super::Check,
+  ) -> anyhow::Result<()> {
+    self.stop_using(id, actor, Some(policy)).await
+  }
+
+  async fn stop_using(
+    &self,
+    id: &str,
+    actor: Actor,
+    policy: Option<super::super::Check>,
+  ) -> anyhow::Result<()> {
     let slot = self.slot(id).await?;
     let mut session = slot.session.lock().await;
     let _operation = self.inner.manager.lock(id)?;
-    let check = self.check(id, actor)?;
+    let check = self.scoped_check(id, actor, policy)?;
     check()?;
     let active = session.as_ref().context("VM is not running")?;
     let client = &active.client;
@@ -114,6 +150,22 @@ impl Sessions {
         actor != Actor::Agent || machine.agent_generation == policy,
         "VM agent policy has changed"
       );
+      Ok(())
+    }))
+  }
+
+  fn scoped_check(
+    &self,
+    id: &str,
+    actor: Actor,
+    policy: Option<super::super::Check>,
+  ) -> anyhow::Result<super::super::Check> {
+    let check = self.check(id, actor)?;
+    Ok(Arc::new(move || {
+      check()?;
+      if let Some(policy) = &policy {
+        policy()?;
+      }
       Ok(())
     }))
   }

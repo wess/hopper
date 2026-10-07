@@ -19,6 +19,8 @@ use tokio::net::UnixStream;
 struct Request {
   vm_id: String,
   operation: Operation,
+  #[serde(default)]
+  agent_generation: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -27,6 +29,48 @@ enum Operation {
   Status,
   Capture,
   Control,
+  Pause,
+  Resume,
+  Stop,
+}
+
+#[derive(Clone, Copy)]
+pub enum Lifecycle {
+  Pause,
+  Resume,
+  Stop,
+}
+
+pub async fn lifecycle(manager: &Machines, id: &str, action: Lifecycle) -> anyhow::Result<()> {
+  let operation = match action {
+    Lifecycle::Pause => Operation::Pause,
+    Lifecycle::Resume => Operation::Resume,
+    Lifecycle::Stop => Operation::Stop,
+  };
+  let (reply, _) = exchange(manager, id, operation).await?;
+  ensure!(
+    matches!(
+      (action, reply),
+      (
+        Lifecycle::Pause,
+        Reply::State {
+          state: Some(Status::Paused {})
+        }
+      ) | (
+        Lifecycle::Resume,
+        Reply::State {
+          state: Some(Status::Running {})
+        }
+      ) | (
+        Lifecycle::Stop,
+        Reply::State {
+          state: Some(Status::Stopped { .. })
+        }
+      )
+    ),
+    "Unexpected native lifecycle reply"
+  );
+  Ok(())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,7 +114,7 @@ async fn exchange(
 ) -> anyhow::Result<(Reply, Vec<u8>)> {
   let policy = manager.machine(id, Actor::Agent)?.agent_generation;
   let response = tokio::time::timeout(Duration::from_secs(165), async {
-    let mut stream = connect(manager, id, operation).await?;
+    let mut stream = connect(manager, id, operation, policy).await?;
     let reply: Reply = wire::read(&mut stream).await?;
     let size = match &reply {
       Reply::Frame { width, height, .. } => wire::frame_size(*width, *height)?,
@@ -91,8 +135,16 @@ async fn exchange(
   Ok(response)
 }
 
-async fn connect(manager: &Machines, id: &str, operation: Operation) -> anyhow::Result<UnixStream> {
-  manager.machine(id, Actor::Agent)?;
+async fn connect(
+  manager: &Machines,
+  id: &str,
+  operation: Operation,
+  policy: u64,
+) -> anyhow::Result<UnixStream> {
+  ensure!(
+    manager.machine(id, Actor::Agent)?.agent_generation == policy,
+    "VM agent policy has changed"
+  );
   let endpoint = path::endpoint(manager)?;
   path::socket(&endpoint)?;
   let mut stream = UnixStream::connect(endpoint)
@@ -107,6 +159,7 @@ async fn connect(manager: &Machines, id: &str, operation: Operation) -> anyhow::
     &Request {
       vm_id: id.into(),
       operation,
+      agent_generation: Some(policy),
     },
     &[],
   )

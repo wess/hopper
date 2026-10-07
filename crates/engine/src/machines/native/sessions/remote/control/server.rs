@@ -15,6 +15,7 @@ pub(in crate::machines::native::sessions::remote) async fn serve(
   mut stream: UnixStream,
   registry: Weak<Registry>,
   id: String,
+  policy: Option<u64>,
 ) -> anyhow::Result<()> {
   let acquire = async {
     let registry = registry.upgrade().context("Native VM registry is closed")?;
@@ -22,8 +23,19 @@ pub(in crate::machines::native::sessions::remote) async fn serve(
       registry.manager.machine(&id, Actor::Agent)?.guest == model::GuestOs::Windows,
       "Native input requires a Windows VM"
     );
+    let expected = policy.context("Native input ownership requires an agent policy generation")?;
+    let manager = registry.manager.clone();
+    let vm_id = id.clone();
+    let guard: crate::machines::native::Check = std::sync::Arc::new(move || {
+      ensure!(
+        manager.machine(&vm_id, Actor::Agent)?.agent_generation == expected,
+        "VM agent policy has changed"
+      );
+      Ok(())
+    });
+    guard()?;
     Sessions { inner: registry }
-      .acquire_input(&id, Actor::Agent)
+      .acquire_input_owned(&id, Actor::Agent, guard)
       .await
   };
   let mut trailing = [0; 1];

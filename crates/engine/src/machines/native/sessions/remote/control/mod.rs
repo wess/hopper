@@ -29,7 +29,7 @@ pub struct Control {
 pub async fn connect(manager: &Machines, id: &str) -> anyhow::Result<Control> {
   let policy = manager.machine(id, Actor::Agent)?.agent_generation;
   let stream = tokio::time::timeout(Duration::from_secs(45), async {
-    let mut stream = super::connect(manager, id, Operation::Control).await?;
+    let mut stream = super::connect(manager, id, Operation::Control, policy).await?;
     let reply: Reply = wire::read(&mut stream).await?;
     match reply {
       Reply::Owned {} => Ok(stream),
