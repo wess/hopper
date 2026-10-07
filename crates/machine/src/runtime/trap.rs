@@ -1,4 +1,4 @@
-use super::Reason;
+use super::{variables, Reason};
 use crate::{
   arm, debug,
   devices::{
@@ -27,6 +27,7 @@ pub struct State<'a, 'vm> {
   pub console: serial::Console,
   pub tail: Vec<u8>,
   pub enter: Option<Instant>,
+  pub durable: Option<&'a mut variables::Variables>,
 }
 
 #[derive(Default)]
@@ -159,6 +160,13 @@ pub fn dispatch(
             offset,
             value(registers, access.register)? as u32,
           )? {
+            if let Some(store) = state.durable.as_deref_mut() {
+              variables::commit(
+                store,
+                changed.start,
+                &flash::bytes(state.variables)[changed.clone()],
+              )?;
+            }
             hv::write(
               state.nvram,
               changed.start,

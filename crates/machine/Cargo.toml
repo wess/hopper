@@ -8,6 +8,11 @@ authors.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 vm-fdt = "0.3"
+fs2 = "0.4"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = { workspace = true }
 
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 libc = "0.2"

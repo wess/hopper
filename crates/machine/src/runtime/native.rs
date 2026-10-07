@@ -1,4 +1,4 @@
-use super::{trap, validate, Boot, Control, Reason};
+use super::{trap, validate, variables, Boot, Control, Reason};
 use crate::{
   acpi, debug,
   devices::{
@@ -25,7 +25,29 @@ pub struct Stopped {
 /// run on the VM owner thread; callbacks handle guest I/O and request a clean stop.
 pub fn run(
   boot: Boot,
+  devices: [Option<pci::Device>; 7],
+  poll: impl FnMut(&mut [Option<pci::Device>; 7], &mut hv::Memory<'_>) -> anyhow::Result<Control>,
+) -> anyhow::Result<Stopped> {
+  execute(boot, devices, None, poll)
+}
+
+pub fn run_persistent(
+  boot: Boot,
+  devices: [Option<pci::Device>; 7],
+  store: &mut variables::Variables,
+  poll: impl FnMut(&mut [Option<pci::Device>; 7], &mut hv::Memory<'_>) -> anyhow::Result<Control>,
+) -> anyhow::Result<Stopped> {
+  anyhow::ensure!(
+    boot.variables == variables::bytes(store),
+    "Boot variables do not match their persistent store"
+  );
+  execute(boot, devices, Some(store), poll)
+}
+
+fn execute(
+  boot: Boot,
   mut devices: [Option<pci::Device>; 7],
+  store: Option<&mut variables::Variables>,
   mut poll: impl FnMut(&mut [Option<pci::Device>; 7], &mut hv::Memory<'_>) -> anyhow::Result<Control>,
 ) -> anyhow::Result<Stopped> {
   validate(&boot)?;
@@ -112,6 +134,7 @@ pub fn run(
       console: Default::default(),
       tail: Vec::with_capacity(64),
       enter: None,
+      durable: store,
     };
     let mut next = Instant::now();
     let started = Instant::now();

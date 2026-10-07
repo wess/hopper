@@ -13,16 +13,30 @@ fn main() -> anyhow::Result<()> {
   };
   let args: Vec<_> = std::env::args().collect();
   ensure!(
-    args.len() == 6,
-    "Provide firmware, variables, boot DVD, installer DVD and new frame path"
+    matches!(args.len(), 6 | 7),
+    "Provide firmware, variables, boot DVD, installer DVD, new frame path and optional variable store"
   );
-  let boot = Boot {
+  let mut boot = Boot {
     firmware: std::fs::read(&args[1])?,
     variables: std::fs::read(&args[2])?,
     memory: 0x100000000,
     cpus: 2,
     timeout: Duration::from_secs(75),
   };
+  let mut store = args
+    .get(6)
+    .map(|root| -> anyhow::Result<_> {
+      let root = Path::new(root);
+      if root.exists() {
+        runtime::variables::open(root)
+      } else {
+        runtime::variables::create(root, &boot.variables)
+      }
+    })
+    .transpose()?;
+  if let Some(store) = &store {
+    boot.variables = runtime::variables::bytes(store).to_vec();
+  }
   let devices = [
     Some(pci::optical(scsi::open(Path::new(&args[3]))?)?),
     Some(pci::graphics(gpu::create(1024, 768)?)?),
@@ -35,7 +49,7 @@ fn main() -> anyhow::Result<()> {
   let mut decoder = setup::Decoder::default();
   let mut events = 0;
   let start = Instant::now();
-  let stopped = runtime::run(boot, devices, |devices, ram| {
+  let poll = |devices: &mut [Option<pci::Device>; 7], ram: &mut machine::hypervisor::Memory<'_>| {
     let bytes = pci::receive_serial(
       devices[6].as_mut().context("Missing setup controller")?,
       ram,
@@ -49,7 +63,27 @@ fn main() -> anyhow::Result<()> {
     } else {
       Control::Continue
     })
-  })?;
+  };
+  let stopped = if let Some(store) = &mut store {
+    runtime::run_persistent(boot, devices, store, poll)?
+  } else {
+    runtime::run(boot, devices, poll)?
+  };
+  if let Some(store) = &store {
+    ensure!(
+      runtime::variables::bytes(store) == stopped.variables,
+      "Persistent firmware state differs from the stopped guest"
+    );
+  }
+  drop(store);
+  if let Some(root) = args.get(6) {
+    let reopened = runtime::variables::open(Path::new(root))?;
+    ensure!(
+      runtime::variables::bytes(&reopened) == stopped.variables,
+      "Firmware changes did not survive reopening"
+    );
+    eprintln!("Persistent firmware state verified after reopening");
+  }
   ensure!(
     stopped.reason == runtime::Reason::Stopped,
     "Unexpected guest power event"
