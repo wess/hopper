@@ -44,6 +44,17 @@ fn main() -> anyhow::Result<()> {
   );
   let id = record.id.as_str();
   vz::network::set_connected(&manager, id, false)?;
+  let shared = root.path().join("shared");
+  std::fs::create_dir(&shared)?;
+  vz::sharing::add(
+    &manager,
+    id,
+    model::MachineFolder {
+      name: "work".into(),
+      path: shared.to_str().context("Folder path must be UTF-8")?.into(),
+      read_only: true,
+    },
+  )?;
   let runtime = tokio::runtime::Builder::new_multi_thread()
     .worker_threads(1)
     .build()?;
@@ -80,6 +91,18 @@ fn main() -> anyhow::Result<()> {
   ensure!(
     vz::network::set_connected(&manager, id, true).is_err(),
     "Admitted Linux hardware allowed network policy replacement"
+  );
+  ensure!(
+    owner.inspect(id)?.sharing_devices == 1,
+    "Persisted folder was not attached to native Linux hardware"
+  );
+  ensure!(
+    vz::sharing::remove(&manager, id, "work").is_err(),
+    "Owned hardware allowed folder removal"
+  );
+  ensure!(
+    vz::sharing::set_read_only(&manager, id, "work", false).is_err(),
+    "Owned hardware allowed folder access changes"
   );
   let target = manager.root.join("vz").join(id);
   let identity = std::fs::read(target.join("identity"))?;
@@ -193,6 +216,7 @@ fn main() -> anyhow::Result<()> {
   drop(display);
   owner.retire(id)?;
   vz::network::set_connected(&manager, id, true)?;
+  vz::sharing::set_read_only(&manager, id, "work", false)?;
   lock.try_lock_exclusive()?;
   FileExt::unlock(&lock)?;
   let variables = std::fs::read(target.join("variables"))?;

@@ -9,6 +9,8 @@ mod lifecycle;
 mod macos;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod network;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod sharing;
 use gpui::prelude::*;
 use gpui::{div, px, Context, Entity, PathPromptOptions, SharedString, Window};
 use guise::prelude::*;
@@ -26,6 +28,13 @@ pub struct Machines {
     state: AppState,
     rows: Load<Vec<MachineStatus>>,
     networks: BTreeMap<String, Result<bool, String>>,
+    folders: BTreeMap<String, Result<Vec<model::MachineFolder>, String>>,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    folder_draft: Option<(String, String)>,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    folder_name: Entity<TextInput>,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    folder_read_only: bool,
     busy: BTreeMap<String, String>,
     error: Option<String>,
     creating: bool,
@@ -50,6 +59,13 @@ impl Machines {
             state,
             rows: Load::Loading,
             networks: BTreeMap::new(),
+            folders: BTreeMap::new(),
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            folder_draft: None,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            folder_name: cx.new(|cx| TextInput::new(cx).label("Guest folder name").placeholder("work")),
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            folder_read_only: true,
             busy: BTreeMap::new(),
             error: None,
             creating: false,
@@ -121,13 +137,22 @@ impl Machines {
                     .collect();
                 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
                 let networks = BTreeMap::<String, Result<bool, String>>::new();
-                Ok::<_, anyhow::Error>((rows, networks))
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let folders = rows.iter()
+                    .filter(|row| row.machine.runtime == Some(model::MachineRuntime::Virtualization))
+                    .map(|row| (row.machine.id.clone(), host.virtual_machine_folders(&row.machine.id)
+                        .map_err(|error| format!("{error:#}"))))
+                    .collect();
+                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                let folders = BTreeMap::<String, Result<Vec<model::MachineFolder>, String>>::new();
+                Ok::<_, anyhow::Error>((rows, networks, folders))
             },
             move |result, cx| {
                 if let Some(view) = weak.upgrade() {
                     view.update(cx, |this, cx| {
                         this.rows = match result {
-                            Ok((rows, networks)) => {
+                            Ok((rows, networks, folders)) => {
+                                this.folders = folders;
                                 this.networks = networks;
                                 Load::Ready(rows)
                             },
@@ -532,7 +557,7 @@ impl Machines {
             .child(controls)
             .when(row_native, |view| {
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                { view.child(self.network(row, busy, cx)) }
+                { view.child(self.network(row, busy, cx)).child(self.sharing(row, busy, cx)) }
                 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
                 { view }
             })

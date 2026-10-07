@@ -56,7 +56,7 @@ impl Prepared {
         .as_ref()
         .map(|directory| directory.path().join("seed")),
       network: Some(self.network),
-      shares: Vec::new(),
+      shares: self.shares,
       console: observation
         .as_ref()
         .map(|(output, _)| output.try_clone())

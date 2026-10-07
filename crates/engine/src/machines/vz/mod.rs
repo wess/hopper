@@ -5,6 +5,7 @@ pub mod mac;
 pub mod network;
 mod prepare;
 pub mod records;
+pub mod sharing;
 mod watch;
 pub use watch::{Installation, Permit};
 

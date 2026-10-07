@@ -119,6 +119,22 @@ impl Host {
     ::engine::machines::vz::network::set_connected(&self.machines(), id, connected)
   }
 
+  pub fn virtual_machine_folders(&self, id: &str) -> anyhow::Result<Vec<model::MachineFolder>> {
+    ::engine::machines::vz::sharing::folders(&self.machines(), id)
+  }
+
+  pub fn add_virtual_machine_folder(&self, id: &str, folder: model::MachineFolder) -> anyhow::Result<()> {
+    ::engine::machines::vz::sharing::add(&self.machines(), id, folder)
+  }
+
+  pub fn remove_virtual_machine_folder(&self, id: &str, name: &str) -> anyhow::Result<()> {
+    ::engine::machines::vz::sharing::remove(&self.machines(), id, name)
+  }
+
+  pub fn set_virtual_machine_folder_read_only(&self, id: &str, name: &str, read_only: bool) -> anyhow::Result<()> {
+    ::engine::machines::vz::sharing::set_read_only(&self.machines(), id, name, read_only)
+  }
+
   pub fn virtual_machine_owner(&self) -> anyhow::Result<::engine::machines::vz::Owner> {
     let mut service = self
       .virtual_machines

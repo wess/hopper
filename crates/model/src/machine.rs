@@ -91,6 +91,14 @@ pub struct MachineSnapshot {
     pub machine_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MachineFolder {
+    pub name: String,
+    pub path: String,
+    pub read_only: bool,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum MachineInput {

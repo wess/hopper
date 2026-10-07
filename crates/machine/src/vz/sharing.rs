@@ -22,6 +22,15 @@ pub struct Directory {
 }
 
 impl Directory {
+  pub fn path(&self) -> &Path {
+    &self.path
+  }
+
+  pub fn identity(&self) -> anyhow::Result<(u64, u64)> {
+    let info = self.file.metadata()?;
+    Ok((info.dev(), info.ino()))
+  }
+
   pub fn open(name: &str, path: &Path, read_only: bool) -> anyhow::Result<Self> {
     ensure!(
       !name.is_empty()
@@ -66,6 +75,10 @@ impl Directory {
     );
     Ok(())
   }
+}
+
+pub fn device_count(vm: &super::Vm) -> usize {
+  unsafe { vm.machine.directorySharingDevices().len() }
 }
 
 pub(super) fn attach(

@@ -11,6 +11,7 @@ pub struct Status {
   pub started: bool,
   pub stop_requested: bool,
   pub network_connected: Option<bool>,
+  pub sharing_devices: usize,
 }
 
 impl Owner {
@@ -26,6 +27,7 @@ impl Owner {
       mac_ready: vm.mac_ready.get(),
       started: vm.started.get(),
       stop_requested: vm.stop_requested.get(),
+      sharing_devices: super::super::sharing::device_count(vm),
       network_connected: match super::super::network::attachments(vm).as_slice() {
         [connected] => Some(*connected),
         _ => None,

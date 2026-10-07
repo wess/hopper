@@ -27,6 +27,7 @@ pub struct Prepared {
   pub(super) temporary: Option<tempfile::TempDir>,
   pub(super) runtime: Arc<store::lock::Lease>,
   pub(super) network: machine::vz::network::Mode,
+  pub(super) shares: Vec<machine::vz::sharing::Directory>,
   pub(super) check: Check,
   pub(super) installed: bool,
 }
@@ -67,6 +68,7 @@ pub fn prepare(
   );
   let runtime = Arc::new(manager.guard(&machine.id, ".runtime")?);
   let network = super::super::network::mode(manager, &machine.id)?;
+  let shares = super::super::sharing::directories(manager, &machine.id)?;
   let parent = manager.root.join("vz");
   files::parent(&parent)?;
   let target = parent.join(&machine.id);
@@ -104,6 +106,7 @@ pub fn prepare(
     temporary,
     runtime,
     network,
+    shares,
     check,
     installed,
   })

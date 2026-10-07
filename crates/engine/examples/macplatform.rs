@@ -50,6 +50,17 @@ fn main() -> anyhow::Result<()> {
   )?;
   let media = Arc::new(tempfile::tempdir()?);
   vz::network::set_connected(&manager, &machine.id, false)?;
+  let shared = root.path().join("shared");
+  std::fs::create_dir(&shared)?;
+  vz::sharing::add(
+    &manager,
+    &machine.id,
+    model::MachineFolder {
+      name: "work".into(),
+      path: shared.to_str().context("Folder path must be UTF-8")?.into(),
+      read_only: true,
+    },
+  )?;
   let (client, mut owner) = vz::channel();
   let service = Service::new(manager.clone(), client);
   let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -84,6 +95,14 @@ fn main() -> anyhow::Result<()> {
   ensure!(
     owner.state(&machine.id)? == State::Stopped,
     "Admission unexpectedly started macOS"
+  );
+  ensure!(
+    owner.inspect(&machine.id)?.sharing_devices == 1,
+    "Persisted macOS folder was not attached"
+  );
+  ensure!(
+    vz::sharing::remove(&manager, &machine.id, "work").is_err(),
+    "Owned macOS hardware allowed folder removal"
   );
   let controller = service.clone();
   let id = machine.id.clone();

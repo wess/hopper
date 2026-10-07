@@ -23,7 +23,14 @@ is rechecked at configuration and startup/installation. Handles remain alive thr
 and SDK completion ownership. The signed Linux sharing diagnostic verifies guest reads,
 writes, read-only rejection, symlink containment and host-path replacement isolation.
 Replacing a running share's host path may make it unavailable; it must not redirect access.
-Persisted folder grants, UI selection, installed guest mounts and Windows sharing remain pending.
+The library picker saves bounded private grants bound to VM id, canonical path, device and
+inode. New folders default read-only and have editable guest names; mode changes and removal
+require operation/runtime exclusion and retirement of stopped hardware. Preparation opens
+and freezes all grants before storage allocation; replacement directories reject admission.
+Missing grants can be removed without opening their old paths. No MCP host-folder grant tool
+is exposed. UI selection, naming, mode persistence across reopen and removal are verified
+against an isolated synthetic profile. Signed Linux/Mac admission probes verify a real shared
+filesystem device and mutation exclusion; installed guest mounts and Windows sharing remain pending.
 New macOS creation persists native VZ records. Library Start discovers and downloads supported
 official restore media when no local image is selected, then inspects it, prepares hardware, opens its dedicated viewer and installs through
 the owned queue. Creation offers a local restore picker and automatic acquisition; profile

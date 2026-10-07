@@ -34,6 +34,7 @@ pub struct Prepared {
   attempt: Option<String>,
   runtime: Arc<store::lock::Lease>,
   network: vz::network::Mode,
+  shares: Vec<vz::sharing::Directory>,
   check: Check,
   client: Client,
 }
@@ -87,6 +88,7 @@ pub(super) fn prepare(
   };
   let runtime = Arc::new(manager.guard(&machine.id, ".runtime")?);
   let network = super::network::mode(&manager, &machine.id)?;
+  let shares = super::sharing::directories(&manager, &machine.id)?;
   let parent = manager.root.join("vz");
   files::parent(&parent)?;
   let target = parent.join(&machine.id);
@@ -150,6 +152,7 @@ pub(super) fn prepare(
     attempt: None,
     runtime,
     network,
+    shares,
     check,
     client,
   })
