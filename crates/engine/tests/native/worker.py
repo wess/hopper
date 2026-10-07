@@ -65,6 +65,12 @@ while True:
     req = request()
     id = req["id"]
     kind = req["command"]["type"]
+    event = root / "powerevent"
+    if event.exists():
+        reason = event.read_text()
+        event.unlink()
+        send(0, {"type": "stopped", "reason": reason})
+        sys.exit(0)
     with (root / "trace").open("a") as trace:
         trace.write(kind + "\n")
     if kind == "stop":

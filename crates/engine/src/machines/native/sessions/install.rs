@@ -17,7 +17,7 @@ pub(super) fn monitor(
   assets: Assets,
   progress: watch::Sender<Phase>,
   generation: Arc<std::sync::Mutex<u64>>,
-  epoch: u64,
+  mut epoch: u64,
 ) {
   tokio::spawn(async move {
     let mut ticks = tokio::time::interval(Duration::from_millis(500));
@@ -36,8 +36,8 @@ pub(super) fn monitor(
         .await;
       drop(owner);
       match result {
-        Ok(true) => {}
-        Ok(false) => return,
+        Ok(Some(next)) => epoch = next,
+        Ok(None) => return,
         Err(error)
           if error
             .chain()
@@ -81,7 +81,7 @@ impl Sessions {
     assets: &Assets,
     progress: &watch::Sender<Phase>,
     epoch: u64,
-  ) -> anyhow::Result<bool> {
+  ) -> anyhow::Result<Option<u64>> {
     let slot = self.slot(id).await?;
     let mut session = slot.session.clone().lock_owned().await;
     let lease = self.inner.manager.lock(id)?;
@@ -101,20 +101,37 @@ impl Sessions {
           .unwrap_or_else(|error| error.into_inner())
           != epoch
         {
-          return Ok(false);
+          return Ok(None);
         }
         let previous = installation::read(&manager, &id, Actor::Person)?
           .context("Missing installation record")?;
         let Some(active) = session.as_ref() else {
-          return Ok(false);
+          return Ok(None);
         };
+        if matches!(previous, Installation::SystemStarted {}) {
+          return match super::super::state(&active.client) {
+            super::super::State::Stopped(model::native::StopReason::Reset) => {
+              owner::finished(active).await?;
+              owner::retire(&slot, super::super::state(&active.client));
+              session.take();
+              super::reboot::start(&manager, &id, &assets, &progress, &slot, &mut session)
+                .await
+                .map(Some)
+            }
+            super::super::State::Stopped(_) | super::super::State::Failed(_) => {
+              owner::finished(active).await?;
+              Ok(None)
+            }
+            _ => Ok(Some(epoch)),
+          };
+        }
         if matches!(
           super::super::state(&active.client),
           super::super::State::Stopped(_) | super::super::State::Failed(_)
         ) {
           owner::finished(active).await?;
           installation::interrupted(&manager, &id)?;
-          return Ok(false);
+          return Ok(None);
         }
         let (paused, setup) =
           match super::super::request(&active.client, Command::Status {}).await? {
@@ -122,7 +139,7 @@ impl Sessions {
             Reply::Stopped { .. } => {
               owner::finished(active).await?;
               installation::interrupted(&manager, &id)?;
-              return Ok(false);
+              return Ok(None);
             }
             _ => anyhow::bail!("Worker did not return installation status"),
           };
@@ -132,12 +149,15 @@ impl Sessions {
         }
         progress.send_replace(Phase::Installing(setup));
         if !matches!(next, Installation::Deployed {}) || paused {
-          return Ok(matches!(
-            next,
-            Installation::Setup {
-              status: SetupStatus::Waiting {} | SetupStatus::Active { .. }
-            } | Installation::Deployed {}
-          ));
+          return Ok(
+            matches!(
+              next,
+              Installation::Setup {
+                status: SetupStatus::Waiting {} | SetupStatus::Active { .. }
+              } | Installation::Deployed {}
+            )
+            .then_some(epoch),
+          );
         }
         let stopped = super::super::request(&active.client, Command::Stop {}).await?;
         ensure!(
@@ -147,26 +167,9 @@ impl Sessions {
         owner::finished(active).await?;
         owner::retire(&slot, super::super::state(&active.client));
         session.take();
-        installation::save(&manager, &id, Installation::Booting {})?;
-        progress.send_replace(Phase::SystemBoot);
-        let boot = config::prepare(&manager, &id, &assets, config::Stage::System)?;
-        ensure!(
-          boot.boot_media.is_none() && boot.installer.is_none(),
-          "System boot retained installation media"
-        );
-        let runtime = manager.guard(&id, ".runtime")?;
-        let client = super::super::launch(&assets.worker, boot).await?;
-        let created = owner::started(
-          &manager,
-          &id,
-          client,
-          runtime,
-          Some(Installation::SystemStarted {}),
-        )
-        .await?;
-        owner::publish(&slot, &created.client);
-        *session = Some(created);
-        Ok(false)
+        super::reboot::start(&manager, &id, &assets, &progress, &slot, &mut session)
+          .await
+          .map(Some)
       }
       .await;
       if result.is_err() {

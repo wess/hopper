@@ -10,6 +10,7 @@ use tokio::sync::{watch, Mutex};
 mod guest;
 mod install;
 mod owner;
+mod reboot;
 use owner::{finished, Session};
 
 struct Slot {
@@ -86,7 +87,7 @@ impl Sessions {
         "Windows deployment is not complete"
       );
     }
-    self
+    let epoch = self
       .start_using(
         id,
         &assets.worker,
@@ -103,8 +104,20 @@ impl Sessions {
         },
         system.then_some(model::native::Installation::SystemStarted {}),
       )
-      .await
-      .map(|_| ())
+      .await?;
+    if system {
+      let slot = self.slot(id).await?;
+      let (progress, _) = watch::channel(super::deployment::Phase::SystemBoot);
+      install::monitor(
+        Arc::downgrade(&self.inner),
+        id.to_owned(),
+        assets.clone(),
+        progress,
+        slot.generation.clone(),
+        epoch,
+      );
+    }
+    Ok(())
   }
 
   pub async fn deploy(

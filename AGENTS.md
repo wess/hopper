@@ -57,8 +57,11 @@ rejects a wholly unwritten target. Handoff failures retain system-boot intent fo
 VM watches survive worker replacement; generation changes and publication share one lock
 so a stale worker cannot overwrite the current state. A surviving viewer receiver cannot
 keep a worker or registry alive. SystemStarted proves hardware allocation only.
-Full official ESD conversion and Windows installation/first-boot verification, subsequent
-guest-reboot supervision and app integration remain pending. Existing prototype instances
+The controller follows explicit guest resets through system-worker replacement, with both
+DVDs detached and the same disk/firmware identity. Manual system startup installs the same
+supervision. Guest shutdown and requested stop do not trigger automatic startup; failed
+reboots retain retry intent. Full official ESD conversion and Windows installation/first-boot
+verification and app integration remain pending. Existing prototype instances
 need migration before native startup.
 VM and temporary target leases explicitly unlock on owner teardown; closing a file
 alone can retain a flock through a duplicated or inherited descriptor. Do not replace
