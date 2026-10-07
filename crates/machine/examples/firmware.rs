@@ -4,6 +4,9 @@ mod keyboard;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "support/frame.rs"]
 mod frame;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "support/fault.rs"]
+mod fault;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() -> anyhow::Result<()> {
@@ -63,6 +66,7 @@ fn main() -> anyhow::Result<()> {
   hv::set(&mut cpu, 0, platform::RAM)?;
   hv::enter(&mut cpu, 0)?;
   let mut console = serial::Console::default();
+  let mut debug = machine::debug::State::default();
   let mut output = Vec::with_capacity(64);
   let mut opened_menu = false;
   let mut selected_shell = false;
@@ -95,7 +99,11 @@ fn main() -> anyhow::Result<()> {
   let mut seen_acpi = [false; 5];
   let mut checked_acpi = [false; 2];
   let start = std::time::Instant::now();
-  let deadline = if check_input || boot_media { 60 } else { 30 };
+  let deadline = if let Some(index) = arguments.iter().position(|argument| argument == "--seconds") {
+    let seconds: u64 = arguments.get(index + 1).context("Provide a diagnostic duration")?.parse()?;
+    ensure!((3..=300).contains(&seconds), "Diagnostic duration must be 3–300 seconds");
+    seconds
+  } else if check_input || boot_media { 60 } else { 30 };
   let mut pulses = 0;
   let boot = hv::paced(&mut cpu, std::time::Duration::from_secs(deadline), std::time::Duration::from_millis(20), |cpu| {
     for _ in 0..2000000 {
@@ -116,7 +124,13 @@ fn main() -> anyhow::Result<()> {
         "Firmware diagnostic reached its deadline"
       );
       match hv::run(cpu)? {
-      hv::Exit::Canceled => { pulses += 1; continue; }
+      hv::Exit::Canceled => {
+        pulses += 1;
+        if boot_media && start.elapsed().as_secs() >= 3 {
+          fault::inspect(cpu, &ram, topology.memory)?;
+        }
+        continue;
+      }
       hv::Exit::Exception { syndrome, physical_address, .. } => match arm::decode(syndrome) {
         arm::Trap::DataAbort(Some(access)) if (platform::UART..platform::UART + 0x1000).contains(&physical_address) => {
           let offset = physical_address - platform::UART;
@@ -254,6 +268,14 @@ fn main() -> anyhow::Result<()> {
           let pc = hv::get(cpu, 31)?;
           hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
+        arm::Trap::SystemRegister(access) => {
+          let value = if access.read || access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
+          let result = machine::debug::access(&mut debug, access, value)
+            .with_context(|| format!("Unsupported guest system register 0x{:x}", access.encoding))?;
+          if access.read && access.register != 31 { hv::set(cpu, access.register.into(), result)?; }
+          let pc = hv::get(cpu, 31)?;
+          hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
+        }
         arm::Trap::Hypercall(0) => {
           let command = hv::get(cpu, 0)? as u32;
           let argument = hv::get(cpu, 1)?;
@@ -291,6 +313,9 @@ fn main() -> anyhow::Result<()> {
       .unwrap_or_else(|| "Boot native firmware".into())
   });
   eprintln!("Firmware serviced {pulses} host polling exits");
+  if boot_media && boot.is_err() {
+    fault::report(&cpu)?;
+  }
   if boot_media {
     for device in devices[2..].iter().flatten() {
       eprintln!("Installer completed {} input events; fault: {:?}", vpci::completed(device), vpci::fault(device));

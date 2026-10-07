@@ -87,6 +87,7 @@ pub fn create(vm: &Vm, distributor: u64, redistributor: u64) -> anyhow::Result<G
       "Create interrupt controller",
     )?;
   }
+  vm.gic.set(true);
   Ok(Gic {
     distributor,
     distributor_size,

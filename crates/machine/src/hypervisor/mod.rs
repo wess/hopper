@@ -1,18 +1,23 @@
 //! Each VM owns a process; each CPU stays on its creating thread.
 
+mod config;
+mod exception;
 mod ffi;
 pub mod gic;
 mod watch;
 
+pub use exception::{fault, Fault};
 pub use watch::{bounded, paced};
 
 use anyhow::{bail, ensure, Context};
+use std::cell::Cell;
 use std::marker::PhantomData;
 use std::ptr::{null_mut, NonNull};
 use std::rc::Rc;
 
 pub struct Vm {
   _thread: PhantomData<Rc<()>>,
+  gic: Cell<bool>,
 }
 
 pub struct Memory<'a> {
@@ -48,9 +53,10 @@ fn check(status: i32, operation: &str) -> anyhow::Result<()> {
 }
 
 pub fn create() -> anyhow::Result<Vm> {
-  check(unsafe { ffi::hv_vm_create(null_mut()) }, "Create VM")?;
+  config::create()?;
   Ok(Vm {
     _thread: PhantomData,
+    gic: Cell::new(false),
   })
 }
 
@@ -172,11 +178,13 @@ pub fn cpu(vm: &Vm) -> anyhow::Result<Cpu<'_>> {
     bail!("Hypervisor did not provide CPU exit information");
   };
   let _ = vm;
-  Ok(Cpu {
+  let cpu = Cpu {
     id,
     exit,
     _vm: PhantomData,
-  })
+  };
+  config::cpu(cpu.id, vm.gic.get())?;
+  Ok(cpu)
 }
 
 pub fn set(cpu: &mut Cpu<'_>, register: u32, value: u64) -> anyhow::Result<()> {

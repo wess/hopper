@@ -1,6 +1,7 @@
 //! Native VM execution, independent of the container engine and UI.
 
 pub mod arm;
+pub mod debug;
 pub mod acpi;
 pub mod devices;
 pub mod dma;

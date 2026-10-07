@@ -23,6 +23,8 @@ pub const CPSR: u32 = 34;
 #[link(name = "Hypervisor", kind = "framework")]
 extern "C" {
   pub fn hv_vm_create(config: *mut c_void) -> i32;
+  pub fn hv_vm_config_create() -> *mut c_void;
+  pub fn hv_vm_config_set_el2_enabled(config: *mut c_void, value: bool) -> i32;
   pub fn hv_vm_destroy() -> i32;
   pub fn hv_vm_map(address: *mut c_void, guest: u64, size: usize, flags: u64) -> i32;
   pub fn hv_vm_unmap(guest: u64, size: usize) -> i32;
@@ -34,6 +36,8 @@ extern "C" {
   pub fn hv_vcpu_get_reg(cpu: u64, register: u32, value: *mut u64) -> i32;
   pub fn hv_vcpu_set_reg(cpu: u64, register: u32, value: u64) -> i32;
   pub fn hv_vcpu_set_sys_reg(cpu: u64, register: u16, value: u64) -> i32;
+  pub fn hv_vcpu_get_sys_reg(cpu: u64, register: u16, value: *mut u64) -> i32;
+  pub fn hv_vcpu_set_trap_debug_reg_accesses(cpu: u64, value: bool) -> i32;
   pub fn hv_gic_config_create() -> *mut c_void;
   pub fn hv_gic_config_set_distributor_base(config: *mut c_void, address: u64) -> i32;
   pub fn hv_gic_config_set_redistributor_base(config: *mut c_void, address: u64) -> i32;

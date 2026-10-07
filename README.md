@@ -233,11 +233,27 @@ Windows input drivers remain unverified.
 attaches keyboard/pointer controllers, and sends Enter after Microsoft's ARM64
 CD boot program loads. Supply the cached installer as its disk argument and use
 `--frame` to preserve the display when the 60-second probe fails. The cached ISO
-is opened read-only. This currently loads the boot program and then times out;
-it does not reach Windows Setup. The reserved physical framebuffer replaces the
-previous `PixelBltOnly` mode, but has not yet established Windows boot compatibility.
+is opened read-only. It now passes Microsoft's CD boot program and the UEFI
+handoff. A live 60-second run rendered Windows 11 Setup's storage-driver dialog
+through the physical framebuffer, and shorter runs reached user code and kernel
+system calls. Setup still needs a guest storage driver to access its installation
+media. The physical framebuffer replaces the previous `PixelBltOnly` mode;
+installation, desktop integration and accelerated display drivers remain unverified.
 The probe requests a native CPU exit every 20 milliseconds so the owner thread
 can deliver input even when guest execution makes no device accesses.
+`--seconds` accepts a bounded diagnostic duration from 3 to 300 seconds.
+
+CPUs created after the native GIC expose the framework's virtual PMUv3, which
+Windows boot code requires. Guest OS debug-lock status and access are emulated
+per CPU with the architectural cold-reset state; unknown system registers fail
+explicitly. A separate native probe verifies the advertised version, an advancing
+cycle counter, and the guest lock/unlock instructions:
+
+```sh
+cargo build -p machine --example performance
+codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/performance
+target/debug/examples/performance
+```
 
 `cargo run -p machine --example acpi -- /tmp/hopperacpi` exports the handoff and
 individual tables for ACPICA inspection. TPM is still missing. The native runtime,
