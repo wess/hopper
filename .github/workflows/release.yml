@@ -1,12 +1,6 @@
 name: Release
 
-# Ships a notarized, Rust-only Hopper. The version lives in the workspace
-# Cargo.toml (not package.json — that is the retired Bun build); pushing a bump
-# to main tags and releases.
-#
-# Hopper ships no engine of its own any more. On macOS the engine is Apple's
-# `container`, which the user installs and which does its own virtualization,
-# so there is no guest kernel to compile here and no entitlement to sign in.
+# releases follow the workspace version and include both container and desktop VM helpers.
 
 on:
   push:
@@ -118,6 +112,7 @@ jobs:
           scripts/build/compose.sh
           scripts/build/lima.sh
           scripts/build/docker.sh
+          scripts/build/windows.sh
 
       - name: Import signing certificate
         env:
@@ -159,17 +154,18 @@ jobs:
           test -x "$app/MacOS/hopper" || { echo "FATAL: app binary missing"; exit 1; }
           test -x "$app/MacOS/sidecars/docker"
           test -x "$app/MacOS/sidecars/compose"
+          test -x "$app/MacOS/sidecars/hoppervm"
+          codesign --verify --strict "$app/MacOS/sidecars/hoppervm"
+          codesign -d --entitlements - "$app/MacOS/sidecars/hoppervm" 2>/dev/null | grep -q com.apple.security.hypervisor
+          python3 scripts/build/windowsmanifest.py --verify "$app/Resources/windows"
+          "$app/Resources/windows/bin/wimlib-imagex" --version
+          "$app/Resources/windows/bin/mkisofs" --version
           helper="$app/Resources/lima/bin/limactl"
           test -x "$helper"
           test -f "$app/Resources/lima/share/lima/lima-guestagent.Linux-aarch64.gz"
           codesign --verify --strict "$helper"
           codesign -d --entitlements - "$helper" 2>/dev/null | grep -q 'com.apple.security.virtualization'
-          # Only the VM helper needs virtualization privileges.
-          if codesign -d --entitlements - "$app/MacOS/hopper" 2>/dev/null | grep -q virtualization; then
-            echo "FATAL: virtualization entitlement belongs on the helper"
-            exit 1
-          fi
-          echo "OK: signed, and asking for no virtualization entitlement"
+          python3 scripts/check/bundle.py dist/Hopper.app
 
       - name: Upload DMG
         run: gh release upload "v${{ needs.check-version.outputs.version }}" dist/Hopper.dmg --clobber

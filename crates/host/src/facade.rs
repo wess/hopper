@@ -41,6 +41,12 @@ pub struct Host {
     engine_version: RwLock<Option<String>>,
     settings: RwLock<Settings>,
     workspaces: RwLock<Vec<Workspace>>,
+    machines: ::engine::machines::Machines,
+    native_machines: ::engine::machines::native::sessions::Sessions,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    pub(crate) virtual_machines: std::sync::Mutex<Option<::engine::machines::vz::Service>>,
+    #[cfg(unix)]
+    pub(crate) machine_agents: std::sync::Mutex<Option<::engine::machines::native::sessions::remote::Server>>,
 }
 
 impl Host {
@@ -49,7 +55,14 @@ impl Host {
         // Older or hand-edited settings must not create an invalid VM on the
         // first start after an upgrade.
         settings.resources = settings.resources.bounded();
+        let machines = ::engine::machines::Machines::default();
         Arc::new(Self {
+            native_machines: ::engine::machines::native::sessions::Sessions::new(machines.clone()),
+            machines,
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            virtual_machines: std::sync::Mutex::new(None),
+            #[cfg(unix)]
+            machine_agents: std::sync::Mutex::new(None),
             engines: crate::engine::Engines::new(client.clone()),
             client,
             provider: RwLock::new("existing".into()),
@@ -70,6 +83,14 @@ impl Host {
 
     pub fn client(&self) -> Client {
         self.client.clone()
+    }
+
+    pub fn machines(&self) -> ::engine::machines::Machines {
+        self.machines.clone()
+    }
+
+    pub fn native_machines(&self) -> &::engine::machines::native::sessions::Sessions {
+        &self.native_machines
     }
 
     /// Point the whole app at a different daemon.

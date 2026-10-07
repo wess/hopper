@@ -1,0 +1,162 @@
+use crate::machines::{linux::progress, native::assets, Actor, Machines};
+use anyhow::{ensure, Context};
+use model::{CreateMachine, GuestOs, Machine, MachineRuntime, MachineStatus};
+use std::path::Path;
+
+pub fn create(manager: &Machines, request: CreateMachine) -> anyhow::Result<Machine> {
+  ensure!(
+    manager.root.is_absolute(),
+    "Native VM root must be absolute"
+  );
+  let (guest, maximum) = match request.profile.as_str() {
+    "ubuntu" => (GuestOs::Linux, 16 << 30),
+    "macos" => (GuestOs::Macos, 64 << 30),
+    _ => anyhow::bail!("Choose a native Ubuntu or macOS VM profile"),
+  };
+  ensure!(
+    !request.name.trim().is_empty() && request.name.len() <= 100,
+    "Choose a VM name of 1–100 characters"
+  );
+  let machine = Machine {
+    id: model::new_uuid(),
+    name: request.name.trim().into(),
+    guest,
+    profile: request.profile,
+    resources: request.resources,
+    runtime: Some(MachineRuntime::Virtualization),
+    agent_access: request.agent_access,
+    agent_generation: 0,
+    installer: request.installer,
+  };
+  crate::machines::config::validate_resources(&machine)?;
+  if let Some(installer) = &machine.installer {
+    ensure!(
+      Path::new(installer).is_absolute(),
+      "Native installation media must be absolute"
+    );
+    assets::regular(Path::new(installer), maximum)?;
+  }
+  let _operation = manager.lock(&machine.id)?;
+  let record = manager.record(&machine.id)?;
+  ensure!(!record.try_exists()?, "VM identity already exists");
+  store::json::write(&record, &machine)?;
+  Ok(machine)
+}
+
+pub(crate) fn status(
+  manager: &Machines,
+  machine: Machine,
+  actor: Actor,
+) -> anyhow::Result<MachineStatus> {
+  manager.machine(&machine.id, actor)?;
+  match std::fs::symlink_metadata(manager.root.join("lima").join(&machine.id)) {
+    Ok(_) => {
+      return Ok(MachineStatus {
+        machine,
+        state: "Migration required".into(),
+        busy: false,
+        progress: Some("The previous VM disk is preserved for migration".into()),
+      })
+    }
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+    Err(error) => return Err(error.into()),
+  }
+  let operation = match manager.lock(&machine.id) {
+    Ok(lease) => Some(lease),
+    Err(error) if busy(&error) => None,
+    Err(error) => return Err(error),
+  };
+  let (state, busy, progress) = if operation.is_none() {
+    (
+      "Unavailable",
+      true,
+      Some("Another operation is in progress."),
+    )
+  } else {
+    match manager.guard(&machine.id, ".runtime") {
+      Ok(_lease) => {
+        let prepared = match std::fs::symlink_metadata(manager.root.join("vz").join(&machine.id)) {
+          Ok(_) => true,
+          Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+          Err(error) => return Err(error.into()),
+        };
+        if machine.guest == GuestOs::Macos {
+          if prepared {
+            super::files::directory(&manager.root.join("vz").join(&machine.id))?;
+          }
+          let phase = if prepared {
+            super::mac::deployment::read(&manager.root.join("vz").join(&machine.id), &machine.id)?
+          } else {
+            None
+          };
+          let directory = manager.root.join("vz").join(&machine.id);
+          let written = phase.is_none()
+            && prepared
+            && directory.join("platform").try_exists()?
+            && super::mac::deployment::written(&directory)?;
+          if phase == Some(super::mac::deployment::Phase::Installed) {
+            super::mac::platform::inspect(&directory, &machine)?;
+          }
+          return Ok(MachineStatus {
+            machine,
+            state: match phase {
+              Some(super::mac::deployment::Phase::Installed) => "Ready to start",
+              Some(super::mac::deployment::Phase::Installing) => "Installation recovery required",
+              None if written => "Installation recovery required",
+              None => "Setup required",
+            }
+            .into(),
+            busy: false,
+            progress: Some(
+              phase
+                .map_or(
+                  if written {
+                    "Written macOS disk requires recovery; its data is preserved"
+                  } else {
+                    "Native macOS installation is in development"
+                  },
+                  |phase| phase.message(),
+                )
+                .into(),
+            ),
+          });
+        }
+        let phase = if prepared {
+          progress::read(&manager.root.join("vz").join(&machine.id))?
+        } else {
+          None
+        };
+        (
+          match phase {
+            Some(progress::Phase::Deployed) => "Deployment finished",
+            Some(progress::Phase::SystemBoot) => "Ready to start",
+            Some(_) => "Installation recovery required",
+            None if prepared => "Ready to start",
+            None => "Not created",
+          },
+          false,
+          phase.map(|phase| phase.message()),
+        )
+      }
+      Err(error) if busy(&error) => (
+        "Unavailable",
+        true,
+        Some("This VM is owned by another runtime."),
+      ),
+      Err(error) => return Err(error).context("Inspect native VM runtime ownership"),
+    }
+  };
+  Ok(MachineStatus {
+    machine,
+    state: state.into(),
+    busy,
+    progress: progress.map(Into::into),
+  })
+}
+
+fn busy(error: &anyhow::Error) -> bool {
+  error
+    .chain()
+    .filter_map(|error| error.downcast_ref::<std::io::Error>())
+    .any(|error| error.kind() == std::io::ErrorKind::WouldBlock)
+}

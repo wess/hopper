@@ -1,0 +1,237 @@
+//! The kernel-backed GIC handles interrupt routing and guest register accesses.
+
+use super::{check, ffi, Vm};
+use anyhow::{ensure, Context};
+use std::ffi::c_void;
+use std::ptr::NonNull;
+
+pub struct Gic<'a> {
+  pub distributor: u64,
+  pub distributor_size: usize,
+  pub redistributor: u64,
+  pub redistributor_size: usize,
+  pub spi_base: u32,
+  pub spi_count: u32,
+  pub msi: Option<Msi>,
+  _vm: &'a Vm,
+}
+
+pub struct Msi {
+  pub address: u64,
+  pub size: usize,
+  pub first: u32,
+  pub count: u32,
+}
+
+struct Config(NonNull<c_void>);
+
+impl Drop for Config {
+  fn drop(&mut self) {
+    unsafe { ffi::os_release(self.0.as_ptr()) };
+  }
+}
+
+pub fn create(vm: &Vm, distributor: u64, redistributor: u64) -> anyhow::Result<Gic<'_>> {
+  configured(vm, distributor, redistributor, None)
+}
+
+pub fn create_msi(
+  vm: &Vm,
+  distributor: u64,
+  redistributor: u64,
+  address: u64,
+  first: u32,
+  count: u32,
+) -> anyhow::Result<Gic<'_>> {
+  configured(
+    vm,
+    distributor,
+    redistributor,
+    Some((address, first, count)),
+  )
+}
+
+fn configured(
+  vm: &Vm,
+  distributor: u64,
+  redistributor: u64,
+  requested: Option<(u64, u32, u32)>,
+) -> anyhow::Result<Gic<'_>> {
+  let mut distributor_size = 0;
+  let mut distributor_alignment = 0;
+  let mut redistributor_size = 0;
+  let mut redistributor_alignment = 0;
+  let mut spi_base = 0;
+  let mut spi_count = 0;
+  unsafe {
+    check(
+      ffi::hv_gic_get_distributor_size(&mut distributor_size),
+      "Read GIC distributor size",
+    )?;
+    check(
+      ffi::hv_gic_get_distributor_base_alignment(&mut distributor_alignment),
+      "Read GIC distributor alignment",
+    )?;
+    check(
+      ffi::hv_gic_get_redistributor_region_size(&mut redistributor_size),
+      "Read GIC redistributor size",
+    )?;
+    check(
+      ffi::hv_gic_get_redistributor_base_alignment(&mut redistributor_alignment),
+      "Read GIC redistributor alignment",
+    )?;
+    check(
+      ffi::hv_gic_get_spi_interrupt_range(&mut spi_base, &mut spi_count),
+      "Read GIC interrupt range",
+    )?;
+  }
+  ensure!(
+    distributor_alignment > 0 && distributor.is_multiple_of(distributor_alignment as u64),
+    "GIC distributor address is not aligned"
+  );
+  ensure!(
+    redistributor_alignment > 0 && redistributor.is_multiple_of(redistributor_alignment as u64),
+    "GIC redistributor address is not aligned"
+  );
+  let distributor_end = distributor
+    .checked_add(distributor_size as u64)
+    .context("GIC distributor range overflow")?;
+  let redistributor_end = redistributor
+    .checked_add(redistributor_size as u64)
+    .context("GIC redistributor range overflow")?;
+  ensure!(
+    distributor_end <= redistributor || redistributor_end <= distributor,
+    "GIC regions overlap"
+  );
+  let config = Config(
+    NonNull::new(unsafe { ffi::hv_gic_config_create() }).context("Create GIC configuration")?,
+  );
+  let msi = requested
+    .map(|(address, first, count)| -> anyhow::Result<Msi> {
+      let mut size = 0;
+      let mut alignment = 0;
+      unsafe {
+        check(
+          ffi::hv_gic_get_msi_region_size(&mut size),
+          "Read MSI region size",
+        )?;
+        check(
+          ffi::hv_gic_get_msi_region_base_alignment(&mut alignment),
+          "Read MSI alignment",
+        )?;
+      }
+      ensure!(
+        alignment > 0 && address.is_multiple_of(alignment as u64),
+        "MSI region address is not aligned"
+      );
+      ensure!(
+        count > 0
+          && first >= spi_base
+          && (first - spi_base)
+            .checked_add(count)
+            .is_some_and(|end| end <= spi_count),
+        "MSI interrupts are outside the GIC range"
+      );
+      let end = address
+        .checked_add(size as u64)
+        .context("MSI region range overflow")?;
+      ensure!(
+        (end <= distributor || address >= distributor_end)
+          && (end <= redistributor || address >= redistributor_end),
+        "GIC MSI region overlaps"
+      );
+      unsafe {
+        check(
+          ffi::hv_gic_config_set_msi_region_base(config.0.as_ptr(), address),
+          "Set MSI address",
+        )?;
+        check(
+          ffi::hv_gic_config_set_msi_interrupt_range(config.0.as_ptr(), first, count),
+          "Set MSI interrupt range",
+        )?;
+      }
+      Ok(Msi {
+        address,
+        size,
+        first,
+        count,
+      })
+    })
+    .transpose()?;
+  unsafe {
+    check(
+      ffi::hv_gic_config_set_distributor_base(config.0.as_ptr(), distributor),
+      "Set GIC distributor address",
+    )?;
+    check(
+      ffi::hv_gic_config_set_redistributor_base(config.0.as_ptr(), redistributor),
+      "Set GIC redistributor address",
+    )?;
+    check(
+      ffi::hv_gic_create(config.0.as_ptr()),
+      "Create interrupt controller",
+    )?;
+  }
+  vm.gic.set(true);
+  Ok(Gic {
+    distributor,
+    distributor_size,
+    redistributor,
+    redistributor_size,
+    spi_base,
+    spi_count,
+    msi,
+    _vm: vm,
+  })
+}
+
+pub fn signal(gic: &Gic<'_>, interrupt: u32, level: bool) -> anyhow::Result<()> {
+  ensure!(
+    interrupt >= gic.spi_base && interrupt - gic.spi_base < gic.spi_count,
+    "Peripheral interrupt is outside the GIC range"
+  );
+  ensure!(
+    !gic
+      .msi
+      .as_ref()
+      .is_some_and(|msi| interrupt >= msi.first && interrupt - msi.first < msi.count),
+    "Message interrupt cannot use the peripheral signal path"
+  );
+  check(
+    unsafe { ffi::hv_gic_set_spi(interrupt, level) },
+    "Signal peripheral interrupt",
+  )
+}
+
+pub fn message(gic: &Gic<'_>, address: u64, interrupt: u32) -> anyhow::Result<()> {
+  let msi = gic.msi.as_ref().context("GIC has no MSI region")?;
+  ensure!(
+    msi.address.checked_add(0x40) == Some(address)
+      && interrupt >= msi.first
+      && interrupt - msi.first < msi.count,
+    "Message interrupt target is outside the MSI region"
+  );
+  check(
+    unsafe { ffi::hv_gic_send_msi(address, interrupt) },
+    "Send message interrupt",
+  )
+}
+
+pub fn read_msi(gic: &Gic<'_>) -> anyhow::Result<u64> {
+  ensure!(gic.msi.is_some(), "GIC has no MSI region");
+  let mut value = 0;
+  check(
+    unsafe { ffi::hv_gic_get_msi_reg(8, &mut value) },
+    "Read MSI region type",
+  )?;
+  Ok(value)
+}
+
+pub fn read(_gic: &Gic<'_>, offset: u16) -> anyhow::Result<u64> {
+  let mut value = 0;
+  check(
+    unsafe { ffi::hv_gic_get_distributor_reg(offset, &mut value) },
+    "Read GIC distributor",
+  )?;
+  Ok(value)
+}

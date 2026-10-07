@@ -7,6 +7,7 @@ members = [
     "crates/compose",
     "crates/apple",
     "crates/engine",
+    "crates/machine",
     "crates/host",
     "crates/mcp",
     "crates/migrate",
@@ -15,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.14.0"
+version = "0.15.85"
 edition = "2021"
 license = "MIT"
 authors = ["Wess Cope <opensource@wess.io>"]
@@ -120,6 +121,9 @@ mcp = { path = "crates/mcp" }
 
 [profile.dev]
 debug = "limited"
+
+[profile.dev.package."sha2:0.10.9"]
+opt-level = 3
 
 [profile.release]
 lto = "thin"

@@ -1,0 +1,32 @@
+[package]
+name = "machine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "hoppervm"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+model = { path = "../model" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+vm-fdt = "0.3"
+fs2 = "0.4"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+libc = "0.2"
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication"] }
+objc2-virtualization = "0.3.2"
+block2 = "0.6"
+tempfile = { workspace = true }
+tokio = { workspace = true }

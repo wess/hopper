@@ -27,9 +27,16 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 chrono = { workspace = true }
+image = { version = "0.25.10", default-features = false }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # For the Apple Containers first-run panel.
 apple = { workspace = true }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSRunningApplication", "NSApplication", "NSWindow", "NSView", "NSResponder", "NSGraphics"] }
+objc2-foundation = "0.3"
+
+[dev-dependencies]
+tempfile = { workspace = true }

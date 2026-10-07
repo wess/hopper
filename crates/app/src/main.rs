@@ -10,6 +10,8 @@
 
 mod bridge;
 mod format;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod machines;
 mod root;
 mod sidebar;
 mod state;

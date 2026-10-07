@@ -23,6 +23,7 @@ pub struct Root {
     containers: Entity<views::Containers>,
     images: Entity<views::Images>,
     dashboard: Entity<views::Dashboard>,
+    machines: Entity<views::Machines>,
     stacks: Entity<views::Stacks>,
     import: Entity<views::Import>,
     settings: Entity<views::Settings>,
@@ -42,6 +43,16 @@ pub struct Root {
 impl Root {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let host = Host::from_env();
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        {
+            if let Err(error) = crate::machines::install(&host, cx) {
+                tracing::error!(%error, "could not connect native VZ ownership");
+            }
+            let _runtime = bridge::runtime().enter();
+            if let Err(error) = host.serve_machine_agents() {
+                tracing::error!(%error, "could not start native VM agent service");
+            }
+        }
         let state = AppState::new(Arc::clone(&host), cx);
         provide(cx, state.clone());
         watch(cx, &state.route);
@@ -50,6 +61,7 @@ impl Root {
         let containers = cx.new(views::Containers::new);
         let images = cx.new(views::Images::new);
         let dashboard = cx.new(views::Dashboard::new);
+        let machines = cx.new(views::Machines::new);
         let stacks = cx.new(views::Stacks::new);
         let import = cx.new(views::Import::new);
         let settings = cx.new(views::Settings::new);
@@ -65,6 +77,7 @@ impl Root {
             containers,
             images,
             dashboard,
+            machines,
             stacks,
             import,
             settings,
@@ -276,6 +289,7 @@ impl Render for Root {
         // configured there), and Registry stays reachable so you can browse and
         // queue images to pull before the engine is even up.
         let show_setup = !engine.connected
+            && route != Route::Machines
             && route != Route::Settings
             && route != Route::Registry
             && route != Route::Import;
@@ -318,6 +332,12 @@ impl Render for Root {
                 Route::Volumes => div().size_full().child(self.volumes.clone()),
                 Route::Networks => div().size_full().child(self.networks.clone()),
                 Route::Dashboard => div().size_full().child(self.dashboard.clone()),
+                Route::Machines => div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .overflow_hidden()
+                    .child(self.machines.clone()),
                 Route::Stacks => div().size_full().child(self.stacks.clone()),
                 Route::Import => div().size_full().child(self.import.clone()),
                 Route::Settings => div().size_full().child(self.settings.clone()),

@@ -22,6 +22,11 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Check Windows deployment media inputs
+        run: |
+          python3 scripts/tests/windowsprobe.py
+          python3 scripts/tests/windowsassets.py
+
       - name: Test workspace
         # Every crate runs even after one fails, so a platform-specific break
         # reports all of its failures in one run instead of one crate at a time.
@@ -32,3 +37,48 @@ jobs:
 
       - name: Release build workspace
         run: cargo build --workspace --release --locked
+
+  firmware:
+    name: Native ARM64 firmware
+    runs-on: macos-26
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install firmware build tools
+        run: brew install llvm lld acpica
+
+      - name: Decode ARM64 hardware tables
+        run: |
+          for cpus in 1 256; do
+            tables="$RUNNER_TEMP/hopperacpi$cpus"
+            cargo run -p machine --example acpi --locked -- "$tables" "$cpus"
+            iasl -we -d "$tables/"*.dat
+            iasl -we -p "$tables/roundtrip" -tc "$tables/dsdt.dsl"
+            python3 scripts/check/acpi.py "$tables/dsdt.dat"
+          done
+          tables="$RUNNER_TEMP/hopperacpimsi"
+          cargo run -p machine --example acpi --locked -- "$tables" 1 --msi
+          iasl -we -d "$tables/"*.dat
+          iasl -we -p "$tables/roundtrip" -tc "$tables/dsdt.dsl"
+          python3 scripts/check/acpi.py "$tables/dsdt.dat" --msi
+
+      - name: Build pinned firmware
+        run: |
+          scripts/build/firmware.sh > firmware.log 2>&1 || {
+            tail -n 50 firmware.log
+            exit 1
+          }
+          cat native/build/firmware/manifest.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nativefirmware
+          path: |
+            native/build/firmware/windows.fd
+            native/build/firmware/variables.fd
+            native/build/firmware/manifest.json
+            native/build/firmware/licenses
+          if-no-files-found: error

@@ -9,6 +9,7 @@ authors.workspace = true
 model = { workspace = true }
 store = { workspace = true }
 docker = { workspace = true }
+machine = { path = "../machine" }
 
 tokio = { workspace = true }
 async-trait = { workspace = true }
@@ -19,6 +20,17 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 futures = { workspace = true }
+fs2 = "0.4"
+reqwest = { workspace = true }
+tempfile = { workspace = true }
+quick-xml = { version = "0.41", features = ["serialize"] }
+sha1_smol = "1"
+sha2 = "0.10"
+sha-crypt = "0.5"
+flate2 = "1"
+zstd = "0.13"
+libc = "0.2"
+uuid = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Apple Containers, the macOS engine. It publishes no socket, so this is a CLI
@@ -26,5 +38,8 @@ futures = { workspace = true }
 apple = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
+keyring = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dev-dependencies]
+objc2-foundation = "0.3"

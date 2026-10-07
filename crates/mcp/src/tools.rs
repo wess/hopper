@@ -9,7 +9,7 @@ const MAX_LOG_OUTPUT: usize = 16 * 1024 * 1024;
 
 /// The tool catalogue, as `tools/list` returns it.
 pub fn catalogue() -> Value {
-    json!({
+    let mut catalogue = json!({
         "tools": [
             {
                 "name": "docker.list_containers",
@@ -72,7 +72,12 @@ pub fn catalogue() -> Value {
                 "inputSchema": { "type": "object", "properties": {} }
             }
         ]
-    })
+    });
+    catalogue["tools"]
+        .as_array_mut()
+        .unwrap()
+        .extend(crate::machines::catalogue());
+    catalogue
 }
 
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
@@ -84,6 +89,9 @@ fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
 /// Run one tool call, returning its MCP result payload.
 pub async fn call(host: &Arc<Host>, name: &str, args: &Value) -> Value {
     use crate::protocol::{error_result, text_result};
+    if name.starts_with("vm.") {
+        return crate::machines::call(host, name, args).await;
+    }
 
     // A tool that acts on a container is useless without one, and the daemon's
     // error for an empty id is unhelpful, so it is caught here.
