@@ -1,11 +1,15 @@
+mod files;
+mod prepare;
+
 use super::{Actor, Machines};
 use anyhow::ensure;
 use model::GuestOs;
+pub use prepare::{Admission, Prepared, Stage};
 use std::sync::Arc;
 
 pub use machine::vz::{
   queue::{channel, Client, Owner},
-  Action,
+  Action, MainThreadMarker, VZVirtualMachineState as State,
 };
 
 #[derive(Clone)]
@@ -20,6 +24,32 @@ impl Service {
   }
 
   pub async fn transition(&self, id: &str, actor: Actor, action: Action) -> anyhow::Result<()> {
+    let (_, check) = self.scope(id, actor)?;
+    self.client.transition_checked(id, action, check).await
+  }
+
+  pub async fn prepare_linux(
+    &self,
+    id: &str,
+    actor: Actor,
+    stage: Stage,
+  ) -> anyhow::Result<Prepared> {
+    let (machine, check) = self.scope(id, actor)?;
+    ensure!(
+      machine.guest == GuestOs::Linux,
+      "Linux admission requires a Linux VM"
+    );
+    let manager = self.manager.clone();
+    let client = self.client.clone();
+    tokio::task::spawn_blocking(move || prepare::prepare(manager, machine, check, client, stage))
+      .await?
+  }
+
+  fn scope(
+    &self,
+    id: &str,
+    actor: Actor,
+  ) -> anyhow::Result<(model::Machine, machine::vz::queue::Check)> {
     let machine = self.manager.machine(id, actor)?;
     ensure!(
       machine.guest != GuestOs::Windows,
@@ -51,6 +81,6 @@ impl Service {
       );
       Ok(())
     });
-    self.client.transition_checked(id, action, check).await
+    Ok((machine, check))
   }
 }

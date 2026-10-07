@@ -87,3 +87,21 @@ impl Host {
     service.transition(id, actor, action).await
   }
 }
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl Host {
+  pub async fn prepare_virtual_linux(
+    &self,
+    id: &str,
+    actor: MachineActor,
+    stage: ::engine::machines::vz::Stage,
+  ) -> anyhow::Result<::engine::machines::vz::Prepared> {
+    let service = self
+      .virtual_machines
+      .lock()
+      .map_err(|_| anyhow::anyhow!("VZ service lock failed"))?
+      .clone()
+      .ok_or_else(|| anyhow::anyhow!("VZ ownership is not connected"))?;
+    service.prepare_linux(id, actor, stage).await
+  }
+}

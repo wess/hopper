@@ -57,7 +57,10 @@ pub fn start<'vm>(vm: &'vm mut Vm, path: &Path) -> anyhow::Result<Installation<'
   let done = Rc::new(Cell::new(false));
   let completed = done.clone();
   // cancellation is asynchronous; the callback owns hardware until it acknowledges completion.
-  let held = Rc::new(RefCell::new(Some(installer.clone())));
+  let held = Rc::new(RefCell::new(Some((
+    installer.clone(),
+    vm.ownership.clone(),
+  ))));
   let completion = RcBlock::new(move |error: *mut NSError| {
     let result = if error.is_null() {
       Ok(())

@@ -37,3 +37,6 @@ apple = { workspace = true }
 [dev-dependencies]
 keyring = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dev-dependencies]
+objc2-foundation = "0.3"

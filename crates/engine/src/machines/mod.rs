@@ -71,6 +71,22 @@ impl Machines {
         })
     }
 
+    fn native_vz(&self, id: &str) -> anyhow::Result<bool> {
+        validate_id(id)?;
+        match std::fs::symlink_metadata(self.root.join("vz").join(id)) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn cli_for(&self, id: &str) -> anyhow::Result<cli::Cli> {
+        if self.native_vz(id)? {
+            bail!("This VM uses native VZ; the previous helper cannot control it");
+        }
+        self.cli()
+    }
+
     fn record(&self, id: &str) -> anyhow::Result<PathBuf> {
         validate_id(id)?;
         Ok(self.root.join("records").join(format!("{id}.json")))
@@ -140,17 +156,36 @@ impl Machines {
     }
 
     pub async fn list(&self, actor: Actor) -> anyhow::Result<Vec<MachineStatus>> {
-        self.list_records(self.records(actor)?).await
+        self.list_records(self.records(actor)?, actor).await
     }
 
     pub async fn list_non_windows(&self, actor: Actor) -> anyhow::Result<Vec<MachineStatus>> {
         let records = self.records(actor)?.into_iter()
             .filter(|machine| machine.guest != model::GuestOs::Windows).collect();
-        self.list_records(records).await
+        self.list_records(records, actor).await
     }
 
-    async fn list_records(&self, records: Vec<Machine>) -> anyhow::Result<Vec<MachineStatus>> {
-        if records.is_empty() { return Ok(Vec::new()); }
+    async fn list_records(&self, records: Vec<Machine>, actor: Actor) -> anyhow::Result<Vec<MachineStatus>> {
+        let mut native = Vec::new();
+        let mut previous = Vec::new();
+        for machine in records {
+            self.machine(&machine.id, actor)?;
+            if self.native_vz(&machine.id)? {
+                native.push(MachineStatus {
+                    machine,
+                    state: "Unavailable".into(),
+                    busy: true,
+                    progress: Some("Controls are unavailable for this VM in this build. Its files are preserved.".into()),
+                });
+            } else {
+                previous.push(machine);
+            }
+        }
+        let records = previous;
+        if records.is_empty() {
+            native.sort_by_key(|row| row.machine.name.to_lowercase());
+            return Ok(native);
+        }
         let output = self
             .cli()?
             .output(&["list".into(), "--json".into()], Duration::from_secs(10))
@@ -160,7 +195,7 @@ impl Machines {
             .filter(|l| !l.trim().is_empty())
             .map(serde_json::from_str)
             .collect::<Result<_, _>>()?;
-        let mut result = Vec::new();
+        let mut result = native;
         for machine in records {
             let state = instances
                 .iter()
@@ -249,7 +284,7 @@ impl Machines {
             }
         }
         let _progress = Progress(progress.clone());
-        let cli = self.cli()?;
+        let cli = self.cli_for(id)?;
         if !cli.home.join(id).exists()
             && machine.guest == model::GuestOs::Windows
             && machine.installer.is_none()
@@ -314,7 +349,7 @@ impl Machines {
         let _lock = self.lock(id)?;
         let machine = self.machine(id, Actor::Person)?;
         let output = self
-            .cli()?
+            .cli_for(id)?
             .output(&["list".into(), "--json".into()], Duration::from_secs(10))
             .await?;
         let running = output
@@ -344,7 +379,7 @@ impl Machines {
     pub async fn stop(&self, id: &str, actor: Actor) -> anyhow::Result<()> {
         let _lock = self.lock(id)?;
         self.machine(id, actor)?;
-        self.cli()?
+        self.cli_for(id)?
             .run(id, &["stop".into(), id.into()], Duration::from_secs(120))
             .await
     }
@@ -357,7 +392,7 @@ impl Machines {
         }
         let mut command = vec!["shell".into(), id.into(), "--".into()];
         command.extend_from_slice(args);
-        self.cli()?.output(&command, Duration::from_secs(120)).await
+        self.cli_for(id)?.output(&command, Duration::from_secs(120)).await
     }
 
     pub async fn screenshot(&self, id: &str, actor: Actor, path: &Path) -> anyhow::Result<()> {
@@ -371,7 +406,7 @@ impl Machines {
             },
         )?;
         let machine = self.machine(id, actor)?;
-        let cli = self.cli()?;
+        let cli = self.cli_for(id)?;
         if machine.guest == model::GuestOs::Windows {
             return qmp::screenshot(&cli.home.join(id).join("qmp.sock"), path).await;
         }
@@ -438,7 +473,7 @@ impl Machines {
         } else {
             [remote, local]
         };
-        self.cli()?
+        self.cli_for(id)?
             .run(
                 id,
                 &[
@@ -466,7 +501,7 @@ impl Machines {
         self.require_stopped(id).await?;
         machine.id = model::new_uuid();
         machine.name = name.trim().into();
-        self.cli()?
+        self.cli_for(id)?
             .run(
                 id,
                 &[
@@ -484,7 +519,7 @@ impl Machines {
 
     async fn require_stopped(&self, id: &str) -> anyhow::Result<()> {
         let output = self
-            .cli()?
+            .cli_for(id)?
             .output(&["list".into(), "--json".into()], Duration::from_secs(10))
             .await?;
         for line in output.lines().filter(|l| !l.trim().is_empty()) {

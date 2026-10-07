@@ -53,9 +53,10 @@ direct uncompressed ARM64 kernel boot; prior image formats require migration. Op
 serial output uses a duplicated descriptor owned by the framework; callers must bound
 its sink. Signed diagnostics verify real framework start/pause/resume/stop and a verified
 Alpine initramfs shell. Host lifecycle authorization now connects to an app-owned main-queue
-registry. Native VM admission, creation/preparation, viewer routing, Ubuntu provisioning
-and guest tools remain pending; the Linux/macOS screens still use the prototype. macOS now has SDK restore-image
-discovery and platform configuration with image-specific CPU/RAM minimums, independent
+registry. Linux preparation and main-thread admission now persist a private sparse disk,
+generic identity and EFI state together. Host exposes preparation, but screen creation,
+viewer routing, Ubuntu provisioning and guest tools remain pending; the Linux/macOS
+screens still use the prototype. macOS now has SDK restore-image discovery and platform configuration with image-specific CPU/RAM minimums, independent
 Mac identity, boot loader and graphics. Its auxiliary directory publishes firmware state
 and hardware-model binding together with exclusive rename; opening it checks private
 ownership and exact model consistency before framework configuration. Existing state is
@@ -74,9 +75,17 @@ through completion. Host requests retain the original agent policy generation an
 per-VM operation lease through queued dispatch and native completion. Policy checks run
 before dispatch and completion publication; off/on changes invalidate old requests.
 The app owner sleeps on queue notification while idle and pumps completions on its main
-queue while active. The main app now requires the virtualization entitlement. MCP routing,
-VM admission and dedicated viewer integration remain pending; the bridge is not an agent
-endpoint. Neither diagnostic establishes a usable desktop. Keep prototype records intact.
+queue while active. The main app now requires the virtualization entitlement. MCP routing and
+dedicated viewer integration remain pending; the bridge is not an agent endpoint.
+Linux preparation captures the original policy before blocking work, retains operation
+ownership through admission/start and binds runtime ownership to the VM and outstanding
+SDK callbacks. Private state publishes with exclusive rename and retries preserve identity
+and EFI variables. Installer preparation currently requires a local ISO; its volume
+descriptor check does not prove architecture or official origin. System boot rejects
+unwritten disks but does not establish installation readiness. Records with native state
+never fall back to the previous helper; listing reports controls unavailable until native
+status routing is connected. These diagnostics do not establish a usable desktop.
+Keep prototype records intact.
 The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware
 and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in
 `model::native` and `machine::ipc`; host paths in Start are never an agent API.

@@ -170,8 +170,8 @@ Inside-guest agent connections remain pending.
 
 The direct Linux VZ foundation lives in `machine::vz`. It owns framework configuration
 and asynchronous lifecycle on the main thread, with persistent identity/EFI variables,
-raw storage, installer media and desktop devices. It is not connected to Hopper's manager
-or viewers yet; Linux/macOS application VMs still use the prototype. A signed diagnostic
+raw storage, installer media and desktop devices. Host exposes native Linux preparation
+and authorized lifecycle operations; dedicated viewer integration remains unfinished; Linux/macOS application VMs still use the prototype. A signed diagnostic
 verifies real VZ hardware transitions with a temporary blank disk:
 
 ```sh
@@ -212,8 +212,24 @@ framework machine until completion. Host now authorizes lifecycle requests again
 persisted VM record, keeps the original agent policy generation through dispatch and
 completion, and holds the operation lock until queued cancellation or native completion.
 The app installs the main-queue owner and wakes it on requests instead of polling while
-idle. Native VM admission, creation/preparation, MCP routing and dedicated VZ viewers
-remain unfinished; Linux/macOS creation and startup still follow the prototype.
+idle. Linux preparation now stages a private sparse disk, identity and EFI variables,
+publishing them together without replacing existing data. Main-thread admission binds
+runtime ownership through pending SDK callbacks. A signed engine diagnostic verifies
+admission, all four lifecycle states, agent revocation, runtime locks and persistent
+identity/firmware reuse:
+
+```sh
+cargo +1.99.0 build -p engine --example admission
+codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/admission
+target/debug/examples/admission /absolute/path/to/linux-arm64.iso
+```
+
+This path requires local ISO media and checks only its volume descriptor. It does not
+automatically download or install Ubuntu, establish desktop readiness or provide guest
+tools. Native-state records cannot fall back to previous runtime operations. Listing
+currently reports their controls unavailable until native status routing is connected.
+Screen creation, MCP routing and dedicated VZ viewers remain unfinished; Linux/macOS
+creation and startup in the app still follow the prototype.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into

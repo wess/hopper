@@ -31,3 +31,9 @@ pub use ::engine::machines::native::sessions::input::Input as MachineInputLease;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use ::engine::machines::vz::{Action as VirtualMachineAction, Owner as VirtualMachineOwner};
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub use ::engine::machines::vz::{
+  MainThreadMarker as VirtualMachineThread, Prepared as VirtualLinuxPrepared,
+  Stage as VirtualLinuxStage,
+};

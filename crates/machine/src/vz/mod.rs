@@ -10,9 +10,11 @@ pub mod restore;
 use anyhow::{ensure, Context};
 use block2::RcBlock;
 pub use config::{create_variables, identity};
-use objc2::{rc::Retained, AllocAnyThread, MainThreadMarker};
+pub use objc2::MainThreadMarker;
+use objc2::{rc::Retained, AllocAnyThread};
 use objc2_foundation::NSError;
-use objc2_virtualization::{VZVirtualMachine, VZVirtualMachineState};
+use objc2_virtualization::VZVirtualMachine;
+pub use objc2_virtualization::VZVirtualMachineState;
 use std::{
   cell::{Cell, RefCell},
   path::PathBuf,
@@ -55,6 +57,7 @@ pub struct Vm {
   _main: MainThreadMarker,
   mac: bool,
   installing: Rc<Cell<bool>>,
+  ownership: Option<std::sync::Arc<dyn Send + Sync>>,
 }
 
 #[derive(Clone, Copy)]
@@ -89,7 +92,21 @@ fn configured(
     _main: main,
     mac,
     installing: Rc::new(Cell::new(false)),
+    ownership: None,
   }
+}
+
+pub fn retain(vm: &mut Vm, ownership: std::sync::Arc<dyn Send + Sync>) -> anyhow::Result<()> {
+  ensure!(
+    state(vm) == VZVirtualMachineState::Stopped && !vm.installing.get(),
+    "Bind runtime ownership before starting the VM"
+  );
+  ensure!(
+    vm.ownership.is_none(),
+    "VZ runtime ownership is already bound"
+  );
+  vm.ownership = Some(ownership);
+  Ok(())
 }
 
 pub fn state(vm: &Vm) -> VZVirtualMachineState {
@@ -113,7 +130,11 @@ fn scoped_transition(
     "macOS installation owns the VM lifecycle"
   );
   let (send, receive) = mpsc::sync_channel(1);
-  let held = Rc::new(RefCell::new(Some((vm.machine.clone(), check))));
+  let held = Rc::new(RefCell::new(Some((
+    vm.machine.clone(),
+    check,
+    vm.ownership.clone(),
+  ))));
   let completion = RcBlock::new(move |error: *mut NSError| {
     let result = if error.is_null() {
       Ok(())
@@ -122,7 +143,7 @@ fn scoped_transition(
       Err(anyhow::anyhow!("VZ transition failed: {message}"))
     };
     let ownership = held.borrow_mut().take();
-    let result = if let Some((_, Some(check))) = &ownership {
+    let result = if let Some((_, Some(check), _)) = &ownership {
       check().and(result)
     } else {
       result
