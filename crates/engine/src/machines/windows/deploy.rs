@@ -49,41 +49,51 @@ set id=de94bba4-06d1-4d40-a16a-bfd50179d6ac\ngpt attributes=0x8000000000000001\n
   .replace('\n', "\r\n");
   let commands = format!(r#"@echo off
 setlocal
+set "phase=checking deployment files"
 set "ambiguous="
 set "driverfailed="
 if not exist "%~dp0partitions.txt" goto failed
 for %%F in (unattend.xml hopperspecialize.ps1 hopperfirstlogon.ps1) do if not exist "%~dp0%%F" goto failed
 for %%D in (viostor vioscsi vioinput) do if not exist "%~dp0%%D\%%D.inf" goto failed
+set "phase=initializing Windows PE"
 wpeinit
 if errorlevel 1 goto failed
+set "phase=loading signed guest drivers"
 for %%D in (viostor vioscsi vioinput) do call :driver %%D
 if defined driverfailed goto failed
+set "phase=locating Windows installation media"
 set "source="
 for %%D in (C D E F G H I J K L M N O P Q R S T U V Y Z) do if exist "%%D:\sources\install.wim" call :source %%D:
 if not defined source goto failed
 if defined ambiguous goto failed
+set "phase=validating Windows installation image"
 dism /Get-WimInfo /WimFile:"%source%\sources\install.wim" /Index:{index}
 if errorlevel 1 goto failed
+set "phase=checking target drive letters"
 if exist S:\ goto failed
 if exist W:\ goto failed
 if exist R:\ goto failed
-echo Hopper deployment: partitioning new disk
+set "phase=partitioning new disk"
+echo Hopper deployment: %phase%
 diskpart /s "%~dp0partitions.txt"
 if errorlevel 1 goto failed
 if not exist S:\ goto failed
 if not exist W:\ goto failed
 if not exist R:\ goto failed
-echo Hopper deployment: applying Windows image
+set "phase=applying Windows image"
+echo Hopper deployment: %phase%
 dism /Apply-Image /ImageFile:"%source%\sources\install.wim" /Index:{index} /ApplyDir:W:\ /CheckIntegrity /Verify
 if errorlevel 1 goto failed
-echo Hopper deployment: installing signed guest drivers
+set "phase=installing signed guest drivers"
+echo Hopper deployment: %phase%
 dism /Image:W:\ /Add-Driver /Driver:"%~dp0viostor\viostor.inf"
 if errorlevel 1 goto failed
 dism /Image:W:\ /Add-Driver /Driver:"%~dp0vioscsi\vioscsi.inf"
 if errorlevel 1 goto failed
 dism /Image:W:\ /Add-Driver /Driver:"%~dp0vioinput\vioinput.inf"
 if errorlevel 1 goto failed
-echo Hopper deployment: staging first-boot provisioning
+set "phase=staging first-boot provisioning"
+echo Hopper deployment: %phase%
 if not exist W:\Windows\Panther mkdir W:\Windows\Panther
 if errorlevel 1 goto failed
 copy /y "%~dp0unattend.xml" W:\Windows\Panther\unattend.xml
@@ -96,7 +106,8 @@ copy /y "%~dp0hopperspecialize.ps1" W:\Windows\Setup\Scripts\hopperspecialize.ps
 if errorlevel 1 goto failed
 copy /y "%~dp0hopperfirstlogon.ps1" W:\Windows\Setup\Scripts\hopperfirstlogon.ps1
 if errorlevel 1 goto failed
-echo Hopper deployment: configuring recovery
+set "phase=configuring recovery"
+echo Hopper deployment: %phase%
 if not exist W:\Windows\System32\Recovery\winre.wim goto failed
 mkdir R:\Recovery\WindowsRE
 if errorlevel 1 goto failed
@@ -104,7 +115,8 @@ copy /y W:\Windows\System32\Recovery\winre.wim R:\Recovery\WindowsRE\winre.wim
 if errorlevel 1 goto failed
 W:\Windows\System32\reagentc /setreimage /path R:\Recovery\WindowsRE /target W:\Windows
 if errorlevel 1 goto failed
-echo Hopper deployment: configuring UEFI boot
+set "phase=configuring UEFI boot"
+echo Hopper deployment: %phase%
 W:\Windows\System32\bcdboot W:\Windows /s S: /f UEFI
 if errorlevel 1 goto failed
 echo Hopper deployment: image ready for first-boot provisioning
@@ -118,7 +130,7 @@ drvload "%~dp0%~1\%~1.inf"
 if errorlevel 1 set "driverfailed=1"
 exit /b 0
 :failed
-echo Hopper deployment failed. The VM has not been marked ready.
+echo Hopper deployment failed while %phase%. The VM has not been marked ready.
 exit /b 1
 "#, index = layout.image_index).replace('\n', "\r\n");
   Ok(Plan {

@@ -1,10 +1,11 @@
-"""Build boot-only Windows PE media for native disk, optical and input driver diagnostics."""
+"""Build native Windows PE media for driver diagnostics or new-disk deployment."""
 
 import argparse
 import hashlib
 import json
 from pathlib import Path
 import shutil
+import stat
 import struct
 import subprocess
 
@@ -14,6 +15,25 @@ FILES = {
   "vioinput": ["vioinput.inf", "vioinput.cat", "vioinput.sys", "viohidkmdf.sys"],
   "vioscsi": ["vioscsi.inf", "vioscsi.cat", "vioscsi.sys"],
 }
+DEPLOYMENT = (
+  "partitions.txt", "deploy.cmd", "unattend.xml", "hopperspecialize.ps1", "hopperfirstlogon.ps1",
+)
+
+
+def deployment_files(folder):
+  info = folder.lstat()
+  if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o077:
+    raise ValueError("Deployment directory must be private")
+  files = {}
+  for name in DEPLOYMENT:
+    path = folder / name
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+      raise ValueError(f"Deployment file must be private: {name}")
+    if not 0 < info.st_size <= 256 * 1024:
+      raise ValueError(f"Invalid deployment file size: {name}")
+    files[name] = path.read_bytes()
+  return files
 
 
 def validate(path):
@@ -33,7 +53,20 @@ def validate(path):
   return hashlib.sha256(data).hexdigest()
 
 
-def bootstrap():
+def bootstrap(deployment=False):
+  if deployment:
+    return (
+      "@echo off\r\n"
+      "title Hopper native Windows deployment\r\n"
+      "call X:\\hopper\\deploy.cmd\r\n"
+      "if errorlevel 1 goto failed\r\n"
+      "echo Hopper image prepared. Stop the VM and boot from its new disk.\r\n"
+      "goto finished\r\n"
+      ":failed\r\n"
+      "echo Hopper deployment stopped. The VM has not been marked ready.\r\n"
+      ":finished\r\n"
+      "cmd /k\r\n"
+    )
   return (
     "@echo off\r\n"
     "title Hopper native Windows driver diagnostic\r\n"
@@ -55,7 +88,8 @@ def bootstrap():
   )
 
 
-def build(installer, drivers, out, mkisofs):
+def build(installer, drivers, out, mkisofs, deployment=None):
+  staged = deployment_files(deployment) if deployment is not None else {}
   hashes = {}
   for name, files in FILES.items():
     for file in files:
@@ -66,7 +100,7 @@ def build(installer, drivers, out, mkisofs):
   # wimlib's command language quotes paths; reject characters it cannot represent here.
   if any(c in str(out.resolve()) for c in '\"\r\n'):
     raise ValueError("Output path contains unsupported characters")
-  out.mkdir(parents=True, exist_ok=False)
+  out.mkdir(mode=0o700, parents=True, exist_ok=False)
   media = out / "media"
   media.mkdir()
   subprocess.run([
@@ -84,7 +118,11 @@ def build(installer, drivers, out, mkisofs):
     for file in files:
       shutil.copyfile(drivers / name / "w11/ARM64" / file, payload / name / file)
   shutil.copyfile(license, payload / "license.txt")
-  (payload / "drivers.cmd").write_bytes(bootstrap().encode("ascii"))
+  for name, data in staged.items():
+    path = payload / name
+    path.write_bytes(data)
+    path.chmod(0o600)
+  (payload / "drivers.cmd").write_bytes(bootstrap(bool(staged)).encode("ascii"))
   shell = out / "winpeshl.ini"
   shell.write_bytes(
     b"[LaunchApps]\r\n%SYSTEMROOT%\\System32\\cmd.exe, /c X:\\hopper\\drivers.cmd\r\n"
@@ -98,15 +136,19 @@ def build(installer, drivers, out, mkisofs):
   subprocess.run([
     "wimlib-imagex", "update", str(boot), "2",
   ], input=commands, text=True, check=True)
-  image = out / "drivers.iso"
+  image = out / ("deployment.iso" if staged else "drivers.iso")
   subprocess.run([
-    str(mkisofs), "-udf", "-iso-level", "3", "-V", "HOPPERDRIVERS",
+    str(mkisofs), "-udf", "-iso-level", "3", "-V", "HOPPERSETUP" if staged else "HOPPERDRIVERS",
     "-eltorito-platform", "efi", "-b", "efi/microsoft/boot/efisys.bin",
     "-no-emul-boot", "-o", str(image), str(media),
   ], check=True)
+  image.chmod(0o600)
   (out / "manifest.json").write_text(json.dumps({
-    "purpose": "boot-only native driver diagnostic, no Windows installation",
+    "purpose": "new-disk native Windows deployment" if staged else
+      "boot-only native driver diagnostic, no Windows installation",
     "driverSha256": hashes,
+    "containsGuestCredentials": bool(staged),
+    "detachBeforeFirstBoot": bool(staged),
   }, indent=2) + "\n")
   print(image)
 
@@ -117,8 +159,11 @@ def main():
   parser.add_argument("drivers", type=Path, help="Extracted virtio-win drivers/by-driver directory")
   parser.add_argument("output", type=Path, help="New diagnostic directory; existing paths are refused")
   parser.add_argument("--mkisofs", default="mkisofs", help="UDF-capable mkisofs executable")
+  parser.add_argument("--deployment", type=Path,
+    help="Private generated deployment bundle; only attach a new writable target as disk 0")
   args = parser.parse_args()
-  build(args.installer.resolve(), args.drivers.resolve(), args.output.resolve(), args.mkisofs)
+  build(args.installer.resolve(), args.drivers.resolve(), args.output.resolve(), args.mkisofs,
+    args.deployment)
 
 
 if __name__ == "__main__":

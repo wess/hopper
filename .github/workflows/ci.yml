@@ -22,6 +22,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Check Windows deployment media inputs
+        run: python3 scripts/tests/windowsprobe.py
+
       - name: Test workspace
         # Every crate runs even after one fails, so a platform-specific break
         # reports all of its failures in one run instead of one crate at a time.
