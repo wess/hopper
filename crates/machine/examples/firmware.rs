@@ -171,6 +171,7 @@ fn main() -> anyhow::Result<()> {
     let worker = if cpus == 2 {
       let (ready, initialized) = mpsc::sync_channel(1);
       let config = secondary::Config {
+        pause: None,
         factory, index: 1, affinity: 1,
         timeout: std::time::Duration::from_secs(deadline),
         boot: launches, requests, wake: Some(hv::wake(&cpu)), ready, stop: stop.clone(), power: power.clone(),

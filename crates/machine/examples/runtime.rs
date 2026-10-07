@@ -11,6 +11,20 @@ fn main() -> anyhow::Result<()> {
     path::Path,
     time::{Duration, Instant},
   };
+  fn export(display: &gpu::Frame, path: &Path) -> anyhow::Result<()> {
+    let mut file = std::io::BufWriter::new(
+      std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)?,
+    );
+    write!(file, "P6\n{} {}\n255\n", display.width, display.height)?;
+    for pixel in display.rgba.as_chunks::<4>().0 {
+      file.write_all(&pixel[..3])?;
+    }
+    file.flush()?;
+    Ok(())
+  }
   let args: Vec<_> = std::env::args().collect();
   ensure!(
     matches!(args.len(), 6 | 7),
@@ -49,7 +63,11 @@ fn main() -> anyhow::Result<()> {
   let mut decoder = setup::Decoder::default();
   let mut events = 0;
   let start = Instant::now();
-  let poll = |devices: &mut [Option<pci::Device>; 7], ram: &mut machine::hypervisor::Memory<'_>| {
+  let mut captured = 0;
+  let mut held_frame = Vec::new();
+  let poll = |devices: &mut [Option<pci::Device>; 7],
+              ram: &mut machine::hypervisor::Memory<'_>,
+              mode: runtime::Mode| {
     let bytes = pci::receive_serial(
       devices[6].as_mut().context("Missing setup controller")?,
       ram,
@@ -58,8 +76,36 @@ fn main() -> anyhow::Result<()> {
       events += 1;
       eprintln!("Setup event: {event:?}");
     }
+    if mode == runtime::Mode::Paused {
+      let sampled = Instant::now();
+      pci::refresh(devices[1].as_mut().context("Missing display")?, ram)?;
+      let display = pci::display(devices[1].as_ref().context("Missing display")?)
+        .and_then(gpu::frame)
+        .context("Paused runtime produced no frame")?;
+      let suffix = if captured == 0 {
+        "paused.ppm"
+      } else {
+        "resumed.ppm"
+      };
+      export(display, &Path::new(&args[5]).with_extension(suffix))?;
+      held_frame = display.rgba.clone();
+      captured += 1;
+      eprintln!(
+        "Captured guest frame {captured} with both CPUs paused in {:?}",
+        sampled.elapsed()
+      );
+      return Ok(if captured == 2 {
+        Control::Stop
+      } else {
+        Control::Continue
+      });
+    }
     Ok(if start.elapsed() >= Duration::from_secs(55) {
       Control::Stop
+    } else if (start.elapsed() >= Duration::from_secs(30) && captured == 0)
+      || (start.elapsed() >= Duration::from_secs(50) && captured == 1)
+    {
+      Control::Pause
     } else {
       Control::Continue
     })
@@ -85,6 +131,10 @@ fn main() -> anyhow::Result<()> {
     eprintln!("Persistent firmware state verified after reopening");
   }
   ensure!(
+    captured == 2,
+    "Native runtime did not capture a paused frame"
+  );
+  ensure!(
     stopped.reason == runtime::Reason::Stopped,
     "Unexpected guest power event"
   );
@@ -109,17 +159,11 @@ fn main() -> anyhow::Result<()> {
   let display = pci::display(stopped.devices[1].as_ref().context("Missing display")?)
     .and_then(gpu::frame)
     .context("Native runtime produced no frame")?;
-  let mut file = std::io::BufWriter::new(
-    std::fs::OpenOptions::new()
-      .write(true)
-      .create_new(true)
-      .open(&args[5])?,
+  ensure!(
+    display.rgba == held_frame,
+    "Framebuffer changed while stopping a paused guest"
   );
-  write!(file, "P6\n{} {}\n255\n", display.width, display.height)?;
-  for pixel in display.rgba.as_chunks::<4>().0 {
-    file.write_all(&pixel[..3])?;
-  }
-  file.flush()?;
+  export(display, Path::new(&args[5]))?;
   Ok(())
 }
 

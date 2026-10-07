@@ -1,11 +1,11 @@
-use super::{trap, validate, variables, Boot, Control, Reason};
+use super::{trap, validate, variables, Boot, Control, Mode, Reason};
 use crate::{
   acpi, debug,
   devices::{
     flash,
     virtio::{input, pci},
   },
-  hypervisor as hv, platform, psci,
+  hypervisor as hv, pause, platform, psci,
 };
 use anyhow::Context;
 use std::{
@@ -26,7 +26,7 @@ pub struct Stopped {
 pub fn run(
   boot: Boot,
   devices: [Option<pci::Device>; 7],
-  poll: impl FnMut(&mut [Option<pci::Device>; 7], &mut hv::Memory<'_>) -> anyhow::Result<Control>,
+  poll: impl FnMut(&mut [Option<pci::Device>; 7], &mut hv::Memory<'_>, Mode) -> anyhow::Result<Control>,
 ) -> anyhow::Result<Stopped> {
   execute(boot, devices, None, poll)
 }
@@ -35,7 +35,7 @@ pub fn run_persistent(
   boot: Boot,
   devices: [Option<pci::Device>; 7],
   store: &mut variables::Variables,
-  poll: impl FnMut(&mut [Option<pci::Device>; 7], &mut hv::Memory<'_>) -> anyhow::Result<Control>,
+  poll: impl FnMut(&mut [Option<pci::Device>; 7], &mut hv::Memory<'_>, Mode) -> anyhow::Result<Control>,
 ) -> anyhow::Result<Stopped> {
   anyhow::ensure!(
     boot.variables == variables::bytes(store),
@@ -48,7 +48,11 @@ fn execute(
   boot: Boot,
   mut devices: [Option<pci::Device>; 7],
   store: Option<&mut variables::Variables>,
-  mut poll: impl FnMut(&mut [Option<pci::Device>; 7], &mut hv::Memory<'_>) -> anyhow::Result<Control>,
+  mut poll: impl FnMut(
+    &mut [Option<pci::Device>; 7],
+    &mut hv::Memory<'_>,
+    Mode,
+  ) -> anyhow::Result<Control>,
 ) -> anyhow::Result<Stopped> {
   validate(&boot)?;
   let vm = hv::create()?;
@@ -96,12 +100,14 @@ fn execute(
   let factory = hv::factory(&vm);
   let reason = std::thread::scope(|scope| -> anyhow::Result<Reason> {
     let stop = Arc::new(AtomicBool::new(false));
-    let _stopper = hv::secondary::stopper(stop.clone());
+    let gate = pause::create();
+    let _stopper = pause::stopper(stop.clone(), gate.clone());
     let (launch, launches) = mpsc::sync_channel(1);
     let (requests, pending) = mpsc::sync_channel(1);
     let worker = if boot.cpus == 2 {
       let (ready, initialized) = mpsc::sync_channel(1);
       let config = hv::secondary::Config {
+        pause: Some(gate.clone()),
         factory,
         index: 1,
         affinity: 1,
@@ -136,6 +142,7 @@ fn execute(
       enter: None,
       durable: store,
     };
+    let mut paused = false;
     let mut next = Instant::now();
     let started = Instant::now();
     let result = hv::paced(&mut cpu, boot.timeout, Duration::from_millis(20), |cpu| {
@@ -149,8 +156,24 @@ fn execute(
             worker.as_ref().is_none_or(|worker| !worker.is_finished()),
             "Secondary CPU owner stopped unexpectedly"
           );
-          if poll(state.devices, state.ram)? == Control::Stop {
-            return Ok(Reason::Stopped);
+          match poll(
+            state.devices,
+            state.ram,
+            if paused { Mode::Paused } else { Mode::Running },
+          )? {
+            Control::Stop => return Ok(Reason::Stopped),
+            Control::Pause if !paused => {
+              if boot.cpus == 2 {
+                let generation = pause::request(&gate)?;
+                pause::wait(&gate, generation, Duration::from_secs(5))?;
+              }
+              paused = true;
+            }
+            Control::Continue if paused => {
+              pause::resume(&gate);
+              paused = false;
+            }
+            _ => {}
           }
           if state.enter.is_some_and(|time| Instant::now() >= time) {
             if let Some(keyboard) = &mut state.devices[2] {
@@ -177,6 +200,10 @@ fn execute(
           }
           trap::interrupts(&mut state)?;
           next = Instant::now() + Duration::from_millis(20);
+        }
+        if paused {
+          std::thread::sleep(Duration::from_millis(5));
+          continue;
         }
         let request = pending.try_recv().ok();
         let caller = usize::from(request.is_some());
@@ -209,6 +236,7 @@ fn execute(
       }
     });
     stop.store(true, Ordering::Release);
+    pause::resume(&gate);
     if let Some(worker) = worker {
       let joined = worker
         .join()

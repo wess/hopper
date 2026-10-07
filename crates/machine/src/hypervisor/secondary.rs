@@ -39,6 +39,7 @@ pub struct Config<'vm> {
   pub ready: SyncSender<()>,
   pub stop: Arc<AtomicBool>,
   pub power: Arc<Mutex<power::Power>>,
+  pub pause: Option<Arc<crate::pause::Pause>>,
 }
 
 #[derive(Debug, Default)]
@@ -78,7 +79,7 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
   config.ready.send(())?;
   let interval = Duration::from_millis(20);
   loop {
-    if config.stop.load(Ordering::Acquire) {
+    if !checkpoint(&config)? {
       return Ok(stats);
     }
     let boot = match config.boot.recv_timeout(interval) {
@@ -109,7 +110,7 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
       |cpu| -> anyhow::Result<bool> {
         let started = Instant::now();
         loop {
-          if config.stop.load(Ordering::Acquire) {
+          if !checkpoint(&config)? {
             return Ok(false);
           }
           let exit = super::run(cpu)?;
@@ -125,7 +126,7 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
             reply,
           };
           loop {
-            if config.stop.load(Ordering::Acquire) {
+            if !checkpoint(&config)? {
               return Ok(false);
             }
             ensure!(
@@ -151,7 +152,7 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
           }
           stats.traps += 1;
           loop {
-            if config.stop.load(Ordering::Acquire) {
+            if !checkpoint(&config)? {
               return Ok(false);
             }
             ensure!(
@@ -187,5 +188,12 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
     )?;
     stats.stops += 1;
     ensure!(stats.stops <= stats.starts, "Invalid CPU power cycle count");
+  }
+}
+
+fn checkpoint(config: &Config<'_>) -> anyhow::Result<bool> {
+  match &config.pause {
+    Some(pause) => crate::pause::checkpoint(pause, &config.stop),
+    None => Ok(!config.stop.load(Ordering::Acquire)),
   }
 }

@@ -17,7 +17,7 @@ fn main() -> anyhow::Result<()> {
   // mov w0, PSCI_SYSTEM_OFF / PSCI_SYSTEM_RESET; hvc #0.
   for (command, reason) in [(8, Reason::Shutdown), (9, Reason::Reset)] {
     let code = [0x52800000 | (command << 5), 0x72b08000, 0xd4000002];
-    let stopped = runtime::run(boot(&code, Duration::from_secs(2)), empty(), |_, _| {
+    let stopped = runtime::run(boot(&code, Duration::from_secs(2)), empty(), |_, _, _| {
       Ok(Control::Continue)
     })?;
     ensure!(
@@ -26,7 +26,7 @@ fn main() -> anyhow::Result<()> {
     );
   }
   let idle = [0x14000000];
-  let stopped = runtime::run(boot(&idle, Duration::from_secs(2)), empty(), |_, _| {
+  let stopped = runtime::run(boot(&idle, Duration::from_secs(2)), empty(), |_, _, _| {
     Ok(Control::Stop)
   })?;
   ensure!(
@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
     "Explicit stop was not retained"
   );
   drop(stopped);
-  let error = runtime::run(boot(&idle, Duration::from_secs(2)), empty(), |_, _| {
+  let error = runtime::run(boot(&idle, Duration::from_secs(2)), empty(), |_, _, _| {
     anyhow::bail!("lifecycle poll check")
   });
   ensure!(
@@ -44,9 +44,11 @@ fn main() -> anyhow::Result<()> {
     "Callback failure was not propagated"
   );
   let start = Instant::now();
-  let error = runtime::run(boot(&idle, Duration::from_millis(100)), empty(), |_, _| {
-    Ok(Control::Continue)
-  });
+  let error = runtime::run(
+    boot(&idle, Duration::from_millis(100)),
+    empty(),
+    |_, _, _| Ok(Control::Continue),
+  );
   let error = error
     .err()
     .ok_or_else(|| anyhow::anyhow!("Native timeout did not stop execution"))?;
@@ -59,7 +61,7 @@ fn main() -> anyhow::Result<()> {
     "Native timeout failed to stop owner threads"
   );
   // reacquire the native VM after both failure paths in this same process.
-  let stopped = runtime::run(boot(&idle, Duration::from_secs(2)), empty(), |_, _| {
+  let stopped = runtime::run(boot(&idle, Duration::from_secs(2)), empty(), |_, _, _| {
     Ok(Control::Stop)
   })?;
   ensure!(

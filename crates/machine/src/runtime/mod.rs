@@ -22,8 +22,18 @@ pub struct Boot {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Control {
+  /// continue guest execution, resuming a coordinated pause if necessary.
   Continue,
+  /// hold all CPUs; the next callback can sample guest RAM in paused mode.
+  Pause,
   Stop,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+  Running,
+  /// every guest CPU has returned to its owner and cannot execute until resumed.
+  Paused,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

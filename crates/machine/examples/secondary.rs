@@ -38,6 +38,7 @@ fn main() -> anyhow::Result<()> {
     let (requests, pending) = mpsc::sync_channel(1);
     let (ready, initialized) = mpsc::sync_channel(1);
     let config = hv::secondary::Config {
+      pause: None,
       factory,
       index: 1,
       affinity: 1,

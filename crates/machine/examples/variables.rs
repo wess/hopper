@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
     0xd2a08001, 0x52800802, 0x72a00802, 0xb9000022, 0x528acf02, 0x72a24682, 0xb9000022, 0x14000000,
   ];
   let mut start = None;
-  let result = runtime::run_persistent(boot(&code, &store), empty(), &mut store, |_, _| {
+  let result = runtime::run_persistent(boot(&code, &store), empty(), &mut store, |_, _, _| {
     if start.get_or_insert_with(Instant::now).elapsed() >= Duration::from_millis(200) {
       anyhow::bail!("variable callback check");
     }
@@ -47,7 +47,7 @@ fn main() -> anyhow::Result<()> {
     "Variable write was lost after callback failure"
   );
   let code = [0x52800100, 0x72b08000, 0xd4000002];
-  let stopped = runtime::run_persistent(boot(&code, &store), empty(), &mut store, |_, _| {
+  let stopped = runtime::run_persistent(boot(&code, &store), empty(), &mut store, |_, _, _| {
     Ok(Control::Continue)
   })?;
   ensure!(
