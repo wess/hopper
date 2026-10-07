@@ -51,6 +51,7 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
       installer: None,
       agent_access: true,
       agent_generation: 0,
+      runtime: None,
     };
     std::fs::create_dir_all(manager.root.join("records")).unwrap();
     std::fs::write(

@@ -6,7 +6,6 @@ fn main() -> anyhow::Result<()> {
     Actor, Machines,
   };
   use fs2::FileExt;
-  use model::{GuestOs, Machine};
   use objc2_foundation::{NSDate, NSDefaultRunLoopMode, NSRunLoop};
   use std::{
     fs::OpenOptions,
@@ -25,25 +24,25 @@ fn main() -> anyhow::Result<()> {
   let manager = Machines {
     root: root.path().join("machines"),
   };
-  let id = "00000000-0000-0000-0000-000000000001";
-  let record = Machine {
-    id: id.into(),
-    name: "Admission diagnostic".into(),
-    guest: GuestOs::Linux,
-    profile: "ubuntu".into(),
-    resources: model::EngineResources {
-      cpus: 2,
-      memory_gib: 1,
-      disk_gib: 10,
+  let record = engine::machines::linux::records::create(
+    &manager,
+    model::CreateMachine {
+      name: "Admission diagnostic".into(),
+      profile: "ubuntu".into(),
+      resources: model::EngineResources {
+        cpus: 2,
+        memory_gib: 1,
+        disk_gib: 10,
+      },
+      installer: Some(iso.to_str().context("ISO path must be UTF-8")?.into()),
+      agent_access: true,
     },
-    agent_access: true,
-    agent_generation: 0,
-    installer: Some(iso.to_str().context("ISO path must be UTF-8")?.into()),
-  };
-  store::json::write(
-    &manager.root.join("records").join(format!("{id}.json")),
-    &record,
   )?;
+  ensure!(
+    record.runtime == Some(model::MachineRuntime::Virtualization),
+    "Native runtime choice was not persisted"
+  );
+  let id = record.id.as_str();
   let runtime = tokio::runtime::Builder::new_multi_thread()
     .worker_threads(1)
     .build()?;
@@ -92,7 +91,9 @@ fn main() -> anyhow::Result<()> {
       );
     }
     let controller = service.clone();
-    let pending = runtime.spawn(async move { controller.transition(id, actor, action).await });
+    let identity = id.to_owned();
+    let pending =
+      runtime.spawn(async move { controller.transition(&identity, actor, action).await });
     let deadline = Instant::now() + Duration::from_secs(30);
     while !pending.is_finished() {
       owner.tick();
@@ -116,7 +117,8 @@ fn main() -> anyhow::Result<()> {
       "VZ state differs from acknowledged lifecycle"
     );
     let query = service.clone();
-    let pending = runtime.spawn(async move { query.status(id, Actor::Person).await });
+    let identity = id.to_owned();
+    let pending = runtime.spawn(async move { query.status(&identity, Actor::Person).await });
     let deadline = Instant::now() + Duration::from_secs(30);
     while !pending.is_finished() {
       owner.tick();
@@ -185,11 +187,25 @@ fn main() -> anyhow::Result<()> {
   drop(display);
   lock.try_lock_exclusive()?;
   FileExt::unlock(&lock)?;
+  let rows = runtime.block_on(manager.list_non_windows(Actor::Person))?;
+  ensure!(
+    rows.len() == 1 && rows[0].state == "Ready to start" && !rows[0].busy,
+    "Released native VM is not ready for admission"
+  );
+  let (client, mut owner) = vz::channel();
+  let service = Service::new(manager.clone(), client);
+  let prepared = runtime.block_on(service.prepare_linux(id, Actor::Person, Stage::Installer))?;
+  drop(prepared.admit(main, &mut owner)?);
+  ensure!(
+    std::fs::read(target.join("identity"))? == identity,
+    "New owner changed persistent identity"
+  );
+  owner.retire(id)?;
   ensure!(
     !manager.root.join("lima").exists(),
     "Native admission must not invoke the previous helper"
   );
-  println!("Native Linux admission, persisted identity/EFI reuse, runtime ownership, authorized status, exclusive display lifetime and agent lifecycle verified; no desktop installation was performed");
+  println!("Native Linux admission, persisted identity/EFI reuse, runtime ownership, authorized status, native creation, repeated admission, exclusive display lifetime and agent lifecycle verified; no desktop installation was performed");
   Ok(())
 }
 

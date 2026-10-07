@@ -35,6 +35,7 @@ async fn main() -> anyhow::Result<()> {
     },
     agent_access: true,
     agent_generation: 0,
+    runtime: None,
     installer: Some(args[0].clone()),
   };
   store::json::write(

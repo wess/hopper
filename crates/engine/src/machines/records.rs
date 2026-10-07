@@ -18,6 +18,7 @@ impl Machines {
       let file = assets::regular(&path, 1024 * 1024)?;
       let machine: Machine = serde_json::from_reader(file.take(1024 * 1024 + 1))?;
       super::validate_id(&machine.id)?;
+      validate(&machine)?;
       ensure!(
         path.file_stem().and_then(|stem| stem.to_str()) == Some(machine.id.as_str()),
         "VM record does not match its filename"
@@ -29,4 +30,16 @@ impl Machines {
     }
     Ok(records)
   }
+}
+
+pub(super) fn validate(machine: &Machine) -> anyhow::Result<()> {
+  ensure!(
+    match machine.runtime {
+      None => true,
+      Some(model::MachineRuntime::Virtualization) => machine.guest != model::GuestOs::Windows,
+      Some(model::MachineRuntime::Hypervisor) => machine.guest == model::GuestOs::Windows,
+    },
+    "VM runtime does not support its guest platform"
+  );
+  Ok(())
 }

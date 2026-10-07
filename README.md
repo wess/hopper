@@ -16,18 +16,20 @@ quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and 
 
 ## Features
 
-- **Virtual machines** — Ubuntu Desktop and macOS prototypes, plus Windows 11
-  ARM64 through Hopper's native runtime and dedicated viewer. Automatic image
+- **Virtual machines** — new Ubuntu Desktop and Windows 11 ARM64 records use
+  Hopper's native runtimes and dedicated viewers. macOS creation retains its prototype. Automatic image
   acquisition and installation preparation are implemented; complete native Windows
   installation and first boot remain unverified. A local installer is optional.
   Guest VMs live under `~/.hopper/machines`. Closing the native viewer keeps Windows
   running; quitting Hopper stops its owned Windows sessions. Windows snapshots,
-  clones and accelerated graphics remain unfinished. Linux and macOS still use Lima.
+  clones and accelerated graphics remain unfinished. Ubuntu first start boots its installer;
+  automatic installation and guest tools remain unfinished. Previous untagged Linux
+  records retain their recovery path.
 - **Agent access** — enabled for new VMs, revocable per VM. The MCP server creates
-  and lists native Windows VMs and captures their display through the running app.
+  and lists native Windows/Ubuntu records and captures Windows displays through the running app.
   Windows US key chords and pointer actions share input ownership with the viewer.
   Pause, resume and stop also use the owned runtime. Composed text, commands, files,
-  snapshots and clones remain unavailable. The
+  snapshots and clones remain unavailable. Previous
   Linux/macOS prototypes expose guest operations; macOS input requires Accessibility
   permission inside the guest. Prototype snapshots and clones require a stopped VM;
   clones inherit agent access.
@@ -172,7 +174,8 @@ The direct Linux VZ foundation lives in `machine::vz`. It owns framework configu
 and asynchronous lifecycle on the main thread, with persistent identity/EFI variables,
 raw storage, installer media and desktop devices. Host exposes native Linux preparation
 and authorized lifecycle operations. Already-admitted VMs use a dedicated native viewer;
-creation/admission and complete viewer integration remain unfinished; Linux/macOS application VMs still use the prototype. A signed diagnostic
+complete viewer verification remains unfinished. New Ubuntu creation and first startup
+use the native path; previous records and macOS creation keep their earlier recovery paths. A signed diagnostic
 verifies real VZ hardware transitions with a temporary blank disk:
 
 ```sh
@@ -244,9 +247,16 @@ attachment and prevent retirement while attached. Host system hotkeys stay with 
 Automatic guest-resolution changes remain disabled after an SDK reconfiguration callback
 crashed during unattached-view teardown; window resizing does not yet change guest
 resolution. The signed admission probe verifies display binding/lifetime on stopped
-hardware, not real rendering, keyboard/mouse or window close/reopen. Screen creation and
-admission, MCP routing, full guest display/input checks and signed app integration remain
-unfinished; Linux/macOS creation and first startup in the app still follow the prototype.
+hardware, not real rendering, keyboard/mouse or window close/reopen. New Ubuntu records
+persist an explicit runtime choice. Their first start acquires media,
+prepares the VM, admits it on the main thread and opens the dedicated viewer after hardware
+starts. First start boots installation media; automatic OS installation, accounts and
+guest tools remain unfinished. A local ARM64 ISO is available as a fallback. Prepared,
+unowned records show Ready to start only when operation/runtime locks are free; this does
+not assert an installed or usable desktop. Previous untagged records retain their recovery
+path, and mismatched guest/runtime choices are rejected. macOS creation still uses the
+prototype. MCP routing, full guest display/input checks and signed app integration remain
+unfinished.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into

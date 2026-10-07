@@ -5,10 +5,9 @@ Repository guidance for agent sessions.
 ## Desktop virtual machines
 
 User VMs are managed by `engine::machines`, separate from the managed Docker VM.
-The app routes Windows ARM64 through the owned native runtime. Linux and macOS
-still use the Lima/VZ prototype. Previous QEMU/swtpm Windows instances remain
-preserved for migration and are not started through the native path. macOS and Windows
-guests are experimental. Release hosts remain
+The app routes Windows ARM64 and new Ubuntu VMs through owned native runtimes.
+Previous untagged Linux records and macOS creation keep the Lima/VZ recovery path. Previous QEMU/swtpm Windows instances remain
+preserved for migration and are not started through the native path. All desktop guest families are experimental. Release hosts remain
 Apple silicon macOS 26+.
 Each VM has a dedicated viewer. Agent access defaults on for new VMs and clones
 inherit it. Native Windows key chords and pointer actions use connection-scoped input leases shared
@@ -56,8 +55,12 @@ Alpine initramfs shell. Host lifecycle authorization now connects to an app-owne
 registry. Linux preparation and main-thread admission now persist a private sparse disk,
 generic identity and EFI state together. Host exposes preparation. Already-admitted VMs
 now route View and start/stop through a dedicated native window and the authorized owner.
-Screen creation/admission, Ubuntu provisioning and guest tools remain pending; the Linux/macOS
-screens still use the prototype. macOS now has SDK restore-image discovery and platform configuration with image-specific CPU/RAM minimums, independent
+New Ubuntu records explicitly select Virtualization.framework and the app routes first
+start through automatic media acquisition, preparation, main-thread admission and its
+dedicated viewer. First start boots installation media; automatic OS installation, Ubuntu
+provisioning and guest tools remain pending. Previous untagged records keep their recovery
+path, and macOS creation still uses the prototype. macOS has SDK restore-image discovery
+and platform configuration with image-specific CPU/RAM minimums, independent
 Mac identity, boot loader and graphics. Its auxiliary directory publishes firmware state
 and hardware-model binding together with exclusive rename; opening it checks private
 ownership and exact model consistency before framework configuration. Existing state is
@@ -85,6 +88,13 @@ retirement with an attached display are rejected. System hotkeys remain with the
 Automatic guest-resolution changes stay disabled: an unattached-view teardown probe
 crashed in the asynchronous SDK reconfiguration callback. Geometry, resize completion,
 real window close/reopen, rendering/input and full signed app verification remain open.
+`Machine.runtime` is optional for previous JSON records; new Ubuntu/Windows records
+explicitly select virtualization/hypervisor. Reject incompatible guest/runtime combinations
+and native records must never invoke previous helpers. Original runtime choice is captured
+and rechecked with policy through queued VZ operations. Native listing holds the operation
+lease while probing runtime ownership, skipping the probe during another operation. Free
+new records are Not created; prepared, unowned records are Ready to start, without claiming
+stopped hardware or installed desktops. Previous guest data always requires migration.
 Linux preparation captures the original policy before blocking work, retains operation
 ownership through admission/start and binds runtime ownership to the VM and outstanding
 SDK callbacks. Private state publishes with exclusive rename and retries preserve identity

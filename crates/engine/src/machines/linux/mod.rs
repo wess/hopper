@@ -1,5 +1,6 @@
 pub mod download;
 mod files;
+pub mod records;
 
 use anyhow::ensure;
 use machine::vz::queue::Check;

@@ -36,6 +36,7 @@ impl Sessions {
       installer: request.installer,
       agent_access: request.agent_access,
       agent_generation: 0,
+      runtime: Some(model::MachineRuntime::Hypervisor),
     };
     config::validate(&machine)?;
     config::paths(&self.inner.manager.root, &machine.id)?;

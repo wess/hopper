@@ -54,6 +54,7 @@ impl Fixture {
       },
       agent_access: true,
       agent_generation: 0,
+      runtime: None,
       installer: Some(installer.to_string_lossy().into()),
     };
     store::json::write(

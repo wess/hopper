@@ -60,3 +60,12 @@ pub fn open(id: &str, title: &str, cx: &mut App) -> anyhow::Result<()> {
 pub fn owns(id: &str, cx: &App) -> bool {
   cx.has_global::<Runtime>() && cx.global::<Runtime>().owner.state(id).is_ok()
 }
+
+pub fn admit(
+  prepared: host::VirtualLinuxPrepared,
+  cx: &mut App,
+) -> anyhow::Result<host::VirtualMachineAdmission> {
+  let main = host::VirtualMachineThread::new()
+    .ok_or_else(|| anyhow::anyhow!("VM admission requires the main thread"))?;
+  prepared.admit(main, &mut cx.global_mut::<Runtime>().owner)
+}

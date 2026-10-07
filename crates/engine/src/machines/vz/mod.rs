@@ -42,8 +42,8 @@ impl Service {
     let check = Arc::new(move || {
       let current = manager.machine(&identity, actor)?;
       ensure!(
-        current.guest == machine.guest,
-        "VM platform changed during the operation"
+        current.guest == machine.guest && current.runtime == machine.runtime,
+        "VM platform or runtime changed during the operation"
       );
       ensure!(
         actor != Actor::Agent || current.agent_generation == machine.agent_generation,
@@ -101,6 +101,7 @@ impl Service {
     );
     let generation = machine.agent_generation;
     let guest = machine.guest;
+    let runtime = machine.runtime;
     let lease = self.manager.lock(id)?;
     let manager = self.manager.clone();
     let identity = id.to_owned();
@@ -112,8 +113,8 @@ impl Service {
         "Previous VM requires migration; its disk is preserved"
       );
       ensure!(
-        machine.guest == guest,
-        "VM platform changed during the operation"
+        machine.guest == guest && machine.runtime == runtime,
+        "VM platform or runtime changed during the operation"
       );
       ensure!(
         actor != Actor::Agent || machine.agent_generation == generation,

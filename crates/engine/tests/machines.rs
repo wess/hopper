@@ -10,6 +10,7 @@ fn machine() -> Machine {
         resources: EngineResources::default(),
         agent_access: false,
         agent_generation: 0,
+        runtime: None,
         installer: None,
     }
 }

@@ -177,7 +177,7 @@ impl Machines {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Use Windows ARM64 ISO".into()),
+            prompt: Some(if self.profile == "ubuntu" { "Use Linux ARM64 ISO" } else { "Use Windows ARM64 ISO" }.into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = paths.await {
@@ -219,6 +219,7 @@ impl Machines {
         let virtual_owned = crate::machines::owns(&id, cx);
         #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
         let virtual_owned = false;
+        let row_native = machine.runtime == Some(model::MachineRuntime::Virtualization);
         let start_name = machine.name.clone();
         let stopped = row.state == "Stopped";
         let uncreated = row.state == "Not created";
@@ -251,7 +252,7 @@ impl Machines {
                 .size(Size::Sm)
                 .variant(Variant::Light)
                 .color(ColorName::Blue)
-                .disabled(busy || (!running && !stopped && !uncreated))
+                .disabled(busy || (!running && !stopped && !uncreated && row.state != "Ready to start"))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let manager = manager.clone();
                     let id = start_id.clone();
@@ -260,8 +261,8 @@ impl Machines {
                         return;
                     }
                     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                    if virtual_owned {
-                        this.start_virtual(id, start_name.clone(), running, cx);
+                    if virtual_owned || row_native {
+                        this.start_virtual(id, start_name.clone(), running, virtual_owned, cx);
                         return;
                     }
                     let operation_id = id.clone();
@@ -287,7 +288,7 @@ impl Machines {
                 Button::new(SharedString::from(format!("snapshot-{id}")), "Snapshot")
                     .size(Size::Sm)
                     .variant(Variant::Subtle)
-                    .disabled(busy || !stopped || windows || virtual_owned)
+                    .disabled(busy || !stopped || windows || virtual_owned || row_native)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let manager = this.state.host.machines();
                         let id = snapshot_id.clone();
@@ -307,7 +308,7 @@ impl Machines {
                 Button::new(SharedString::from(format!("clone-{id}")), "Clone")
                     .size(Size::Sm)
                     .variant(Variant::Subtle)
-                    .disabled(busy || !stopped || windows || virtual_owned)
+                    .disabled(busy || !stopped || windows || virtual_owned || row_native)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let manager = this.state.host.machines();
                         let id = clone_id.clone();
@@ -329,7 +330,7 @@ impl Machines {
                 Button::new(SharedString::from(format!("history-{id}")), "Snapshots")
                     .size(Size::Sm)
                     .variant(Variant::Subtle)
-                    .disabled(busy || windows || virtual_owned)
+                    .disabled(busy || windows || virtual_owned || row_native)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.show_snapshots(history_id.clone(), cx)
                     })),
@@ -614,7 +615,12 @@ impl Render for Machines {
                         .size(Size::Xs),
                 );
             }
-            if profile.guest == model::GuestOs::Windows {
+            if profile.guest == model::GuestOs::Windows || profile.guest == model::GuestOs::Linux {
+                let automatic = if profile.guest == model::GuestOs::Linux {
+                    "Ubuntu downloads its ARM64 desktop installer automatically on first start. Installation and guest tools are still in development."
+                } else {
+                    "Windows downloads from Microsoft and prepares its installer automatically on first start."
+                };
                 form = form.child(Group::new().gap(Size::Sm).wrap(true)
                     .child(Button::new("choose-installer", "Use a local ARM64 ISO…")
                         .size(Size::Sm).variant(Variant::Subtle).disabled(create_busy)
@@ -624,10 +630,10 @@ impl Render for Machines {
                             .size(Size::Sm).variant(Variant::Subtle).disabled(create_busy)
                             .on_click(cx.listener(|this, _, _, cx| { this.installer = None; cx.notify(); })))))
                     .child(Text::new(self.installer.clone().unwrap_or_else(||
-                        "Windows downloads from Microsoft and prepares its installer automatically on first start.".into()))
+                        automatic.into()))
                         .size(Size::Xs).dimmed());
             }
-            form=form.child(Text::new("OS images download automatically on first start. No host folders are shared. Stop a VM before cloning or taking a disk snapshot.").size(Size::Xs).dimmed())
+            form=form.child(Text::new("OS installation and guest tools are still in development. No host folders are shared.").size(Size::Xs).dimmed())
                 .child(div().w(px(180.0)).child(Button::new("create-vm",self.busy.get("create").cloned().unwrap_or_else(||"Create VM".into()))
                     .size(Size::Sm).color(ColorName::Blue).disabled(create_busy)
                     .on_click(cx.listener(|this,_,_,cx|this.create(cx)))));

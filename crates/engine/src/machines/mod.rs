@@ -75,6 +75,9 @@ impl Machines {
 
     fn native_vz(&self, id: &str) -> anyhow::Result<bool> {
         validate_id(id)?;
+        if self.machine(id, Actor::Person)?.runtime == Some(model::MachineRuntime::Virtualization) {
+            return Ok(true);
+        }
         match std::fs::symlink_metadata(self.root.join("vz").join(id)) {
             Ok(_) => Ok(true),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -83,6 +86,9 @@ impl Machines {
     }
 
     fn cli_for(&self, id: &str) -> anyhow::Result<cli::Cli> {
+        if self.machine(id, Actor::Person)?.runtime == Some(model::MachineRuntime::Hypervisor) {
+            bail!("This VM uses the native runtime; the previous helper cannot control it");
+        }
         if self.native_vz(id)? {
             bail!("This VM uses native VZ; the previous helper cannot control it");
         }
@@ -97,6 +103,7 @@ impl Machines {
     pub fn machine(&self, id: &str, actor: Actor) -> anyhow::Result<Machine> {
         let machine: Machine =
             serde_json::from_slice(&std::fs::read(self.record(id)?).context("VM not found")?)?;
+        records::validate(&machine)?;
         if machine.id != id {
             bail!("VM record does not match its id");
         }
@@ -173,6 +180,11 @@ impl Machines {
         for machine in records {
             self.machine(&machine.id, actor)?;
             if self.native_vz(&machine.id)? {
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                if machine.runtime == Some(model::MachineRuntime::Virtualization) {
+                    native.push(linux::records::status(self, machine, actor)?);
+                    continue;
+                }
                 native.push(MachineStatus {
                     machine,
                     state: "Unavailable".into(),
@@ -256,6 +268,7 @@ impl Machines {
             installer: request.installer,
             agent_access: request.agent_access,
             agent_generation: 0,
+            runtime: None,
         };
         let yaml = config::render(&machine)?;
         let _lock = self.lock(&machine.id)?;

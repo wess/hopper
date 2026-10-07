@@ -47,7 +47,10 @@ impl Host {
         .clone();
       if let Some(service) = service {
         for row in &mut rows {
-          if row.machine.guest != model::GuestOs::Windows && row.state == "Unavailable" {
+          if row.machine.guest != model::GuestOs::Windows
+            && (row.state == "Unavailable"
+              || row.machine.runtime == Some(model::MachineRuntime::Virtualization))
+          {
             if let Some(status) = service.status(&row.machine.id, actor).await? {
               use ::engine::machines::vz::State;
               let (state, transitional) = match status.state {
@@ -77,6 +80,10 @@ impl Host {
   }
 
   pub async fn create_machine(&self, request: CreateMachine) -> anyhow::Result<Machine> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if request.profile == "ubuntu" {
+      return ::engine::machines::linux::records::create(&self.machines(), request);
+    }
     if self
       .machines()
       .profiles()

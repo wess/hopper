@@ -20,6 +20,13 @@ impl GuestOs {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MachineRuntime {
+    Virtualization,
+    Hypervisor,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Machine {
@@ -28,6 +35,8 @@ pub struct Machine {
     pub guest: GuestOs,
     pub profile: String,
     pub resources: EngineResources,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<MachineRuntime>,
     #[serde(default)]
     pub agent_access: bool,
     #[serde(default)]

@@ -107,12 +107,15 @@ impl Machines {
     id: String,
     name: String,
     running: bool,
+    owned: bool,
     cx: &mut Context<Self>,
   ) {
     self.busy.insert(
       id.clone(),
       if running {
         "Stopping…"
+      } else if !owned {
+        "Preparing Linux installer…"
       } else {
         "Starting…"
       }
@@ -122,6 +125,44 @@ impl Machines {
     let host = self.state.host.clone();
     let identity = id.clone();
     let weak = cx.entity().downgrade();
+    if !running && !owned {
+      bridge::run(
+        cx,
+        async move {
+          host
+            .prepare_virtual_linux(
+              &identity,
+              MachineActor::Person,
+              host::VirtualLinuxStage::Installer,
+            )
+            .await
+        },
+        move |result, cx| {
+          let Some(view) = weak.upgrade() else {
+            return;
+          };
+          let result = result.and_then(|prepared| crate::machines::admit(prepared, cx));
+          match result {
+            Err(error) => view.update(cx, |this, cx| {
+              this.finish_virtual(&id, &name, false, Err(error), cx)
+            }),
+            Ok(admission) => {
+              view.update(cx, |this, cx| {
+                this.busy.insert(id.clone(), "Starting Linux…".into());
+                cx.notify();
+              });
+              bridge::run(cx, admission.start(), move |result, cx| {
+                let _ = weak.update(cx, |this, cx| {
+                  this.finish_virtual(&id, &name, false, result, cx)
+                });
+              });
+            }
+          }
+        },
+      );
+      cx.notify();
+      return;
+    }
     bridge::run(
       cx,
       async move {
@@ -139,20 +180,34 @@ impl Machines {
       },
       move |result, cx| {
         let _ = weak.update(cx, |this, cx| {
-          this.busy.remove(&id);
-          let result = result.and_then(|()| {
-            if running {
-              Ok(())
-            } else {
-              crate::machines::open(&id, &name, cx)
-            }
-          });
-          this.error = result.err().map(|error| format!("{error:#}"));
-          this.reload(cx);
-          cx.notify();
+          this.finish_virtual(&id, &name, running, result, cx);
         });
       },
     );
+    cx.notify();
+  }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl Machines {
+  fn finish_virtual(
+    &mut self,
+    id: &str,
+    name: &str,
+    running: bool,
+    result: anyhow::Result<()>,
+    cx: &mut Context<Self>,
+  ) {
+    self.busy.remove(id);
+    let result = result.and_then(|()| {
+      if running {
+        Ok(())
+      } else {
+        crate::machines::open(id, name, cx)
+      }
+    });
+    self.error = result.err().map(|error| format!("{error:#}"));
+    self.reload(cx);
     cx.notify();
   }
 }

@@ -27,6 +27,7 @@ fn fixture() -> (tempfile::TempDir, Machines) {
     },
     agent_access: true,
     agent_generation: 0,
+    runtime: None,
     installer: None,
   };
   store::json::write(
@@ -316,4 +317,31 @@ async fn status_does_not_contend_with_operation_or_runtime_ownership() {
   assert!(request.await.unwrap().unwrap().is_none());
   drop((operation, runtime));
   assert!(!owner.active());
+}
+
+#[tokio::test]
+async fn queued_mutation_rejects_runtime_choice_changes() {
+  for actor in [Actor::Person, Actor::Agent] {
+    let (_root, manager) = fixture();
+    let (client, mut owner) = vz::channel();
+    let wake = owner.wake();
+    let service = Service::new(manager.clone(), client);
+    let request = tokio::spawn(async move { service.transition(ID, actor, Action::Start).await });
+    wake.notified().await;
+    let mut machine = manager.machine(ID, Actor::Person).unwrap();
+    machine.runtime = Some(model::MachineRuntime::Virtualization);
+    store::json::write(
+      &manager.root.join("records").join(format!("{ID}.json")),
+      &machine,
+    )
+    .unwrap();
+    owner.tick();
+    assert!(request
+      .await
+      .unwrap()
+      .unwrap_err()
+      .to_string()
+      .contains("runtime changed"));
+    assert!(!owner.active());
+  }
 }
