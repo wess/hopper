@@ -62,6 +62,7 @@ pub struct Vm {
   _main: MainThreadMarker,
   mac: bool,
   installing: Rc<Cell<bool>>,
+  mac_ready: Rc<Cell<bool>>,
   ownership: Option<std::sync::Arc<dyn Send + Sync>>,
   displaying: Rc<Cell<bool>>,
   installer: bool,
@@ -102,6 +103,7 @@ fn configured(
     _main: main,
     mac,
     installing: Rc::new(Cell::new(false)),
+    mac_ready: Rc::new(Cell::new(!mac)),
     ownership: None,
     displaying: Rc::new(Cell::new(false)),
     installer: false,
@@ -152,6 +154,10 @@ fn scoped_transition(
   ensure!(
     !vm.installing.get(),
     "macOS installation owns the VM lifecycle"
+  );
+  ensure!(
+    !matches!(action, Action::Start) || vm.mac_ready.get(),
+    "Install macOS before starting its hardware"
   );
   let (send, receive) = mpsc::sync_channel(1);
   let held = Rc::new(RefCell::new(Some((

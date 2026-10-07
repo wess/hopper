@@ -106,8 +106,11 @@ fn main() -> anyhow::Result<()> {
     vz::state(&vm) == VZVirtualMachineState::Stopped,
     "Configuration must not start macOS hardware"
   );
-  for _ in 0..2 {
+  for attempt in 0..2 {
     let installation = vz::install::start(&mut vm, &invalid)?;
+    if attempt == 1 {
+      vz::install::cancel(&installation);
+    }
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
       ensure!(
@@ -131,6 +134,13 @@ fn main() -> anyhow::Result<()> {
       );
     }
     drop(installation);
+    let error = vz::transition(&vm, vz::Action::Start)
+      .err()
+      .context("Failed or cancelled installation allowed macOS startup")?;
+    ensure!(
+      error.to_string().contains("Install macOS"),
+      "Unexpected post-install startup rejection: {error}"
+    );
   }
   ensure!(
     std::fs::read(&invalid)? == b"invalid restore image",

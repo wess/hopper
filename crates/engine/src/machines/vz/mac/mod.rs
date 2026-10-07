@@ -1,4 +1,5 @@
 pub mod media;
+pub mod platform;
 
 use super::{files, intent, Service};
 use crate::machines::Actor;
@@ -15,6 +16,23 @@ pub struct Restore {
   directory: Arc<tempfile::TempDir>,
   image: restore::Image,
   check: Check,
+  manager: crate::machines::Machines,
+  machine: model::Machine,
+}
+
+pub struct Prepared {
+  platform: platform::Prepared,
+  media: Arc<tempfile::TempDir>,
+}
+
+impl Prepared {
+  pub fn admit(
+    self,
+    main: machine::vz::MainThreadMarker,
+    owner: &mut super::Owner,
+  ) -> anyhow::Result<()> {
+    self.platform.admit(main, owner, self.media)
+  }
 }
 
 impl Restore {
@@ -28,6 +46,18 @@ impl Restore {
 
   pub fn authorized(&self) -> anyhow::Result<()> {
     (self.check)()
+  }
+
+  pub async fn prepare(self) -> anyhow::Result<Prepared> {
+    self.authorized()?;
+    tokio::task::spawn_blocking(move || {
+      let platform = platform::prepare(&self.manager, self.machine, self.image, self.check)?;
+      Ok(Prepared {
+        platform,
+        media: self.directory,
+      })
+    })
+    .await?
   }
 }
 
@@ -96,6 +126,8 @@ impl Service {
       directory,
       image,
       check,
+      manager: self.manager.clone(),
+      machine,
     })
   }
 }

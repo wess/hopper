@@ -29,12 +29,17 @@ pub struct Installation<'vm> {
   installer: Retained<VZMacOSInstaller>,
   receive: mpsc::Receiver<anyhow::Result<()>>,
   done: Rc<Cell<bool>>,
+  cancelled: Rc<Cell<bool>>,
   _vm: &'vm mut Vm,
 }
 
 pub fn start<'vm>(vm: &'vm mut Vm, path: &Path) -> anyhow::Result<Installation<'vm>> {
   ensure!(vm.mac, "macOS installation requires a macOS platform");
   ensure!(!vm.installing.get(), "macOS installation is already active");
+  ensure!(
+    !vm.mac_ready.get(),
+    "macOS installation has already completed"
+  );
   ensure!(
     super::state(vm) == VZVirtualMachineState::Stopped,
     "macOS installation requires a stopped VM"
@@ -54,15 +59,21 @@ pub fn start<'vm>(vm: &'vm mut Vm, path: &Path) -> anyhow::Result<Installation<'
   };
   let (send, receive) = mpsc::sync_channel(1);
   let busy = vm.installing.clone();
+  let ready = vm.mac_ready.clone();
   let done = Rc::new(Cell::new(false));
   let completed = done.clone();
+  let cancelled = Rc::new(Cell::new(false));
+  let requested = cancelled.clone();
   // cancellation is asynchronous; the callback owns hardware until it acknowledges completion.
   let held = Rc::new(RefCell::new(Some((
     installer.clone(),
     vm.ownership.clone(),
   ))));
   let completion = RcBlock::new(move |error: *mut NSError| {
-    let result = if error.is_null() {
+    let result = if requested.get() {
+      Err(anyhow::anyhow!("macOS installation was cancelled"))
+    } else if error.is_null() {
+      ready.set(true);
       Ok(())
     } else {
       let message: String = unsafe { &*error }.to_string().chars().take(512).collect();
@@ -81,6 +92,7 @@ pub fn start<'vm>(vm: &'vm mut Vm, path: &Path) -> anyhow::Result<Installation<'
     installer,
     receive,
     done,
+    cancelled,
     _vm: vm,
   })
 }
@@ -96,6 +108,7 @@ pub fn fraction(installation: &Installation<'_>) -> f64 {
 
 pub fn cancel(installation: &Installation<'_>) {
   if !installation.done.get() {
+    installation.cancelled.set(true);
     unsafe { installation.installer.progress() }.cancel();
   }
 }

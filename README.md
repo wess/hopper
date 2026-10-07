@@ -203,8 +203,14 @@ to inspect it. APFS clones retain independent blocks; copy fallback checks free 
 original authorization throughout copying. Staging checks source identity, size and timestamps,
 rejects symlinks/empty files, and retains original policy and explicit-stop cancellation through
 SDK completion. The SDK callback keeps staging data and operation ownership alive after caller
-cancellation. Dropping completed inspection releases its private copy. This API does not yet
-prepare persistent platform state, admit hardware, download an IPSW or install macOS.
+cancellation. Dropping completed inspection releases its private copy. The inspected result
+now prepares private sparse storage under runtime ownership and can admit native hardware
+on the main thread. Publication stores machine identity, restore
+build/version/requirements and matching auxiliary firmware together. Retry validates and
+reuses those bindings; caller cancellation cleans unpublished storage. SDK hardware and
+displays retain runtime and media ownership. Normal Start rejects macOS hardware until
+native installation reports success; failed installation keeps the guard in place. This
+API does not yet download an IPSW, integrate installation into the library or install macOS.
 
 The `vzmac` example discovers Apple's supported restore-image metadata and configures
 a macOS platform with its CPU/RAM requirements, independent identity and matching

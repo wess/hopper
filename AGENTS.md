@@ -8,7 +8,11 @@ User VMs are managed by `engine::machines`, separate from the managed Docker VM.
 The app routes Windows ARM64 and new Ubuntu VMs through owned native runtimes.
 New macOS creation persists native VZ records and reports Setup required; native installation
 and viewer integration remain pending. Local restore inspection stages private APFS media,
-retains original policy/stop intent and keeps staging/operation ownership through SDK callbacks. Previous untagged Linux/macOS records keep the
+retains original policy/stop intent and keeps staging/operation ownership through SDK callbacks.
+Inspected restore results prepare private native platform state and admit stopped hardware on
+the main thread. Identity, requirements and auxiliary firmware remain bound to the selected
+restore build. Normal Start is blocked until successful native installation; automatic download
+and installation/viewer integration remain pending. Previous untagged Linux/macOS records keep the
 Lima/VZ recovery path. Previous QEMU/swtpm Windows instances remain
 preserved for migration and are not started through the native path. All desktop guest families are experimental. Release hosts remain
 Apple silicon macOS 26+.
