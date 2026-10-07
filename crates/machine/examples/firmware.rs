@@ -35,6 +35,8 @@ fn main() -> anyhow::Result<()> {
     .context("Provide an ARM64 EDK2 firmware image")?;
   let arguments: Vec<_> = std::env::args().collect();
   let boot_media = arguments.iter().any(|argument| argument == "--boot-media");
+  let optical_boot = arguments.iter().any(|argument| argument == "--optical-boot");
+  ensure!(!optical_boot || boot_media, "Optical boot requires guest boot mode");
   let guest_input = arguments.iter().any(|argument| argument == "--check-guest-input");
   ensure!(!guest_input || boot_media, "Guest input check requires boot-only driver media");
   let target_path = arguments.iter().position(|argument| argument == "--check-guest-disk")
@@ -110,7 +112,8 @@ fn main() -> anyhow::Result<()> {
   let mut updates = 0usize;
   let mut bus = pci::Bus::default();
   let disk = std::env::args().nth(4).filter(|path| path != "-").map(|path| {
-    vpci::create(block::open(std::path::Path::new(&path), true, [0; 20])?)
+    if optical_boot { vpci::optical(scsi::open(std::path::Path::new(&path))?) }
+    else { vpci::create(block::open(std::path::Path::new(&path), true, [0; 20])?) }
   }).transpose()?;
   let check_storage = arguments.iter().any(|argument| argument == "--check-storage");
   let check_input = arguments.iter().any(|argument| argument == "--check-input");
@@ -118,6 +121,7 @@ fn main() -> anyhow::Result<()> {
   let graphics = if check_graphics { Some(vpci::graphics(gpu::create(1024, 768)?)?) } else { None };
 
   ensure!(!check_storage || disk.is_some(), "Storage check requires a disk image");
+  ensure!(!optical_boot || !check_storage, "Optical boot and block storage checks are separate");
   let keyboard = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Keyboard))?) } else { None };
   let pointer = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Tablet))?) } else { None };
   let target_disk = target_path.map(|path| target::create(std::path::Path::new(path))).transpose()?;
@@ -177,7 +181,11 @@ fn main() -> anyhow::Result<()> {
         } else if optical_check {
           text_input.extend(b"pnputil /scan-devices\rdiskpart\rrescan\rlist volume\r");
         } else if target_path.is_some() {
-          text_input.extend(b"diskpart\rselect disk 1\rclean\rcreate partition primary\rlist partition\r");
+          if optical_boot {
+            text_input.extend(b"diskpart\rselect disk 0\rclean\rcreate partition primary\rlist partition\rlist volume\r");
+          } else {
+            text_input.extend(b"diskpart\rselect disk 1\rclean\rcreate partition primary\rlist partition\r");
+          }
         } else {
           text_input.extend(b"echo hopper windows input verified\r");
         }
@@ -438,6 +446,12 @@ fn main() -> anyhow::Result<()> {
     fault::report(&cpu)?;
   }
   if boot_media {
+    if optical_boot {
+      if let Some(device) = &mut devices[0] {
+        eprintln!("Boot optical completed {} SCSI requests; fault: {:?}", vpci::completed(device), vpci::fault(device));
+        queue::inspect(device, &mut ram)?;
+      }
+    }
     eprintln!("Firmware exit callback observed: {handed_off}");
     eprintln!("Post-handoff PCI configuration: {} reads, {} writes",
       guest_bus[0], guest_bus[1]);
