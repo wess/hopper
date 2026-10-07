@@ -52,6 +52,7 @@ impl Prepared {
       auxiliary: self.target.join("auxiliary"),
       disk: self.target.join("disk"),
       network: self.network,
+      shares: Vec::new(),
     };
     let mut vm = if installed {
       machine::vz::recover_mac(main, &boot)?

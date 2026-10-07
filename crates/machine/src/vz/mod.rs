@@ -8,6 +8,7 @@ pub mod mac;
 pub mod network;
 pub mod queue;
 pub mod restore;
+pub mod sharing;
 
 use anyhow::{ensure, Context};
 use block2::RcBlock;
@@ -37,6 +38,7 @@ pub struct Linux {
   pub seed: Option<PathBuf>,
   pub network: Option<network::Mode>,
   pub console: Option<std::fs::File>,
+  pub shares: Vec<sharing::Directory>,
 }
 
 pub enum Boot {
@@ -64,6 +66,7 @@ pub struct Vm {
   installing: Rc<Cell<bool>>,
   mac_ready: Rc<Cell<bool>>,
   ownership: Option<std::sync::Arc<dyn Send + Sync>>,
+  shares: std::sync::Arc<Vec<sharing::Directory>>,
   displaying: Rc<Cell<bool>>,
   installer: bool,
   started: Cell<bool>,
@@ -83,12 +86,12 @@ pub struct Pending(mpsc::Receiver<anyhow::Result<()>>);
 
 pub fn create(main: MainThreadMarker, boot: &Linux) -> anyhow::Result<Vm> {
   let config = config::linux(boot)?;
-  Ok(configured(main, &config, false))
+  Ok(configured(main, &config, false, &boot.shares))
 }
 
 pub fn create_mac(main: MainThreadMarker, boot: &mac::Mac) -> anyhow::Result<Vm> {
   let config = mac::config(boot)?;
-  Ok(configured(main, &config, true))
+  Ok(configured(main, &config, true, &boot.shares))
 }
 
 // the caller validates a durable successful-installation receipt before recovering hardware.
@@ -102,6 +105,7 @@ fn configured(
   main: MainThreadMarker,
   config: &objc2_virtualization::VZVirtualMachineConfiguration,
   mac: bool,
+  shares: &[sharing::Directory],
 ) -> Vm {
   let machine =
     unsafe { VZVirtualMachine::initWithConfiguration(VZVirtualMachine::alloc(), config) };
@@ -112,6 +116,7 @@ fn configured(
     installing: Rc::new(Cell::new(false)),
     mac_ready: Rc::new(Cell::new(!mac)),
     ownership: None,
+    shares: std::sync::Arc::new(shares.to_vec()),
     displaying: Rc::new(Cell::new(false)),
     installer: false,
     started: Cell::new(false),
@@ -166,11 +171,16 @@ fn scoped_transition(
     !matches!(action, Action::Start) || vm.mac_ready.get(),
     "Install macOS before starting its hardware"
   );
+  if matches!(action, Action::Start) {
+    for directory in &*vm.shares {
+      directory.validate()?;
+    }
+  }
   let (send, receive) = mpsc::sync_channel(1);
   let held = Rc::new(RefCell::new(Some((
     vm.machine.clone(),
     check,
-    vm.ownership.clone(),
+    Some(hold(vm)),
   ))));
   let completion = RcBlock::new(move |error: *mut NSError| {
     let result = if error.is_null() {
@@ -221,4 +231,8 @@ pub fn poll(pending: &Pending) -> anyhow::Result<Option<anyhow::Result<()>>> {
     Err(mpsc::TryRecvError::Empty) => Ok(None),
     Err(error) => Err(error).context("VZ completion handler ended without a result"),
   }
+}
+
+fn hold(vm: &Vm) -> std::sync::Arc<dyn Send + Sync> {
+  std::sync::Arc::new((vm.shares.clone(), vm.ownership.clone()))
 }

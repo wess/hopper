@@ -34,7 +34,7 @@ pub(super) fn create(vm: &Vm) -> anyhow::Result<Display> {
     _machine: vm.machine.clone(),
     _application: application,
     displaying: vm.displaying.clone(),
-    _ownership: vm.ownership.clone(),
+    _ownership: Some(super::hold(vm)),
   })
 }
 

@@ -61,6 +61,9 @@ pub(crate) fn start_checked(
     super::state(vm) == VZVirtualMachineState::Stopped,
     "macOS installation requires a stopped VM"
   );
+  for directory in &*vm.shares {
+    directory.validate()?;
+  }
   let url = config::file(path)?;
   let size = std::fs::metadata(path)?.len();
   ensure!(
@@ -88,7 +91,7 @@ pub(crate) fn start_checked(
   // cancellation is asynchronous; the callback owns hardware until it acknowledges completion.
   let held = Rc::new(RefCell::new(Some((
     installer.clone(),
-    vm.ownership.clone(),
+    Some(super::hold(vm)),
     check,
     commit,
   ))));

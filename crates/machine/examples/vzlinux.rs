@@ -46,6 +46,7 @@ fn main() -> anyhow::Result<()> {
     installer: None,
     seed: None,
     network: None,
+    shares: Vec::new(),
     console: Some(console),
   };
   let vm = vz::create(main, &boot)?;

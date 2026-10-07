@@ -28,6 +28,7 @@ pub(super) fn linux(boot: &Linux) -> anyhow::Result<Retained<VZVirtualMachineCon
     if let Some(mode) = boot.network {
       super::network::attach(&config, &boot.identity, mode)?;
     }
+    super::sharing::attach(&config, &boot.shares, false)?;
     let disk = storage(&boot.disk, false)?;
     let media = boot
       .installer

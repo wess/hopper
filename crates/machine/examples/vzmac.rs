@@ -91,6 +91,8 @@ fn main() -> anyhow::Result<()> {
     .mode(0o600)
     .open(&disk)?
     .set_len(64 << 30)?;
+  let shared = root.path().join("shared");
+  std::fs::create_dir(&shared)?;
   let mut boot = mac::Mac {
     cpus: image.minimum_cpus,
     memory: image.minimum_memory,
@@ -101,6 +103,7 @@ fn main() -> anyhow::Result<()> {
     auxiliary,
     disk,
     network: vz::network::Mode::Nat,
+    shares: vec![vz::sharing::Directory::open("work", &shared, true)?],
   };
   for mode in [vz::network::Mode::Nat, vz::network::Mode::Disconnected] {
     boot.network = mode;

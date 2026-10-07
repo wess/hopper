@@ -66,6 +66,7 @@ fn main() -> anyhow::Result<()> {
       installer: None,
       seed: None,
       network: None,
+      shares: Vec::new(),
       console: Some(output),
     };
     let mut vm = machine::vz::create(main, &boot)?;

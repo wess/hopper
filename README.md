@@ -562,3 +562,26 @@ consume the automatic watch timeout. Incomplete installations remain on the reco
 A signed diagnostic verified real Linux guest shutdown, hardware replacement and cancellation
 using synthetic disk data and completion markers. Full Ubuntu installation, installed-system
 boot, desktop readiness and the dedicated window behavior remain unverified.
+
+The native VZ core also accepts named shared folders with explicit read-only or read-write
+access. This is runtime groundwork; folder selection and saved grants are not yet available
+in the library. Linux uses the `hopper` virtiofs tag. Mac configurations use
+[Apple's guest automount tag](https://developer.apple.com/documentation/virtualization/vzvirtiofilesystemdeviceconfiguration/macosguestautomounttag).
+The core checks the selected directory's canonical path and filesystem identity before
+configuration and startup, retaining its handle through hardware, viewer and callbacks.
+Replacing the host path while running may make the share unavailable rather than redirect it.
+
+A disposable signed Linux diagnostic verifies named reads, writes, read-only enforcement,
+absolute and relative symlink containment, rejection of a replaced folder before startup,
+and no redirection to a replacement while running:
+
+```sh
+python3 scripts/check/sharing.py /path/to/initramfs-virt /path/to/sharing.gz
+cargo build -p machine --example vzsharing
+codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/vzsharing
+codesign --verify --strict target/debug/examples/vzsharing
+target/debug/examples/vzsharing /path/to/uncompressed/Image /path/to/sharing.gz
+```
+
+This does not prove sharing inside an installed desktop or a macOS guest. Windows sharing,
+UI folder selection, grant persistence and installed guest mount setup remain unfinished.

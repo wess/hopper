@@ -53,6 +53,7 @@ fn main() -> anyhow::Result<()> {
       installer: None,
       seed: args.get(2).map(|path| path.clone().into()),
       network: Some(mode),
+      shares: Vec::new(),
       console: Some(console),
     };
     let vm = vz::create(main, &boot)?;

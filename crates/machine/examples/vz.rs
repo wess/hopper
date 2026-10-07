@@ -46,6 +46,7 @@ fn main() -> anyhow::Result<()> {
     installer: None,
     seed: None,
     network: None,
+    shares: Vec::new(),
     console: None,
   };
   let legacy = root.path().join("previous");
