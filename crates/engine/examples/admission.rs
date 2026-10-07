@@ -91,8 +91,8 @@ fn main() -> anyhow::Result<()> {
         "Revoked guest agent must not resume native hardware"
       );
     }
-    let service = service.clone();
-    let pending = runtime.spawn(async move { service.transition(id, actor, action).await });
+    let controller = service.clone();
+    let pending = runtime.spawn(async move { controller.transition(id, actor, action).await });
     let deadline = Instant::now() + Duration::from_secs(30);
     while !pending.is_finished() {
       owner.tick();
@@ -115,6 +115,24 @@ fn main() -> anyhow::Result<()> {
       owner.state(id)? == expected,
       "VZ state differs from acknowledged lifecycle"
     );
+    let query = service.clone();
+    let pending = runtime.spawn(async move { query.status(id, Actor::Person).await });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !pending.is_finished() {
+      owner.tick();
+      ensure!(Instant::now() < deadline, "VZ status timed out");
+      run_loop.runMode_beforeDate(
+        unsafe { NSDefaultRunLoopMode },
+        &NSDate::dateWithTimeIntervalSinceNow(0.01),
+      );
+    }
+    let status = runtime
+      .block_on(pending)??
+      .context("Admitted VM status is absent")?;
+    ensure!(
+      status.state == expected && !status.busy,
+      "Authorized status differs from actual hardware"
+    );
   }
   owner.retire(id)?;
   lock.try_lock_exclusive()?;
@@ -136,7 +154,7 @@ fn main() -> anyhow::Result<()> {
     !manager.root.join("lima").exists(),
     "Native admission must not invoke the previous helper"
   );
-  println!("Native Linux admission, persisted identity/EFI reuse, runtime ownership and agent lifecycle verified; no desktop installation was performed");
+  println!("Native Linux admission, persisted identity/EFI reuse, runtime ownership, authorized status and agent lifecycle verified; no desktop installation was performed");
   Ok(())
 }
 

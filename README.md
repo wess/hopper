@@ -227,7 +227,9 @@ target/debug/examples/admission /absolute/path/to/linux-arm64.iso
 This path requires local ISO media and checks only its volume descriptor. It does not
 automatically download or install Ubuntu, establish desktop readiness or provide guest
 tools. Native-state records cannot fall back to previous runtime operations. Listing
-currently reports their controls unavailable until native status routing is connected.
+queries the app-owned queue for actual hardware state and pending-operation status,
+without acquiring lifecycle/runtime locks. Queries recheck the original agent policy
+generation; instances absent from the owner remain unavailable.
 Screen creation, MCP routing and dedicated VZ viewers remain unfinished; Linux/macOS
 creation and startup in the app still follow the prototype.
 

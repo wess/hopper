@@ -38,6 +38,40 @@ impl Host {
   pub async fn list_machines(&self, actor: MachineActor) -> anyhow::Result<Vec<MachineStatus>> {
     let mut rows = self.native_machines().list_windows(actor).await?;
     rows.extend(self.machines().list_non_windows(actor).await?);
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+      let service = self
+        .virtual_machines
+        .lock()
+        .map_err(|_| anyhow::anyhow!("VZ service lock failed"))?
+        .clone();
+      if let Some(service) = service {
+        for row in &mut rows {
+          if row.machine.guest != model::GuestOs::Windows && row.state == "Unavailable" {
+            if let Some(status) = service.status(&row.machine.id, actor).await? {
+              use ::engine::machines::vz::State;
+              let (state, transitional) = match status.state {
+                State::Stopped => ("Stopped", false),
+                State::Running => ("Running", false),
+                State::Paused => ("Paused", false),
+                State::Starting => ("Starting", true),
+                State::Pausing => ("Pausing", true),
+                State::Resuming => ("Resuming", true),
+                State::Stopping => ("Stopping", true),
+                State::Error => ("Error", false),
+                _ => ("Unavailable", true),
+              };
+              row.state = state.into();
+              row.busy = status.busy || transitional;
+              row.progress = (state == "Unavailable").then(|| {
+                "Controls are unavailable for this VM in this build. Its files are preserved."
+                  .into()
+              });
+            }
+          }
+        }
+      }
+    }
     rows.sort_by_key(|row| row.machine.name.to_lowercase());
     Ok(rows)
   }

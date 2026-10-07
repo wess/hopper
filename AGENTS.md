@@ -83,8 +83,11 @@ SDK callbacks. Private state publishes with exclusive rename and retries preserv
 and EFI variables. Installer preparation currently requires a local ISO; its volume
 descriptor check does not prove architecture or official origin. System boot rejects
 unwritten disks but does not establish installation readiness. Records with native state
-never fall back to the previous helper; listing reports controls unavailable until native
-status routing is connected. These diagnostics do not establish a usable desktop.
+never fall back to the previous helper. Host listing queries admitted VMs on their queue
+for actual state and lifecycle/install busy status, without acquiring operation/runtime
+locks. Status checks the original agent generation through dispatch and publication.
+Unowned instances remain unavailable; no stopped state is inferred from missing ownership.
+These diagnostics do not establish a usable desktop.
 Keep prototype records intact.
 The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware
 and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in

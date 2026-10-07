@@ -8,7 +8,7 @@ pub use prepare::{Admission, Prepared, Stage};
 use std::sync::Arc;
 
 pub use machine::vz::{
-  queue::{channel, Client, Owner},
+  queue::{channel, Client, Owner, Status},
   Action, MainThreadMarker, VZVirtualMachineState as State,
 };
 
@@ -26,6 +26,32 @@ impl Service {
   pub async fn transition(&self, id: &str, actor: Actor, action: Action) -> anyhow::Result<()> {
     let (_, check) = self.scope(id, actor)?;
     self.client.transition_checked(id, action, check).await
+  }
+
+  pub async fn status(&self, id: &str, actor: Actor) -> anyhow::Result<Option<Status>> {
+    let machine = self.manager.machine(id, actor)?;
+    ensure!(
+      machine.guest != GuestOs::Windows,
+      "Windows uses the native Hypervisor runtime"
+    );
+    if !self.manager.native_vz(id)? {
+      return Ok(None);
+    }
+    let manager = self.manager.clone();
+    let identity = id.to_owned();
+    let check = Arc::new(move || {
+      let current = manager.machine(&identity, actor)?;
+      ensure!(
+        current.guest == machine.guest,
+        "VM platform changed during the operation"
+      );
+      ensure!(
+        actor != Actor::Agent || current.agent_generation == machine.agent_generation,
+        "VM agent policy has changed"
+      );
+      Ok(())
+    });
+    self.client.status_checked(id, check).await
   }
 
   pub async fn prepare_linux(

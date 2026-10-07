@@ -23,7 +23,24 @@ pub struct Owner {
   pending: BTreeMap<String, Operation>,
 }
 
-struct Request {
+enum Request {
+  Transition(Transition),
+  Status(Query),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Status {
+  pub state: super::VZVirtualMachineState,
+  pub busy: bool,
+}
+
+struct Query {
+  id: String,
+  check: Check,
+  send: oneshot::Sender<anyhow::Result<Option<Status>>>,
+}
+
+struct Transition {
   id: String,
   action: Action,
   check: Option<Check>,
@@ -63,6 +80,25 @@ impl Client {
     self.scoped(id, action, Some(check)).await
   }
 
+  pub async fn status_checked(&self, id: &str, check: Check) -> anyhow::Result<Option<Status>> {
+    validate(id)?;
+    check()?;
+    let (send, receive) = oneshot::channel();
+    self
+      .0
+      .send(Request::Status(Query {
+        id: id.into(),
+        check: check.clone(),
+        send,
+      }))
+      .await
+      .context("VZ owner is unavailable")?;
+    self.1.notify_one();
+    let result = receive.await.context("VZ status ended without a result")?;
+    check()?;
+    result
+  }
+
   async fn scoped(&self, id: &str, action: Action, check: Option<Check>) -> anyhow::Result<()> {
     validate(id)?;
     if let Some(check) = &check {
@@ -71,12 +107,12 @@ impl Client {
     let (send, receive) = oneshot::channel();
     self
       .0
-      .send(Request {
+      .send(Request::Transition(Transition {
         id: id.into(),
         action,
         check: check.clone(),
         send,
-      })
+      }))
       .await
       .context("VZ owner is unavailable")?;
     self.1.notify_one();
@@ -149,6 +185,21 @@ impl Owner {
     for _ in 0..16 {
       let Ok(request) = self.receive.try_recv() else {
         break;
+      };
+      let request = match request {
+        Request::Transition(request) => request,
+        Request::Status(query) => {
+          if !query.send.is_closed() {
+            let result = (query.check)().map(|()| {
+              self.machines.get(&query.id).map(|vm| Status {
+                state: super::state(vm),
+                busy: self.pending.contains_key(&query.id) || vm.installing.get(),
+              })
+            });
+            let _ = query.send.send(result);
+          }
+          continue;
+        }
       };
       if request.send.is_closed() {
         continue;

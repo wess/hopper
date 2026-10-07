@@ -262,3 +262,58 @@ async fn native_state_never_falls_back_to_previous_runtime_operations() {
   assert_eq!(std::fs::read(&sentinel).unwrap(), b"preserved native data");
   assert!(!manager.root.join("lima").exists());
 }
+
+#[tokio::test]
+async fn status_rechecks_queued_agent_policy_without_runtime_mutation() {
+  for reenable in [false, true] {
+    let (_root, manager) = fixture();
+    std::fs::create_dir_all(manager.root.join("vz").join(ID)).unwrap();
+    let (client, mut owner) = vz::channel();
+    let wake = owner.wake();
+    let service = Service::new(manager.clone(), client);
+    let request = tokio::spawn(async move { service.status(ID, Actor::Agent).await });
+    wake.notified().await;
+    manager.set_agent_access(ID, false).unwrap();
+    if reenable {
+      manager.set_agent_access(ID, true).unwrap();
+    }
+    owner.tick();
+    let error = request.await.unwrap().unwrap_err().to_string();
+    assert!(
+      error.contains("Agent access") || error.contains("agent policy"),
+      "{error}"
+    );
+    assert!(!manager.root.join("locks").join(ID).exists());
+    assert!(!owner.active());
+  }
+}
+
+#[tokio::test]
+async fn status_does_not_contend_with_operation_or_runtime_ownership() {
+  let (_root, manager) = fixture();
+  std::fs::create_dir_all(manager.root.join("vz").join(ID)).unwrap();
+  let (client, mut owner) = vz::channel();
+  let wake = owner.wake();
+  let service = Service::new(manager.clone(), client);
+  let directory = manager.root.join("locks");
+  std::fs::create_dir_all(&directory).unwrap();
+  let lease = |suffix: &str| {
+    store::lock::exclusive(
+      OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(directory.join(format!("{ID}{suffix}")))
+        .unwrap(),
+    )
+    .unwrap()
+  };
+  let operation = lease("");
+  let runtime = lease(".runtime");
+  let request = tokio::spawn(async move { service.status(ID, Actor::Person).await });
+  wake.notified().await;
+  owner.tick();
+  assert!(request.await.unwrap().unwrap().is_none());
+  drop((operation, runtime));
+  assert!(!owner.active());
+}
