@@ -134,6 +134,30 @@ fn main() -> anyhow::Result<()> {
       "Authorized status differs from actual hardware"
     );
   }
+  let display = owner.display(id)?;
+  ensure!(
+    owner.display(id).is_err(),
+    "A VM must not acquire duplicate displays"
+  );
+  ensure!(
+    owner.retire(id).is_err(),
+    "A display must block ownership retirement"
+  );
+  unsafe {
+    ensure!(
+      display.view().virtualMachine().is_some(),
+      "Display is not bound to admitted hardware"
+    );
+    ensure!(
+      !display.view().capturesSystemKeys(),
+      "System hotkeys must remain with the host"
+    );
+    ensure!(
+      !display.view().automaticallyReconfiguresDisplay(),
+      "Automatic resolution changes must remain disabled until teardown is supported"
+    );
+  }
+  drop(display);
   owner.retire(id)?;
   lock.try_lock_exclusive()?;
   FileExt::unlock(&lock)?;
@@ -149,12 +173,23 @@ fn main() -> anyhow::Result<()> {
     std::fs::read(target.join("variables"))? == variables,
     "Retry changed persistent EFI state"
   );
-  owner.retire(id)?;
+  let display = owner.display(id)?;
+  let retained = unsafe { display.view().virtualMachine() };
+  ensure!(retained.is_some(), "Retry display lacks hardware");
+  drop(retained);
+  drop(owner);
+  ensure!(
+    lock.try_lock_exclusive().is_err(),
+    "A surviving display lost runtime ownership"
+  );
+  drop(display);
+  lock.try_lock_exclusive()?;
+  FileExt::unlock(&lock)?;
   ensure!(
     !manager.root.join("lima").exists(),
     "Native admission must not invoke the previous helper"
   );
-  println!("Native Linux admission, persisted identity/EFI reuse, runtime ownership, authorized status and agent lifecycle verified; no desktop installation was performed");
+  println!("Native Linux admission, persisted identity/EFI reuse, runtime ownership, authorized status, exclusive display lifetime and agent lifecycle verified; no desktop installation was performed");
   Ok(())
 }
 

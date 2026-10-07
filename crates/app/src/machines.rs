@@ -1,10 +1,13 @@
+mod viewer;
+
 use gpui::{App, Global, Task};
 use host::{Host, VirtualMachineOwner};
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 struct Runtime {
   owner: VirtualMachineOwner,
   _poll: Task<()>,
+  viewers: BTreeMap<String, viewer::Viewer>,
 }
 impl Global for Runtime {}
 
@@ -31,6 +34,29 @@ pub fn install(host: &Host, cx: &mut App) -> anyhow::Result<()> {
       wake.notified().await;
     }
   });
-  cx.set_global(Runtime { owner, _poll: task });
+  cx.set_global(Runtime {
+    owner,
+    _poll: task,
+    viewers: BTreeMap::new(),
+  });
   Ok(())
+}
+
+pub fn open(id: &str, title: &str, cx: &mut App) -> anyhow::Result<()> {
+  let runtime = cx.global_mut::<Runtime>();
+  if !runtime.viewers.contains_key(id) {
+    let display = runtime.owner.display(id)?;
+    let viewer = viewer::Viewer::new(display, title)?;
+    runtime.viewers.insert(id.into(), viewer);
+  }
+  runtime
+    .viewers
+    .get(id)
+    .ok_or_else(|| anyhow::anyhow!("VM viewer is unavailable"))?
+    .show();
+  Ok(())
+}
+
+pub fn owns(id: &str, cx: &App) -> bool {
+  cx.has_global::<Runtime>() && cx.global::<Runtime>().owner.state(id).is_ok()
 }

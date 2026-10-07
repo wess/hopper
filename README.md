@@ -171,7 +171,8 @@ Inside-guest agent connections remain pending.
 The direct Linux VZ foundation lives in `machine::vz`. It owns framework configuration
 and asynchronous lifecycle on the main thread, with persistent identity/EFI variables,
 raw storage, installer media and desktop devices. Host exposes native Linux preparation
-and authorized lifecycle operations; dedicated viewer integration remains unfinished; Linux/macOS application VMs still use the prototype. A signed diagnostic
+and authorized lifecycle operations. Already-admitted VMs use a dedicated native viewer;
+creation/admission and complete viewer integration remain unfinished; Linux/macOS application VMs still use the prototype. A signed diagnostic
 verifies real VZ hardware transitions with a temporary blank disk:
 
 ```sh
@@ -236,8 +237,16 @@ runtime operations. Listing
 queries the app-owned queue for actual hardware state and pending-operation status,
 without acquiring lifecycle/runtime locks. Queries recheck the original agent policy
 generation; instances absent from the owner remain unavailable.
-Screen creation, MCP routing and dedicated VZ viewers remain unfinished; Linux/macOS
-creation and startup in the app still follow the prototype.
+The app routes View and start/stop for already-admitted VMs through its native owner.
+It caches one dedicated window per VM; closing the window hides it while hardware remains
+owned. Display bindings retain runtime ownership and detach on drop, refuse duplicate
+attachment and prevent retirement while attached. Host system hotkeys stay with the host.
+Automatic guest-resolution changes remain disabled after an SDK reconfiguration callback
+crashed during unattached-view teardown; window resizing does not yet change guest
+resolution. The signed admission probe verifies display binding/lifetime on stopped
+hardware, not real rendering, keyboard/mouse or window close/reopen. Screen creation and
+admission, MCP routing, full guest display/input checks and signed app integration remain
+unfinished; Linux/macOS creation and first startup in the app still follow the prototype.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into

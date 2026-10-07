@@ -35,7 +35,8 @@ tracing-subscriber = { workspace = true }
 # For the Apple Containers first-run panel.
 apple = { workspace = true }
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSRunningApplication", "NSApplication"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "libc", "NSRunningApplication", "NSApplication", "NSWindow", "NSView", "NSResponder", "NSGraphics"] }
+objc2-foundation = "0.3"
 
 [dev-dependencies]
 tempfile = { workspace = true }

@@ -77,7 +77,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "anyhow",
  "apple",
@@ -92,6 +92,7 @@ dependencies = [
  "model",
  "objc2",
  "objc2-app-kit",
+ "objc2-foundation",
  "serde",
  "serde_json",
  "store",
@@ -103,7 +104,7 @@ dependencies = [
 
 [[package]]
 name = "apple"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "chrono",
  "docker",
@@ -990,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "compose"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "model",
  "serde",
@@ -1465,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "docker"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "anyhow",
  "base64",
@@ -1578,7 +1579,7 @@ checksum = "66b7e2430c6dff6a955451e2cfc438f09cea1965a9d6f87f7e3b90decc014099"
 
 [[package]]
 name = "engine"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "anyhow",
  "apple",
@@ -2613,7 +2614,7 @@ dependencies = [
 
 [[package]]
 name = "host"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "anyhow",
  "apple",
@@ -3299,7 +3300,7 @@ checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
 name = "machine"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "anyhow",
  "block2",
@@ -3307,6 +3308,7 @@ dependencies = [
  "libc",
  "model",
  "objc2",
+ "objc2-app-kit",
  "objc2-foundation",
  "objc2-virtualization",
  "serde",
@@ -3347,7 +3349,7 @@ dependencies = [
 
 [[package]]
 name = "mcp"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "anyhow",
  "base64",
@@ -3416,7 +3418,7 @@ dependencies = [
 
 [[package]]
 name = "migrate"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "anyhow",
  "apple",
@@ -3482,7 +3484,7 @@ dependencies = [
 
 [[package]]
 name = "model"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "regex",
  "serde",
@@ -5314,7 +5316,7 @@ checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "site"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "pulldown-cmark",
 ]
@@ -5449,7 +5451,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "store"
-version = "0.15.63"
+version = "0.15.64"
 dependencies = [
  "dirs 6.0.0",
  "fs2",

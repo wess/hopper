@@ -150,12 +150,21 @@ impl Owner {
     Ok(super::state(vm))
   }
 
+  pub fn display(&self, id: &str) -> anyhow::Result<super::Display> {
+    let vm = self.machines.get(id).context("VZ machine is not owned")?;
+    super::display::create(vm)
+  }
+
   pub fn retire(&mut self, id: &str) -> anyhow::Result<()> {
     ensure!(
       !self.pending.contains_key(id),
       "VZ operation is still active"
     );
     let vm = self.machines.get(id).context("VZ machine is not owned")?;
+    ensure!(
+      !vm.displaying.get(),
+      "Close the VM display before retiring ownership"
+    );
     ensure!(
       !vm.installing.get(),
       "macOS installation still owns this VM"

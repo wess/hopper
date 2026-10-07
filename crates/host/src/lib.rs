@@ -34,6 +34,7 @@ pub use ::engine::machines::vz::{Action as VirtualMachineAction, Owner as Virtua
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub use ::engine::machines::vz::{
+  Display as VirtualMachineDisplay,
   MainThreadMarker as VirtualMachineThread, Prepared as VirtualLinuxPrepared,
   Stage as VirtualLinuxStage,
 };

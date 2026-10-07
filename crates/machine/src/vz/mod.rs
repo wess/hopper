@@ -1,6 +1,7 @@
 mod auxiliary;
 mod config;
 mod console;
+mod display;
 pub mod install;
 mod kernel;
 pub mod mac;
@@ -10,6 +11,7 @@ pub mod restore;
 use anyhow::{ensure, Context};
 use block2::RcBlock;
 pub use config::{create_variables, identity};
+pub use display::Display;
 pub use objc2::MainThreadMarker;
 use objc2::{rc::Retained, AllocAnyThread};
 use objc2_foundation::NSError;
@@ -58,6 +60,7 @@ pub struct Vm {
   mac: bool,
   installing: Rc<Cell<bool>>,
   ownership: Option<std::sync::Arc<dyn Send + Sync>>,
+  displaying: Rc<Cell<bool>>,
 }
 
 #[derive(Clone, Copy)]
@@ -93,6 +96,7 @@ fn configured(
     mac,
     installing: Rc::new(Cell::new(false)),
     ownership: None,
+    displaying: Rc::new(Cell::new(false)),
   }
 }
 

@@ -215,6 +215,10 @@ impl Machines {
         let manager = self.state.host.machines();
         let running = row.state == "Running" || row.state == "Paused";
         let windows = machine.guest == model::GuestOs::Windows;
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        let virtual_owned = crate::machines::owns(&id, cx);
+        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+        let virtual_owned = false;
         let start_name = machine.name.clone();
         let stopped = row.state == "Stopped";
         let uncreated = row.state == "Not created";
@@ -255,6 +259,11 @@ impl Machines {
                         this.start_windows(id, start_name.clone(), running, cx);
                         return;
                     }
+                    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                    if virtual_owned {
+                        this.start_virtual(id, start_name.clone(), running, cx);
+                        return;
+                    }
                     let operation_id = id.clone();
                     this.operate(
                         operation_id,
@@ -278,7 +287,7 @@ impl Machines {
                 Button::new(SharedString::from(format!("snapshot-{id}")), "Snapshot")
                     .size(Size::Sm)
                     .variant(Variant::Subtle)
-                    .disabled(busy || !stopped || windows)
+                    .disabled(busy || !stopped || windows || virtual_owned)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let manager = this.state.host.machines();
                         let id = snapshot_id.clone();
@@ -298,7 +307,7 @@ impl Machines {
                 Button::new(SharedString::from(format!("clone-{id}")), "Clone")
                     .size(Size::Sm)
                     .variant(Variant::Subtle)
-                    .disabled(busy || !stopped || windows)
+                    .disabled(busy || !stopped || windows || virtual_owned)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let manager = this.state.host.machines();
                         let id = clone_id.clone();
@@ -320,7 +329,7 @@ impl Machines {
                 Button::new(SharedString::from(format!("history-{id}")), "Snapshots")
                     .size(Size::Sm)
                     .variant(Variant::Subtle)
-                    .disabled(busy || windows)
+                    .disabled(busy || windows || virtual_owned)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.show_snapshots(history_id.clone(), cx)
                     })),
@@ -335,6 +344,12 @@ impl Machines {
                         let manager = this.state.host.machines();
                         let host = this.state.host.clone();
                         let id = view_id.clone();
+                        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                        if crate::machines::owns(&id, cx) {
+                            this.error = crate::machines::open(&id, &view_name, cx).err().map(|error| format!("{error:#}"));
+                            cx.notify();
+                            return;
+                        }
                         let identity = id.clone();
                         let name = view_name.clone();
                         let weak = cx.entity().downgrade();

@@ -54,8 +54,9 @@ serial output uses a duplicated descriptor owned by the framework; callers must 
 its sink. Signed diagnostics verify real framework start/pause/resume/stop and a verified
 Alpine initramfs shell. Host lifecycle authorization now connects to an app-owned main-queue
 registry. Linux preparation and main-thread admission now persist a private sparse disk,
-generic identity and EFI state together. Host exposes preparation, but screen creation,
-viewer routing, Ubuntu provisioning and guest tools remain pending; the Linux/macOS
+generic identity and EFI state together. Host exposes preparation. Already-admitted VMs
+now route View and start/stop through a dedicated native window and the authorized owner.
+Screen creation/admission, Ubuntu provisioning and guest tools remain pending; the Linux/macOS
 screens still use the prototype. macOS now has SDK restore-image discovery and platform configuration with image-specific CPU/RAM minimums, independent
 Mac identity, boot loader and graphics. Its auxiliary directory publishes firmware state
 and hardware-model binding together with exclusive rename; opening it checks private
@@ -76,7 +77,14 @@ per-VM operation lease through queued dispatch and native completion. Policy che
 before dispatch and completion publication; off/on changes invalidate old requests.
 The app owner sleeps on queue notification while idle and pumps completions on its main
 queue while active. The main app now requires the virtualization entitlement. MCP routing and
-dedicated viewer integration remain pending; the bridge is not an agent endpoint.
+complete dedicated viewer integration remain pending; the bridge is not an agent endpoint.
+The app caches one native viewer per admitted VM; closing its window hides it without
+retiring hardware. The display initializes AppKit, remains on the main queue, retains
+native hardware/runtime ownership and detaches on drop. Duplicate display attachment and
+retirement with an attached display are rejected. System hotkeys remain with the host.
+Automatic guest-resolution changes stay disabled: an unattached-view teardown probe
+crashed in the asynchronous SDK reconfiguration callback. Geometry, resize completion,
+real window close/reopen, rendering/input and full signed app verification remain open.
 Linux preparation captures the original policy before blocking work, retains operation
 ownership through admission/start and binds runtime ownership to the VM and outstanding
 SDK callbacks. Private state publishes with exclusive rename and retries preserve identity

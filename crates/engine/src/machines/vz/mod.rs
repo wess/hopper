@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 pub use machine::vz::{
   queue::{channel, Client, Owner, Status},
-  Action, MainThreadMarker, VZVirtualMachineState as State,
+  Action, Display, MainThreadMarker, VZVirtualMachineState as State,
 };
 
 #[derive(Clone)]

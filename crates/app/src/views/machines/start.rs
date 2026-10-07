@@ -99,3 +99,60 @@ impl Machines {
     cx.notify();
   }
 }
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl Machines {
+  pub(super) fn start_virtual(
+    &mut self,
+    id: String,
+    name: String,
+    running: bool,
+    cx: &mut Context<Self>,
+  ) {
+    self.busy.insert(
+      id.clone(),
+      if running {
+        "Stopping…"
+      } else {
+        "Starting…"
+      }
+      .into(),
+    );
+    self.error = None;
+    let host = self.state.host.clone();
+    let identity = id.clone();
+    let weak = cx.entity().downgrade();
+    bridge::run(
+      cx,
+      async move {
+        host
+          .virtual_machine_lifecycle(
+            &identity,
+            MachineActor::Person,
+            if running {
+              host::VirtualMachineAction::Stop
+            } else {
+              host::VirtualMachineAction::Start
+            },
+          )
+          .await
+      },
+      move |result, cx| {
+        let _ = weak.update(cx, |this, cx| {
+          this.busy.remove(&id);
+          let result = result.and_then(|()| {
+            if running {
+              Ok(())
+            } else {
+              crate::machines::open(&id, &name, cx)
+            }
+          });
+          this.error = result.err().map(|error| format!("{error:#}"));
+          this.reload(cx);
+          cx.notify();
+        });
+      },
+    );
+    cx.notify();
+  }
+}
