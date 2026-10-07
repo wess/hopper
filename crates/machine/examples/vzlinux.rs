@@ -44,6 +44,7 @@ fn main() -> anyhow::Result<()> {
     },
     disk,
     installer: None,
+    network: None,
     console: Some(console),
   };
   let vm = vz::create(main, &boot)?;

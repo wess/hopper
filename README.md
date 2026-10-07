@@ -258,6 +258,21 @@ path, and mismatched guest/runtime choices are rejected. macOS creation still us
 prototype. MCP routing, full guest display/input checks and signed app integration remain
 unfinished.
 
+Native Linux admission attaches a virtio network device using Apple's NAT. Its locally
+administered MAC address derives from the saved VM identity, so repeated admission keeps
+the same address. A disconnected configuration is available in the core; app settings,
+live switching and localhost port forwarding remain unfinished. A signed diagnostic
+verifies guest DHCP, DNS, downloading public Alpine release metadata and a disconnected
+guest link. It uses a disposable initramfs derived from verified Alpine media:
+
+```sh
+python3 scripts/check/network.py /path/to/initramfs-virt /path/to/network.gz
+cargo build -p machine --example vznetwork
+codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/vznetwork
+codesign --verify --strict target/debug/examples/vznetwork
+target/debug/examples/vznetwork /path/to/uncompressed/Image /path/to/network.gz
+```
+
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into
 `native/build/firmware/windows.fd` and `variables.fd`, with a provenance manifest

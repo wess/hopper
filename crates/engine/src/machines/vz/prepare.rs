@@ -158,6 +158,7 @@ impl Prepared {
       },
       disk: self.target.join("disk"),
       installer: self.installer,
+      network: Some(vz::network::Mode::Nat),
       console: None,
     };
     let mut vm = vz::create(main, &boot)?;

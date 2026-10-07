@@ -88,6 +88,12 @@ retirement with an attached display are rejected. System hotkeys remain with the
 Automatic guest-resolution changes stay disabled: an unattached-view teardown probe
 crashed in the asynchronous SDK reconfiguration callback. Geometry, resize completion,
 real window close/reopen, rendering/input and full signed app verification remain open.
+Native Linux admission configures a virtio network device with Apple's NAT attachment.
+Its local unicast MAC derives from the persisted generic identity with the versioned
+`hopper.vz.network.v1` SHA-256 domain; preserve that derivation across retries. The core
+also supports a disconnected device configuration, but app settings and live switching
+remain pending. A signed Alpine diagnostic verifies guest DHCP, DNS, a public metadata
+download and a disconnected link. This does not prove Ubuntu installation or guest tools.
 `Machine.runtime` is optional for previous JSON records; new Ubuntu/Windows records
 explicitly select virtualization/hypervisor. Reject incompatible guest/runtime combinations
 and native records must never invoke previous helpers. Original runtime choice is captured

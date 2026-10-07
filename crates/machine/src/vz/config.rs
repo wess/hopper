@@ -25,6 +25,9 @@ pub(super) fn linux(boot: &Linux) -> anyhow::Result<Retained<VZVirtualMachineCon
     if let Some(console) = &boot.console {
       super::console::attach(&config, console)?;
     }
+    if let Some(mode) = boot.network {
+      super::network::attach(&config, &boot.identity, mode)?;
+    }
     let disk = storage(&boot.disk, false)?;
     let media = boot
       .installer

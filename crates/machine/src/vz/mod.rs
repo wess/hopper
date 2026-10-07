@@ -5,6 +5,7 @@ mod display;
 pub mod install;
 mod kernel;
 pub mod mac;
+pub mod network;
 pub mod queue;
 pub mod restore;
 
@@ -33,6 +34,7 @@ pub struct Linux {
   pub boot: Boot,
   pub disk: PathBuf,
   pub installer: Option<PathBuf>,
+  pub network: Option<network::Mode>,
   pub console: Option<std::fs::File>,
 }
 
