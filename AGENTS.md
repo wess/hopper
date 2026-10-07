@@ -65,7 +65,8 @@ verification and app integration remain pending. Existing prototype instances
 need migration before native startup. Native registry creation validates Windows resources
 and stores policy without invoking legacy helpers or allocating a disk. Its Windows listing
 uses records, durable phases and VM-scoped hardware state without Lima, marks previous
-instances for migration, and detects external runtime ownership. The app still calls the
+instances for migration, and detects external runtime ownership. Runtime probes retain the operation lease and
+skip probing while another operation owns it, so status polling cannot contend with startup. The app still calls the
 prototype create/list/start/viewer path; switching it requires the native viewer.
 VM and temporary target leases explicitly unlock on owner teardown; closing a file
 alone can retain a flock through a duplicated or inherited descriptor. Do not replace

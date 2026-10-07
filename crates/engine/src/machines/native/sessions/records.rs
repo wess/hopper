@@ -88,19 +88,21 @@ impl Sessions {
       let slot = self.slot(&machine.id).await?;
       let hardware = slot.state.borrow().clone();
       let current = installation::read(manager, &machine.id, actor)?;
-      let busy = match manager.lock(&machine.id) {
-        Ok(_) => false,
+      let operation = match manager.lock(&machine.id) {
+        Ok(lease) => Some(lease),
         Err(error)
           if error
             .chain()
             .filter_map(|error| error.downcast_ref::<std::io::Error>())
             .any(|error| error.kind() == std::io::ErrorKind::WouldBlock) =>
         {
-          true
+          None
         }
         Err(error) => return Err(error),
       };
-      let foreign = matches!(hardware, State::Stopped(_) | State::Failed(_))
+      let busy = operation.is_none();
+      let foreign = !busy
+        && matches!(hardware, State::Stopped(_) | State::Failed(_))
         && match manager.guard(&machine.id, ".runtime") {
           Ok(_) => false,
           Err(error)

@@ -109,3 +109,23 @@ async fn listing_rejects_mismatched_record_filenames() {
   std::fs::rename(f.record(), f.manager.root.join("records/wrong.json")).unwrap();
   assert!(sessions.list_windows(Actor::Person).await.is_err());
 }
+
+#[tokio::test]
+async fn listing_does_not_probe_runtime_ownership_during_another_operation() {
+  use fs2::FileExt;
+  let f = fixture::standalone();
+  let sessions = Sessions::new(f.manager.clone());
+  sessions.list_windows(Actor::Person).await.unwrap();
+  let lock = std::fs::OpenOptions::new()
+    .read(true)
+    .write(true)
+    .open(f.manager.root.join("locks").join(ID))
+    .unwrap();
+  lock.try_lock_exclusive().unwrap();
+  let runtime = f.manager.root.join("locks").join(format!("{ID}.runtime"));
+  std::fs::remove_file(&runtime).unwrap();
+  let rows = sessions.list_windows(Actor::Person).await.unwrap();
+  assert!(rows[0].busy);
+  assert!(!runtime.exists());
+  FileExt::unlock(&lock).unwrap();
+}
