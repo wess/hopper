@@ -89,7 +89,7 @@ pub enum Result {
   },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "camelCase", deny_unknown_fields)]
 pub enum SetupStatus {
   Waiting {},
@@ -97,6 +97,23 @@ pub enum SetupStatus {
   Failed { phase: SetupPhase },
   Deployed {},
   Invalid {},
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "camelCase", deny_unknown_fields)]
+pub enum Installation {
+  Preparing {},
+  Setup {
+    status: SetupStatus,
+  },
+  Interrupted {
+    status: SetupStatus,
+  },
+  Deployed {},
+  Booting {},
+  /// hardware has started from the system disk; desktop readiness is still unproven.
+  SystemStarted {},
+  HandoffFailed {},
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

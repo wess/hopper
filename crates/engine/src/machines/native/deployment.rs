@@ -25,6 +25,8 @@ pub enum Phase {
   Media(setup::Phase),
   Disk,
   Starting,
+  Installing(model::native::SetupStatus),
+  SystemBoot,
 }
 
 pub(super) async fn prepare(
@@ -48,6 +50,16 @@ pub(super) async fn prepare(
   } else {
     None
   };
+  ensure!(
+    matches!(
+      super::installation::boot_stage(
+        super::installation::read(manager, id, Actor::Person)?.as_ref()
+      )?,
+      config::Stage::Deployment
+    ),
+    "This VM has completed deployment; start it from its system disk"
+  );
+  super::installation::save(manager, id, model::native::Installation::Preparing {})?;
   let installer = match record.installer.as_deref() {
     Some(installer) if Path::new(installer) != media::installer(&manager.root) => {
       PathBuf::from(installer)
@@ -107,6 +119,13 @@ pub(super) async fn prepare(
   }
   drop(disk);
   let boot = config::prepare(manager, id, assets, config::Stage::Deployment)?;
+  super::installation::save(
+    manager,
+    id,
+    model::native::Installation::Setup {
+      status: model::native::SetupStatus::Waiting {},
+    },
+  )?;
   progress.send_replace(Phase::Starting);
   Ok(boot)
 }

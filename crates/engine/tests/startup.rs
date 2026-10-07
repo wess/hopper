@@ -93,6 +93,13 @@ fn boot_paths_and_identity_follow_the_record_and_system_boot_detaches_media() {
     (2, 2 * 1024 * 1024 * 1024, None)
   );
   assert_eq!(boot.disk_id.len(), 20);
+  assert!(config::prepare(&f.manager, ID, &f.assets(), Stage::System).is_err());
+  std::fs::OpenOptions::new()
+    .write(true)
+    .open(&paths.disk)
+    .unwrap()
+    .write_all(b"synthetic deployed disk")
+    .unwrap();
   let system = config::prepare(&f.manager, ID, &f.assets(), Stage::System).unwrap();
   assert_eq!(boot.disk_id, system.disk_id);
   assert!(system.boot_media.is_none() && system.installer.is_none());
@@ -149,6 +156,12 @@ fn private_storage_and_resource_bounds_fail_without_allocating_a_vm() {
 async fn configured_startup_reaches_the_worker_under_registry_ownership() {
   let f = Fixture::new();
   let paths = f.initialize();
+  std::fs::OpenOptions::new()
+    .write(true)
+    .open(&paths.disk)
+    .unwrap()
+    .write_all(b"synthetic deployed disk")
+    .unwrap();
   std::fs::create_dir(&paths.variables).unwrap();
   let sessions = Sessions::new(f.manager.clone());
   sessions
@@ -182,7 +195,13 @@ fn symlinked_vm_storage_never_creates_files_in_the_target() {
 #[test]
 fn independent_identities_get_distinct_storage_and_disk_serials() {
   let f = Fixture::new();
-  f.initialize();
+  let initial = f.initialize();
+  std::fs::OpenOptions::new()
+    .write(true)
+    .open(&initial.disk)
+    .unwrap()
+    .write_all(b"synthetic deployed disk")
+    .unwrap();
   let first = config::prepare(&f.manager, ID, &f.assets(), Stage::System).unwrap();
   let mut machine = f.manager.machine(ID, Actor::Person).unwrap();
   machine.id = "8197e0f0-0603-43e9-a817-eaf7ab0327ae".into();
@@ -197,13 +216,14 @@ fn independent_identities_get_distinct_storage_and_disk_serials() {
   let paths = config::initialize(&f.manager, &machine.id).unwrap();
   let mut options = std::fs::OpenOptions::new();
   use std::os::unix::fs::OpenOptionsExt;
-  let disk = options
+  let mut disk = options
     .write(true)
     .create_new(true)
     .mode(0o600)
     .open(paths.disk)
     .unwrap();
   disk.set_len(64 * 1024 * 1024 * 1024).unwrap();
+  disk.write_all(b"synthetic deployed disk").unwrap();
   let second = config::prepare(&f.manager, &machine.id, &f.assets(), Stage::System).unwrap();
   assert_ne!(first.disk_id, second.disk_id);
   assert_ne!(first.store, second.store);

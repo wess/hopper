@@ -37,7 +37,13 @@ start = request()
 boot = start["command"]["boot"]
 root = Path(boot["store"])
 mode = boot["diskId"]
+paused = False
 (root / "pid").write_text(str(os.getpid()))
+with (root / "boots").open("a") as boots:
+    boots.write(json.dumps(boot) + "\n")
+if boot.get("bootMedia") is None and (root / "systemreject").exists():
+    send(start["id"], {"type": "rejected", "message": "synthetic system startup failure"})
+    sys.exit(1)
 if mode == "startupgate":
     while not (root / "startupcontinue").exists():
         time.sleep(0.005)
@@ -97,10 +103,14 @@ while True:
     elif kind == "release" and mode == "reject":
         send(id, {"type": "rejected", "message": "fixture rejection"})
     elif kind == "status":
-        send(id, {"type": "status", "paused": False, "setup": {"state": "waiting"}})
+        status = root / "setupstatus"
+        setup = json.loads(status.read_text()) if status.exists() else {"state": "waiting"}
+        send(id, {"type": "status", "paused": paused, "setup": setup})
     elif kind == "pause":
+        paused = True
         send(id, {"type": "paused"})
     elif kind == "resume":
+        paused = False
         send(id, {"type": "running"})
     elif kind == "input" and mode == "inputdelay":
         (root / "inputreceived").touch()

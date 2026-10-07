@@ -48,9 +48,18 @@ ISO checksum, and verifies them on reuse. Partial ESDs survive interrupted trans
 verified ESDs survive conversion failures and are removed only after complete publication.
 Invalid cache data is preserved and rejected. Saving the acquired path shares the agent
 policy lock and rereads the record, preserving concurrent access changes. Supplied local
-ISOs remain a fallback. Full official ESD conversion, persisted install-phase handoff and
-app integration remain pending. Existing prototype instances need migration before
-native startup.
+ISOs remain a fallback. Installation progress is private, bounded and atomically persisted
+per VM. A weak registry controller observes setup independently of viewers, retains failure
+and interruption state, and defers a completed handoff while manually paused. It persists
+deployment completion before stopping/reaping WinPE, reacquires runtime ownership under
+the operation lease, and boots from the system disk with both DVDs detached. System boot
+rejects a wholly unwritten target. Handoff failures retain system-boot intent for retry.
+VM watches survive worker replacement; generation changes and publication share one lock
+so a stale worker cannot overwrite the current state. A surviving viewer receiver cannot
+keep a worker or registry alive. SystemStarted proves hardware allocation only.
+Full official ESD conversion and Windows installation/first-boot verification, subsequent
+guest-reboot supervision and app integration remain pending. Existing prototype instances
+need migration before native startup.
 VM and temporary target leases explicitly unlock on owner teardown; closing a file
 alone can retain a flock through a duplicated or inherited descriptor. Do not replace
 those leases with bare file handles. The download writer retains its inode lock through

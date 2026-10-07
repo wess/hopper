@@ -95,6 +95,14 @@ pub fn prepare(
       (Some(text(&paths.setup)?), Some(installer.to_owned()))
     }
     Stage::System => {
+      #[cfg(unix)]
+      {
+        use std::os::unix::fs::MetadataExt;
+        ensure!(
+          disk.metadata()?.blocks() > 0,
+          "System disk has not received installation data"
+        );
+      }
       let mut disk = &*disk;
       let mut magic = [0; 4];
       disk.read_exact(&mut magic)?;
