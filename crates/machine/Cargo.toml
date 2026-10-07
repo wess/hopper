@@ -5,8 +5,15 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "hoppervm"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = { workspace = true }
+model = { path = "../model" }
+serde = { workspace = true }
+serde_json = { workspace = true }
 vm-fdt = "0.3"
 fs2 = "0.4"
 sha2 = "0.10"

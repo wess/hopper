@@ -41,5 +41,5 @@ fn fifo_disabled_keeps_only_one_received_character() {
   serial::write(&mut console, 0x30, 0x301);
   assert!(serial::receive(&mut console, b'A'));
   assert!(!serial::receive(&mut console, b'B'));
-  assert_eq!(serial::read(&mut console, 0), b'A'.into());
+  assert_eq!(serial::read(&mut console, 0), u32::from(b'A'));
 }

@@ -5,12 +5,22 @@ Repository guidance for agent sessions.
 ## Desktop virtual machines
 
 User VMs are managed by `engine::machines`, separate from the managed Docker VM.
-Linux and macOS use Lima/VZ; Windows ARM64 uses bundled QEMU and swtpm. macOS
-and Windows guests are experimental. Release hosts remain Apple silicon macOS 26+.
+The current prototype uses Lima/VZ for Linux and macOS, and bundled QEMU/swtpm
+for Windows ARM64. macOS and Windows guests are experimental. Release hosts remain
+Apple silicon macOS 26+.
 Each VM has a dedicated viewer. Agent access defaults on for new VMs and clones
 inherit it. MCP operations recheck the persisted access setting, use per-VM
 cross-process locks, and expose only guest files/input. Snapshots require a
 stopped VM and use APFS copies, with a rollback snapshot on restore.
+
+The major release replaces desktop VM lifecycle and viewers with owned runtimes:
+direct Virtualization.framework for Linux/macOS and Hypervisor.framework for Windows.
+Do not add QEMU to the replacement. `PRODUCT.md` contains the full release gates.
+The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware
+and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in
+`model::native` and `machine::ipc`; host paths in Start are never an agent API.
+Started means allocated hardware, and Deployed means deployment completed; neither
+proves a usable desktop. App integration and running-memory snapshots remain pending.
 
 ## What this is
 

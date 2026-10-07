@@ -15,6 +15,7 @@ pub mod engine;
 pub mod image;
 pub mod machine;
 pub mod migration;
+pub mod native;
 pub mod network;
 pub mod registry;
 pub mod settings;
@@ -44,5 +45,5 @@ pub type InspectResult = serde_json::Value;
 
 /// A fresh identifier for request/session correlation and stored records.
 pub fn new_uuid() -> String {
-    uuid::Uuid::new_v4().to_string()
+  uuid::Uuid::new_v4().to_string()
 }

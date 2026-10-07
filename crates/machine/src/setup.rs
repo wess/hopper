@@ -2,22 +2,7 @@
 
 use anyhow::{ensure, Context};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Phase {
-  Files,
-  Pe,
-  Drivers,
-  Media,
-  Image,
-  Letters,
-  Partition,
-  Apply,
-  OfflineDrivers,
-  Provision,
-  Recovery,
-  Boot,
-}
+pub use model::native::SetupPhase as Phase;
 
 const PHASES: [Phase; 12] = [
   Phase::Files,

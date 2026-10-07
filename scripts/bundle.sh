@@ -36,8 +36,8 @@ version="$(sed -n 's/^version = "\([0-9][^"]*\)".*/\1/p' Cargo.toml | head -1)"
 [ -n "$version" ] || { echo "error: could not read version from Cargo.toml" >&2; exit 1; }
 echo "[bundle] $app_name $version"
 
-echo "[bundle] cargo build --profile $profile -p app -p mcp --locked"
-cargo build --profile "$profile" -p app -p mcp --locked
+echo "[bundle] cargo build --profile $profile -p app -p mcp -p machine --locked"
+cargo build --profile "$profile" -p app -p mcp -p machine --locked
 
 mkdir -p dist
 stage="$(mktemp -d dist/.hopper.XXXXXX)"
@@ -50,6 +50,15 @@ mkdir -p "$contents/MacOS" "$contents/Resources"
 [ -f native/build/docker ] || scripts/build/docker.sh
 [ -f native/build/compose ] || scripts/build/compose.sh
 [ -x native/build/qemu/bin/swtpm ] || scripts/build/qemu.sh
+[ -f native/build/firmware/manifest.json ] && \
+  [ -f native/build/firmware/windows.fd ] && \
+  [ -f native/build/firmware/variables.fd ] && \
+  [ -d native/build/firmware/licenses ] || scripts/build/firmware.sh
+mkdir -p "$contents/Resources/firmware"
+for artifact in windows.fd variables.fd manifest.json revision.txt license.txt; do
+  cp "native/build/firmware/$artifact" "$contents/Resources/firmware/$artifact"
+done
+cp -R native/build/firmware/licenses "$contents/Resources/firmware/licenses"
 cp -R native/build/qemu "$contents/Resources/qemu"
 mkdir -p "$contents/Resources/lima/bin" "$contents/Resources/lima/share/doc/lima"
 cp native/build/lima/bin/limactl "$contents/Resources/lima/bin/limactl"
@@ -77,6 +86,7 @@ fi
 # AI clients a stable executable path without requiring a global install.
 mkdir -p "$contents/MacOS/sidecars"
 cp "$target_dir/hoppermcp" "$contents/MacOS/sidecars/hoppermcp"
+cp "$target_dir/hoppervm" "$contents/MacOS/sidecars/hoppervm"
 
 # Never let a stale sidecar from another checkout or host architecture make it
 # into a signed app. Universal binaries pass when they contain arm64.
@@ -138,8 +148,13 @@ echo "[bundle] codesign ($identity)"
 while IFS= read -r sidecar; do
   [ -e "$sidecar" ] || continue
   chmod u+w "$sidecar"
-  codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
-    --preserve-metadata=entitlements --sign "$identity" "$sidecar"
+  if [ "$(basename "$sidecar")" = hoppervm ]; then
+    codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
+      --entitlements assets/machine.entitlements --sign "$identity" "$sidecar"
+  else
+    codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
+      --preserve-metadata=entitlements --sign "$identity" "$sidecar"
+  fi
 done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/qemu/bin" "$contents/Resources/qemu/lib" -type f -perm -111)
 codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
   --entitlements assets/hopper.entitlements \
