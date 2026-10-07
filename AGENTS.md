@@ -21,7 +21,11 @@ and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in
 `model::native` and `machine::ipc`; host paths in Start are never an agent API.
 `engine::machines::native` owns the asynchronous parent client. It serializes requests,
 drains replies after caller cancellation, and tracks worker state independently of viewers.
-The manager must retain a client while the VM runs; dropping the final client stops the worker.
+`Host::native_machines` retains native sessions independently of viewer watches. Runtime
+ownership locks survive cancelled startup and registry teardown until process cleanup.
+Guest operations recheck the persisted policy at dispatch and before returning captures.
+Trusted startup still needs media/configuration wiring; it rejects existing prototype
+instances until migration is implemented. Dropping the final client stops the worker.
 Started means allocated hardware, and Deployed means deployment completed; neither
 proves a usable desktop. App integration and running-memory snapshots remain pending.
 

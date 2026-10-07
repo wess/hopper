@@ -45,6 +45,7 @@ pub(super) async fn serve(
   mut queue: mpsc::Receiver<Pending>,
   state: watch::Sender<State>,
   _reader: Reader,
+  finished: watch::Sender<bool>,
 ) {
   let result = run(&mut child, &mut input, &mut replies, &mut queue, &state).await;
   if let Err(error) = result {
@@ -53,12 +54,22 @@ pub(super) async fn serve(
     tokio::time::timeout(Duration::from_secs(5), child.wait()).await,
     Ok(Ok(_))
   ) {
+    finished.send_replace(true);
     return;
   }
   if child.try_wait().ok().flatten().is_none() {
     let _ = child.kill().await;
   }
-  let _ = child.wait().await;
+  match child.wait().await {
+    Ok(_) => {
+      finished.send_replace(true);
+    }
+    Err(error) => {
+      state.send_replace(State::Failed(format!(
+        "Native worker cleanup failed: {error}"
+      )));
+    }
+  }
 }
 
 async fn run(
@@ -110,6 +121,13 @@ async fn run(
     if pending.response.is_closed() {
       continue;
     }
+    if let Some(check) = &pending.check {
+      if let Err(error) = check() {
+        let _ = pending.response.send(Err(error));
+        continue;
+      }
+    }
+    let input_command = matches!(pending.command, Command::Input { .. });
     let limit = if matches!(pending.command, Command::Capture {}) {
       120
     } else {
@@ -138,6 +156,34 @@ async fn run(
             return Ok(());
           }
           _ => {}
+        }
+        if let Some(check) = &pending.check {
+          if let Err(error) = check() {
+            if input_command {
+              id = id
+                .checked_add(1)
+                .context("Native request identifiers exhausted")?;
+              let released = exchange(
+                input,
+                replies,
+                id,
+                Command::Release {},
+                Duration::from_secs(30),
+              )
+              .await?;
+              match released.response.result {
+                Reply::Accepted {} => {}
+                Reply::Stopped { reason } => {
+                  state.send_replace(State::Stopped(reason));
+                  let _ = pending.response.send(Err(error));
+                  return Ok(());
+                }
+                _ => anyhow::bail!("Native worker failed to release revoked input"),
+              }
+            }
+            let _ = pending.response.send(Err(error));
+            continue;
+          }
         }
         let _ = pending.response.send(Ok(packet));
       }

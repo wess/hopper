@@ -38,6 +38,9 @@ boot = start["command"]["boot"]
 root = Path(boot["store"])
 mode = boot["diskId"]
 (root / "pid").write_text(str(os.getpid()))
+if mode == "startupgate":
+    while not (root / "startupcontinue").exists():
+        time.sleep(0.005)
 if mode == "startuphang":
     time.sleep(60)
 if mode == "startupreject":
@@ -59,7 +62,14 @@ while True:
     with (root / "trace").open("a") as trace:
         trace.write(kind + "\n")
     if kind == "stop":
+        if mode == "stopdelay":
+            (root / "stopreceived").touch()
+            while not (root / "stopcontinue").exists():
+                time.sleep(0.005)
         send(id, {"type": "stopped", "reason": "requested"})
+        if mode == "stopdelay":
+            while not (root / "exitcontinue").exists():
+                time.sleep(0.005)
         sys.exit(0)
     if mode == "wrongid":
         send(id + 1, {"type": "accepted"})
@@ -92,5 +102,10 @@ while True:
         send(id, {"type": "paused"})
     elif kind == "resume":
         send(id, {"type": "running"})
+    elif kind == "input" and mode == "inputdelay":
+        (root / "inputreceived").touch()
+        while not (root / "inputcontinue").exists():
+            time.sleep(0.005)
+        send(id, {"type": "accepted"})
     else:
         send(id, {"type": "accepted"})

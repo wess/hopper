@@ -2,11 +2,12 @@
 //! forwarding operations. A worker and its boot paths are never an agent endpoint.
 
 mod actor;
+pub mod sessions;
 mod wire;
 
 use anyhow::{bail, Context};
 use model::native::{Boot, Command, Result as Reply, StopReason};
-use std::{path::Path, process::Stdio, time::Duration};
+use std::{path::Path, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
   process,
   sync::{mpsc, oneshot, watch},
@@ -24,11 +25,15 @@ pub enum State {
 pub struct Client {
   requests: mpsc::Sender<Pending>,
   state: watch::Receiver<State>,
+  ended: watch::Receiver<bool>,
 }
+
+type Check = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 
 struct Pending {
   command: Command,
   response: oneshot::Sender<anyhow::Result<wire::Packet>>,
+  check: Option<Check>,
 }
 
 pub struct Frame {
@@ -63,27 +68,40 @@ pub async fn launch(helper: &Path, boot: Boot) -> anyhow::Result<Client> {
   });
   let reader = actor::Reader(reader.abort_handle());
   let command = Command::Start { boot };
-  let packet = actor::exchange(
-    &mut input,
-    &mut replies,
-    1,
-    command,
-    Duration::from_secs(30),
-  )
-  .await?;
-  if let Reply::Rejected { message } = packet.response.result {
-    bail!("Native worker rejected startup: {message}");
+  let startup = async {
+    let packet = actor::exchange(
+      &mut input,
+      &mut replies,
+      1,
+      command,
+      Duration::from_secs(30),
+    )
+    .await?;
+    if let Reply::Rejected { message } = packet.response.result {
+      bail!("Native worker rejected startup: {message}");
+    }
+    anyhow::ensure!(
+      matches!(packet.response.result, Reply::Started {}),
+      "Native worker stopped during startup"
+    );
+    Ok::<_, anyhow::Error>(())
   }
-  anyhow::ensure!(
-    matches!(packet.response.result, Reply::Started {}),
-    "Native worker stopped during startup"
-  );
+  .await;
+  if let Err(error) = startup {
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    return Err(error);
+  }
   let (requests, queue) = mpsc::channel(8);
   let (state, status) = watch::channel(State::Running);
-  tokio::spawn(actor::serve(child, input, replies, queue, state, reader));
+  let (finished, ended) = watch::channel(false);
+  tokio::spawn(actor::serve(
+    child, input, replies, queue, state, reader, finished,
+  ));
   Ok(Client {
     requests,
     state: status,
+    ended,
   })
 }
 
@@ -101,11 +119,25 @@ pub async fn changed(client: &mut Client) -> anyhow::Result<State> {
 }
 
 pub async fn request(client: &Client, command: Command) -> anyhow::Result<Reply> {
-  Ok(transact(client, command).await?.response.result)
+  Ok(transact(client, command, None).await?.response.result)
+}
+
+pub async fn finished(client: &Client) -> anyhow::Result<()> {
+  let mut ended = client.ended.clone();
+  while !*ended.borrow_and_update() {
+    ended
+      .changed()
+      .await
+      .context("Native worker cleanup failed")?;
+  }
+  Ok(())
 }
 
 pub async fn capture(client: &Client) -> anyhow::Result<Frame> {
-  let packet = transact(client, Command::Capture {}).await?;
+  frame(transact(client, Command::Capture {}, None).await?)
+}
+
+fn frame(packet: wire::Packet) -> anyhow::Result<Frame> {
   let Reply::Frame {
     width,
     height,
@@ -122,7 +154,11 @@ pub async fn capture(client: &Client) -> anyhow::Result<Frame> {
   })
 }
 
-async fn transact(client: &Client, command: Command) -> anyhow::Result<wire::Packet> {
+async fn transact(
+  client: &Client,
+  command: Command,
+  check: Option<Check>,
+) -> anyhow::Result<wire::Packet> {
   if matches!(command, Command::Start { .. }) {
     bail!("Boot configuration is only accepted when launching a native worker");
   }
@@ -135,7 +171,11 @@ async fn transact(client: &Client, command: Command) -> anyhow::Result<wire::Pac
     let (response, reply) = oneshot::channel();
     client
       .requests
-      .send(Pending { command, response })
+      .send(Pending {
+        command,
+        response,
+        check,
+      })
       .await
       .map_err(|_| anyhow::anyhow!("Native VM is no longer running"))?;
     let packet = reply.await.context("Native VM stopped before replying")??;
