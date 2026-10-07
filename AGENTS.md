@@ -62,7 +62,11 @@ DVDs detached and the same disk/firmware identity. Manual system startup install
 supervision. Guest shutdown and requested stop do not trigger automatic startup; failed
 reboots retain retry intent. Full official ESD conversion and Windows installation/first-boot
 verification and app integration remain pending. Existing prototype instances
-need migration before native startup.
+need migration before native startup. Native registry creation validates Windows resources
+and stores policy without invoking legacy helpers or allocating a disk. Its Windows listing
+uses records, durable phases and VM-scoped hardware state without Lima, marks previous
+instances for migration, and detects external runtime ownership. The app still calls the
+prototype create/list/start/viewer path; switching it requires the native viewer.
 VM and temporary target leases explicitly unlock on owner teardown; closing a file
 alone can retain a flock through a duplicated or inherited descriptor. Do not replace
 those leases with bare file handles. The download writer retains its inode lock through

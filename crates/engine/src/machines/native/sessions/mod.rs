@@ -11,6 +11,7 @@ mod guest;
 mod install;
 mod owner;
 mod reboot;
+mod records;
 use owner::{finished, Session};
 
 struct Slot {

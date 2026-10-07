@@ -131,7 +131,7 @@ pub fn prepare(
   })
 }
 
-fn validate(machine: &model::Machine) -> anyhow::Result<()> {
+pub(crate) fn validate(machine: &model::Machine) -> anyhow::Result<()> {
   ensure!(
     machine.guest == model::GuestOs::Windows,
     "Native Windows startup needs a Windows VM"
