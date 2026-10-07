@@ -1,6 +1,9 @@
+mod auxiliary;
 mod config;
 mod console;
 mod kernel;
+pub mod mac;
+pub mod restore;
 
 use anyhow::{ensure, Context};
 use block2::RcBlock;
@@ -57,12 +60,24 @@ pub struct Pending(mpsc::Receiver<anyhow::Result<()>>);
 
 pub fn create(main: MainThreadMarker, boot: &Linux) -> anyhow::Result<Vm> {
   let config = config::linux(boot)?;
+  Ok(configured(main, &config))
+}
+
+pub fn create_mac(main: MainThreadMarker, boot: &mac::Mac) -> anyhow::Result<Vm> {
+  let config = mac::config(boot)?;
+  Ok(configured(main, &config))
+}
+
+fn configured(
+  main: MainThreadMarker,
+  config: &objc2_virtualization::VZVirtualMachineConfiguration,
+) -> Vm {
   let machine =
-    unsafe { VZVirtualMachine::initWithConfiguration(VZVirtualMachine::alloc(), &config) };
-  Ok(Vm {
+    unsafe { VZVirtualMachine::initWithConfiguration(VZVirtualMachine::alloc(), config) };
+  Vm {
     machine,
     _main: main,
-  })
+  }
 }
 
 pub fn state(vm: &Vm) -> VZVirtualMachineState {

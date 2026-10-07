@@ -53,7 +53,13 @@ direct uncompressed ARM64 kernel boot; prior image formats require migration. Op
 serial output uses a duplicated descriptor owned by the framework; callers must bound
 its sink. Signed diagnostics verify real framework start/pause/resume/stop and a verified
 Alpine initramfs shell. The adapter is not routed through Host or app viewers yet, and
-macOS platform/restore support, Ubuntu provisioning and guest tools remain pending.
+Ubuntu provisioning and guest tools remain pending. macOS now has SDK restore-image
+discovery and platform configuration with image-specific CPU/RAM minimums, independent
+Mac identity, boot loader and graphics. Its auxiliary directory publishes firmware state
+and hardware-model binding together with exclusive rename; opening it checks private
+ownership and exact model consistency before framework configuration. Existing state is
+never replaced. IPSW download, installation, first boot and viewer integration remain
+pending; the signed macOS check discovers metadata and validates configuration only.
 Neither diagnostic establishes a usable desktop. Keep the prototype records intact.
 The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware
 and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in

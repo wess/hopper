@@ -7,26 +7,7 @@ use std::path::Path;
 
 pub(super) fn linux(boot: &Linux) -> anyhow::Result<Retained<VZVirtualMachineConfiguration>> {
   unsafe {
-    ensure!(
-      VZVirtualMachine::isSupported(),
-      "Virtualization is unavailable on this host"
-    );
-    ensure!(
-      (VZVirtualMachineConfiguration::minimumAllowedCPUCount()
-        ..=VZVirtualMachineConfiguration::maximumAllowedCPUCount())
-        .contains(&boot.cpus),
-      "VZ CPU count exceeds host limits"
-    );
-    ensure!(
-      (VZVirtualMachineConfiguration::minimumAllowedMemorySize()
-        ..=VZVirtualMachineConfiguration::maximumAllowedMemorySize())
-        .contains(&boot.memory),
-      "VZ memory exceeds host limits"
-    );
-    ensure!(
-      (640..=4096).contains(&boot.width) && (480..=4096).contains(&boot.height),
-      "VZ display dimensions exceed bounds"
-    );
+    let config = base(boot.cpus, boot.memory, boot.width, boot.height)?;
     ensure!(
       boot.identity.len() <= 4096,
       "VZ machine identity exceeds bounds"
@@ -39,9 +20,6 @@ pub(super) fn linux(boot: &Linux) -> anyhow::Result<Retained<VZVirtualMachineCon
     let platform = VZGenericPlatformConfiguration::new();
     platform.setMachineIdentifier(&identity);
     let loader = loader(&boot.boot)?;
-    let config = VZVirtualMachineConfiguration::new();
-    config.setCPUCount(boot.cpus);
-    config.setMemorySize(boot.memory);
     config.setPlatform(&platform);
     config.setBootLoader(Some(&loader));
     if let Some(console) = &boot.console {
@@ -84,7 +62,41 @@ pub(super) fn linux(boot: &Linux) -> anyhow::Result<Retained<VZVirtualMachineCon
   }
 }
 
-fn storage(
+pub(super) fn base(
+  cpus: usize,
+  memory: u64,
+  width: usize,
+  height: usize,
+) -> anyhow::Result<Retained<VZVirtualMachineConfiguration>> {
+  unsafe {
+    ensure!(
+      VZVirtualMachine::isSupported(),
+      "Virtualization is unavailable on this host"
+    );
+    ensure!(
+      (VZVirtualMachineConfiguration::minimumAllowedCPUCount()
+        ..=VZVirtualMachineConfiguration::maximumAllowedCPUCount())
+        .contains(&cpus),
+      "VZ CPU count exceeds host limits"
+    );
+    ensure!(
+      (VZVirtualMachineConfiguration::minimumAllowedMemorySize()
+        ..=VZVirtualMachineConfiguration::maximumAllowedMemorySize())
+        .contains(&memory),
+      "VZ memory exceeds host limits"
+    );
+    ensure!(
+      (640..=4096).contains(&width) && (480..=4096).contains(&height),
+      "VZ display dimensions exceed bounds"
+    );
+    let config = VZVirtualMachineConfiguration::new();
+    config.setCPUCount(cpus);
+    config.setMemorySize(memory);
+    Ok(config)
+  }
+}
+
+pub(super) fn storage(
   path: &Path,
   read_only: bool,
 ) -> anyhow::Result<Retained<VZVirtioBlockDeviceConfiguration>> {
@@ -148,14 +160,14 @@ fn loader(boot: &Boot) -> anyhow::Result<Retained<VZBootLoader>> {
   }
 }
 
-fn url(path: &Path) -> anyhow::Result<Retained<NSURL>> {
+pub(super) fn url(path: &Path) -> anyhow::Result<Retained<NSURL>> {
   ensure!(path.is_absolute(), "VZ paths must be absolute");
   let path = path.to_str().context("VZ path is not UTF-8")?;
   ensure!(!path.contains('\0'), "VZ path contains a null byte");
   Ok(NSURL::fileURLWithPath(&NSString::from_str(path)))
 }
 
-fn file(path: &Path) -> anyhow::Result<Retained<NSURL>> {
+pub(super) fn file(path: &Path) -> anyhow::Result<Retained<NSURL>> {
   ensure!(
     std::fs::symlink_metadata(path)?.is_file(),
     "VZ requires a regular file, not a symlink"

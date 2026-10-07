@@ -190,6 +190,13 @@ compressed kernels use the EFI path instead. See the
 [ARM64 boot format](https://docs.kernel.org/arch/arm64/booting.html). This verifies a
 diagnostic Linux kernel and userspace, not Ubuntu desktop installation or macOS support.
 
+The `vzmac` example discovers Apple's supported restore-image metadata and configures
+a macOS platform with its CPU/RAM requirements, independent identity and matching
+auxiliary firmware. Creation publishes private state and its hardware binding together
+and refuses to replace existing data. A signed live check validates configuration and
+rejects insufficient resources and model mismatches. It downloads no IPSW and performs
+no installation or macOS first boot; manager/viewer integration remains unfinished.
+
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into
 `native/build/firmware/windows.fd` and `variables.fd`, with a provenance manifest
