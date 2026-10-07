@@ -38,10 +38,18 @@ ARM64 drivers and license notices. `Sessions::deploy_bundled` verifies their inv
 and hashes and resolves them coherently for the app and its sidecars. Signing refreshes
 the asset manifest before sealing the app. Native catalogue acquisition restricts redirects
 to official HTTPS origins, bounds CAB/XML responses and rejects ambiguous ARM64 selections.
-It upgrades the selected ESD URL to HTTPS and retains the catalogue checksum; only its
-network fetch establishes official origin. Verified native cache publication and automatic
-download-to-startup wiring, persisted install-phase
-handoff and app integration remain pending. Existing prototype instances need migration before
+It preserves the exact advertised ESD URL: Microsoft's delivery hostname currently uses
+HTTP and does not have a matching HTTPS certificate. ESD integrity metadata comes from
+the HTTPS catalogue; downloads use no redirects and verify the complete size/checksum
+before conversion. Never disable certificate verification or rewrite that hostname.
+When no installer is selected, native preparation acquires and converts official media
+with bundled tools. Its private atomic cache retains the source CAB, source identity and
+ISO checksum, and verifies them on reuse. Partial ESDs survive interrupted transfers;
+verified ESDs survive conversion failures and are removed only after complete publication.
+Invalid cache data is preserved and rejected. Saving the acquired path shares the agent
+policy lock and rereads the record, preserving concurrent access changes. Supplied local
+ISOs remain a fallback. Full official ESD conversion, persisted install-phase handoff and
+app integration remain pending. Existing prototype instances need migration before
 native startup.
 VM and temporary target leases explicitly unlock on owner teardown; closing a file
 alone can retain a flock through a duplicated or inherited descriptor. Do not replace

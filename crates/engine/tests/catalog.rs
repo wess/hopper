@@ -58,7 +58,7 @@ async fn cab_decoding_bounds_helpers_and_preserves_source_identity() {
   let selection = catalog::decode(source, &helper).await.unwrap();
   assert_eq!(
     selection.media.file_path,
-    "https://dl.delivery.mp.microsoft.com/files/windows.esd"
+    "http://dl.delivery.mp.microsoft.com/files/windows.esd"
   );
   assert_eq!(
     selection.catalogue_sha256,

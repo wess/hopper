@@ -13,6 +13,7 @@ const LIMIT: usize = 4 * 1024 * 1024;
 pub struct Selection {
   pub media: Media,
   pub catalogue_sha256: String,
+  pub catalogue: Vec<u8>,
 }
 
 pub async fn fetch(archive: &Path) -> anyhow::Result<Selection> {
@@ -94,14 +95,11 @@ pub async fn decode(bytes: &[u8], archive: &Path) -> anyhow::Result<Selection> {
     16 * 1024 * 1024,
   )
   .await?;
-  let mut media = catalogue(std::str::from_utf8(&xml)?)?;
-  let mut url = Url::parse(&media.file_path)?;
-  url
-    .set_scheme("https")
-    .map_err(|_| anyhow::anyhow!("Invalid installer URL scheme"))?;
-  media.file_path = url.into();
+  // preserve Microsoft's advertised transport; the delivery host may not support HTTPS.
+  let media = catalogue(std::str::from_utf8(&xml)?)?;
   Ok(Selection {
     media,
     catalogue_sha256: format!("{:x}", Sha256::digest(bytes)),
+    catalogue: bytes.to_vec(),
   })
 }

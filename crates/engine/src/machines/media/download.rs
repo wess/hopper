@@ -5,7 +5,7 @@ use reqwest::{header, Client, StatusCode};
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 
-async fn hash(file: &mut tokio::fs::File) -> anyhow::Result<(sha1_smol::Sha1, u64)> {
+async fn hash(file: &mut tokio::fs::File, limit: u64) -> anyhow::Result<(sha1_smol::Sha1, u64)> {
   let mut digest = sha1_smol::Sha1::new();
   let mut bytes = vec![0; 1024 * 1024];
   let mut size = 0;
@@ -16,6 +16,10 @@ async fn hash(file: &mut tokio::fs::File) -> anyhow::Result<(sha1_smol::Sha1, u6
     }
     digest.update(&bytes[..count]);
     size += count as u64;
+    ensure!(
+      size <= limit,
+      "Cached installer grew beyond its expected size"
+    );
   }
 }
 
@@ -47,21 +51,49 @@ pub async fn fetch(
   );
   let expected = media.sha1.to_ascii_lowercase();
   let complete = cache.join(format!("{expected}.esd"));
-  if complete.is_file() {
+  let cached = match std::fs::symlink_metadata(&complete) {
+    Ok(info) => Some(info),
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+    Err(error) => return Err(error.into()),
+  };
+  if let Some(info) = cached {
+    ensure!(info.is_file(), "Cached installer must be a regular file");
     tokio::fs::write(progress, "Verifying cached Windows installer…").await?;
-    let (digest, size) = hash(&mut tokio::fs::File::open(&complete).await?).await?;
-    if size == media.size && digest.digest().to_string() == expected {
-      return Ok(complete);
+    if info.len() == media.size {
+      let mut options = std::fs::OpenOptions::new();
+      options.read(true);
+      #[cfg(unix)]
+      {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+      }
+      let mut cached = tokio::fs::File::from_std(options.open(&complete)?);
+      ensure!(
+        cached.metadata().await?.is_file(),
+        "Invalid cached installer"
+      );
+      let (digest, size) = hash(&mut cached, media.size).await?;
+      if size == media.size && digest.digest().to_string() == expected {
+        return Ok(complete);
+      }
     }
   }
 
   let partial = cache.join(format!("{expected}.esd.part"));
-  let file = std::fs::OpenOptions::new()
-    .create(true)
-    .truncate(false)
-    .read(true)
-    .write(true)
-    .open(&partial)?;
+  let mut options = std::fs::OpenOptions::new();
+  options.create(true).truncate(false).read(true).write(true);
+  #[cfg(unix)]
+  {
+    use std::os::unix::fs::OpenOptionsExt;
+    options
+      .mode(0o600)
+      .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+  }
+  let file = options.open(&partial)?;
+  ensure!(
+    file.metadata()?.is_file(),
+    "Partial installer must be a regular file"
+  );
   // keep the inode lock on the file itself, including any pending async disk writes
   file
     .try_lock_exclusive()
@@ -70,7 +102,7 @@ pub async fn fetch(
   if file.metadata().await?.len() > media.size {
     file.set_len(0).await?;
   }
-  let (mut digest, mut written) = hash(&mut file).await?;
+  let (mut digest, mut written) = hash(&mut file, media.size).await?;
   if written == media.size {
     if digest.digest().to_string() == expected {
       file.sync_all().await?;

@@ -120,6 +120,16 @@ impl Machines {
         Ok(())
     }
 
+    fn save_installer(&self, id: &str, installer: &Path) -> anyhow::Result<()> {
+        anyhow::ensure!(installer.is_absolute(), "Installer path must be absolute");
+        let _policy = self.guard(id, ".access")?;
+        // acquisition must preserve policy changes made while the download was running.
+        let mut machine = self.machine(id, Actor::Person)?;
+        machine.installer = Some(installer.to_str().context("Invalid installer path")?.into());
+        store::json::write(&self.record(id)?, &machine)?;
+        Ok(())
+    }
+
     pub async fn list(&self, actor: Actor) -> anyhow::Result<Vec<MachineStatus>> {
         let dir = self.root.join("records");
         if !dir.exists() {

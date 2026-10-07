@@ -2,7 +2,7 @@
 
 use super::{assets::Assets, config};
 use crate::machines::{
-  windows::{deploy, inspect, provision, setup},
+  windows::{deploy, inspect, media, provision, setup},
   Actor, Machines,
 };
 use anyhow::{ensure, Context};
@@ -19,6 +19,7 @@ pub struct Tools {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Phase {
+  Acquiring(media::Phase),
   Inspecting,
   Accounts,
   Media(setup::Phase),
@@ -47,11 +48,25 @@ pub(super) async fn prepare(
   } else {
     None
   };
-  let installer = record
-    .installer
-    .as_deref()
-    .context("Prepare Windows installation media before native deployment")?;
-  let installer = Path::new(installer);
+  let installer = match record.installer.as_deref() {
+    Some(installer) if Path::new(installer) != media::installer(&manager.root) => {
+      PathBuf::from(installer)
+    }
+    _ => {
+      let installer = media::prepare(
+        &manager.root,
+        &tools.media,
+        &paths.root.join("download"),
+        |phase| {
+          progress.send_replace(Phase::Acquiring(phase));
+        },
+      )
+      .await?;
+      manager.save_installer(id, &installer)?;
+      installer
+    }
+  };
+  let installer = installer.as_path();
   ensure!(installer.is_absolute(), "Installer path must be absolute");
   let complete = std::fs::symlink_metadata(&paths.setup).is_ok();
   if complete {

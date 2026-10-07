@@ -9,6 +9,32 @@ use tokio::{
 use wire::{installer, response, server};
 
 #[tokio::test]
+#[cfg(unix)]
+async fn cached_and_partial_symlinks_never_modify_their_targets() {
+  use std::os::unix::fs::symlink;
+  for suffix in ["esd", "esd.part"] {
+    let root = tempfile::tempdir().unwrap();
+    let target = root.path().join("preserve");
+    std::fs::write(&target, b"0123456789").unwrap();
+    let media = installer("http://127.0.0.1:0/unreachable".into(), b"0123456789");
+    symlink(
+      &target,
+      root.path().join(format!("{}.{suffix}", media.sha1)),
+    )
+    .unwrap();
+    assert!(download::fetch(
+      &Client::new(),
+      &media,
+      root.path(),
+      &root.path().join("progress")
+    )
+    .await
+    .is_err());
+    assert_eq!(std::fs::read(target).unwrap(), b"0123456789");
+  }
+}
+
+#[tokio::test]
 async fn interrupted_transfer_resumes_real_http_bytes_and_publishes_only_verified_media() {
   let data = b"0123456789";
   let (url, task) = server(vec![
