@@ -243,6 +243,24 @@ The probe requests a native CPU exit every 20 milliseconds so the owner thread
 can deliver input even when guest execution makes no device accesses.
 `--seconds` accepts a bounded diagnostic duration from 3 to 300 seconds.
 
+`scripts/build/windowsprobe.py` prepares a separate, boot-only Windows PE driver
+diagnostic from the cached installer and an extracted ARM64 Virtio driver package.
+It validates driver executable architectures, retains the package license and records
+driver hashes. It adds a WinPE startup script that runs `drvload` for storage/input,
+prints each exit code and lists visible disks/volumes. It does not launch Setup or
+change the source installer. Windows remains responsible for accepting driver catalogs;
+the diagnostic does not disable signature checks. It requires `bsdtar`, `wimlib-imagex`
+and a UDF-capable `mkisofs` to preserve the installer's filesystem format.
+A live run with the Virtio Windows 0.1.302 ARM64 package reported successful
+`drvload` results for both drivers (exit code 0), but DiskPart found no disks or
+volumes. Package acceptance does not establish working device enumeration, disk
+access or input; those remain under development.
+
+```sh
+python3 scripts/build/windowsprobe.py /path/to/installer.iso /path/to/virtio-win/drivers/by-driver /tmp/hopperdrivers
+target/debug/examples/firmware native/build/firmware/windows.fd /tmp/drivers.dtb native/build/firmware/variables.fd /tmp/hopperdrivers/drivers.iso --boot-media --seconds 90 --frame /tmp/drivers.ppm
+```
+
 CPUs created after the native GIC expose the framework's virtual PMUv3, which
 Windows boot code requires. Guest OS debug-lock status and access are emulated
 per CPU with the architectural cold-reset state; unknown system registers fail
