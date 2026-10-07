@@ -26,6 +26,39 @@ pub fn accounts() -> Accounts {
   }
 }
 
+/// persist credentials for native installer retries; agent policy is checked afresh.
+pub fn persisted(
+  manager: &super::super::Machines,
+  id: &str,
+  actor: super::super::Actor,
+) -> anyhow::Result<Accounts> {
+  super::super::validate_id(id)?;
+  let canonical = Uuid::parse_str(id)?.to_string();
+  let id = canonical.as_str();
+  let _lock = manager.guard(id, ".credentials")?;
+  let machine = manager.machine(id, actor)?;
+  ensure!(
+    machine.guest == model::GuestOs::Windows,
+    "Windows provisioning needs a Windows VM"
+  );
+  let slot = store::guests::open(id)?;
+  if let Some(saved) = store::guests::read(&slot)? {
+    return Ok(Accounts {
+      user: saved.user_password,
+      administrator: saved.administrator_password,
+    });
+  }
+  let accounts = accounts();
+  store::guests::create(
+    &slot,
+    &store::guests::Credentials {
+      user_password: accounts.user.clone(),
+      administrator_password: accounts.administrator.clone(),
+    },
+  )?;
+  Ok(accounts)
+}
+
 pub fn password(accounts: &Accounts, role: Role) -> &str {
   match role {
     Role::User => &accounts.user,

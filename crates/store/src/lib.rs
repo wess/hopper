@@ -1,6 +1,7 @@
 //! Hopper's local persistence: JSON documents under `~/.hopper/` plus the OS
 //! keychain for secrets. gpui-free.
 
+pub mod guests;
 pub mod json;
 pub mod keychain;
 pub mod paths;
