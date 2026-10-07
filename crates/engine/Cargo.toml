@@ -25,6 +25,8 @@ reqwest = { workspace = true }
 tempfile = { workspace = true }
 quick-xml = { version = "0.41", features = ["serialize"] }
 sha1_smol = "1"
+sha2 = "0.10"
+libc = "0.2"
 uuid = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]

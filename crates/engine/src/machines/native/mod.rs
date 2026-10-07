@@ -2,6 +2,8 @@
 //! forwarding operations. A worker and its boot paths are never an agent endpoint.
 
 mod actor;
+pub mod assets;
+pub mod config;
 pub mod sessions;
 mod wire;
 

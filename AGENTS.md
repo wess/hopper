@@ -24,8 +24,11 @@ drains replies after caller cancellation, and tracks worker state independently 
 `Host::native_machines` retains native sessions independently of viewer watches. Runtime
 ownership locks survive cancelled startup and registry teardown until process cleanup.
 Guest operations recheck the persisted policy at dispatch and before returning captures.
-Trusted startup still needs media/configuration wiring; it rejects existing prototype
-instances until migration is implemented. Dropping the final client stops the worker.
+Configured startup verifies bundled firmware artifacts and derives private VM paths
+from the persisted record under the runtime locks. Deployment requires an unwritten
+sparse disk; system boot detaches setup media. Media/deployment preparation is still
+pending. Existing prototype instances need migration before native startup.
+Dropping the final client stops the worker.
 Started means allocated hardware, and Deployed means deployment completed; neither
 proves a usable desktop. App integration and running-memory snapshots remain pending.
 

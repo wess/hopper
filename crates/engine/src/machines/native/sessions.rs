@@ -54,6 +54,28 @@ impl Sessions {
 
   /// internal startup only; never expose helper or boot paths through an agent endpoint.
   pub async fn start(&self, id: &str, helper: &Path, boot: Boot) -> anyhow::Result<()> {
+    self.start_using(id, helper, || Ok(boot)).await
+  }
+
+  pub async fn start_configured(
+    &self,
+    id: &str,
+    assets: &super::assets::Assets,
+    stage: super::config::Stage,
+  ) -> anyhow::Result<()> {
+    self
+      .start_using(id, &assets.worker, || {
+        super::config::prepare(&self.manager, id, assets, stage)
+      })
+      .await
+  }
+
+  async fn start_using(
+    &self,
+    id: &str,
+    helper: &Path,
+    prepare: impl FnOnce() -> anyhow::Result<Boot>,
+  ) -> anyhow::Result<()> {
     let slot = self.slot(id).await?;
     let mut session = slot.lock().await;
     let _operation = self.manager.lock(id)?;
@@ -78,6 +100,7 @@ impl Sessions {
       session.take();
     }
     let lease = self.manager.guard(id, ".runtime")?;
+    let boot = prepare()?;
     let helper = helper.to_owned();
     let (result, started) = tokio::sync::oneshot::channel();
     // cancellation drops the result, while startup still cleans up under both locks.
