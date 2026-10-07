@@ -1,8 +1,15 @@
-//! Firmware services for the initial single-CPU platform.
+//! PSCI services; stateless calls describe a single CPU.
+
+pub mod power;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Reply {
   Value(i64),
+  CpuOn {
+    target: usize,
+    entry: u64,
+    context: u64,
+  },
   CpuOff,
   Shutdown,
   Reset,
