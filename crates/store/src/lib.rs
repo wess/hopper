@@ -4,6 +4,7 @@
 pub mod guests;
 pub mod json;
 pub mod keychain;
+pub mod lock;
 pub mod paths;
 
 use model::{Settings, Workspace};

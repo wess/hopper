@@ -102,7 +102,7 @@ pub fn verify(worker: &Path, folder: &Path) -> anyhow::Result<Assets> {
   })
 }
 
-pub(super) fn regular(path: &Path, limit: u64) -> anyhow::Result<File> {
+pub(crate) fn regular(path: &Path, limit: u64) -> anyhow::Result<File> {
   let metadata = std::fs::symlink_metadata(path)
     .with_context(|| format!("Missing native asset: {}", path.display()))?;
   ensure!(

@@ -15,10 +15,7 @@ use tokio::sync::watch;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
   let args: Vec<_> = std::env::args().skip(1).collect();
-  ensure!(
-    args.len() == 5,
-    "Provide installer, drivers root, license, WIM helper and image helper"
-  );
+  ensure!(matches!(args.len(), 1 | 5), "Provide an installer, optionally followed by drivers root, license, WIM helper and image helper");
   // diagnostic credentials are held only in memory and never touch the OS keychain.
   keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
   let root = tempfile::tempdir()?;
@@ -45,15 +42,19 @@ async fn main() -> anyhow::Result<()> {
   )?;
   let paths = config::paths(&manager.root, &id)?;
   let assets = assets::locate()?;
-  let tools = Tools {
-    media: setup::Tools {
-      archive: "/usr/bin/tar".into(),
-      wim: args[3].clone().into(),
-      image: args[4].clone().into(),
-    },
-    mount: "/usr/sbin/diskutil".into(),
-    drivers: args[1].clone().into(),
-    license: args[2].clone().into(),
+  let tools = if args.len() == 1 {
+    engine::machines::windows::assets::locate()?
+  } else {
+    Tools {
+      media: setup::Tools {
+        archive: "/usr/bin/tar".into(),
+        wim: args[3].clone().into(),
+        image: args[4].clone().into(),
+      },
+      mount: "/usr/sbin/diskutil".into(),
+      drivers: args[1].clone().into(),
+      license: args[2].clone().into(),
+    }
   };
   let sessions = Sessions::new(manager.clone());
   let (progress, mut phase) = watch::channel(Phase::Inspecting);

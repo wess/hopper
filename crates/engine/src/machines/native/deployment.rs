@@ -87,7 +87,8 @@ pub(super) async fn prepare(
   }
   progress.send_replace(Phase::Disk);
   if disk.is_none() {
-    drop(deploy::create_disk(&paths.disk, &layout)?);
+    let created = deploy::create_disk(&paths.disk, &layout)?;
+    fs2::FileExt::unlock(&created)?;
   }
   drop(disk);
   let boot = config::prepare(manager, id, assets, config::Stage::Deployment)?;

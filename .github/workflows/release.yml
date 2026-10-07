@@ -113,6 +113,7 @@ jobs:
           scripts/build/lima.sh
           scripts/build/docker.sh
           scripts/build/qemu.sh
+          scripts/build/windows.sh
 
       - name: Import signing certificate
         env:
@@ -154,6 +155,12 @@ jobs:
           test -x "$app/MacOS/hopper" || { echo "FATAL: app binary missing"; exit 1; }
           test -x "$app/MacOS/sidecars/docker"
           test -x "$app/MacOS/sidecars/compose"
+          test -x "$app/MacOS/sidecars/hoppervm"
+          codesign --verify --strict "$app/MacOS/sidecars/hoppervm"
+          codesign -d --entitlements - "$app/MacOS/sidecars/hoppervm" 2>/dev/null | grep -q com.apple.security.hypervisor
+          python3 scripts/build/windowsmanifest.py --verify "$app/Resources/windows"
+          "$app/Resources/windows/bin/wimlib-imagex" --version
+          "$app/Resources/windows/bin/mkisofs" --version
           helper="$app/Resources/lima/bin/limactl"
           test -x "$helper"
           test -f "$app/Resources/lima/share/lima/lima-guestagent.Linux-aarch64.gz"

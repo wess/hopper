@@ -3,7 +3,6 @@
 use super::assets::{self, Assets};
 use crate::machines::{Actor, Machines};
 use anyhow::{ensure, Context};
-use fs2::FileExt;
 use model::native::Boot;
 use sha2::{Digest, Sha256};
 use std::{
@@ -96,7 +95,7 @@ pub fn prepare(
       (Some(text(&paths.setup)?), Some(installer.to_owned()))
     }
     Stage::System => {
-      let mut disk = disk;
+      let mut disk = &*disk;
       let mut magic = [0; 4];
       disk.read_exact(&mut magic)?;
       ensure!(
@@ -236,12 +235,10 @@ pub(super) fn target(
   paths: &Paths,
   machine: &model::Machine,
   unwritten: bool,
-) -> anyhow::Result<std::fs::File> {
+) -> anyhow::Result<store::lock::Lease> {
   let disk = assets::regular(&paths.disk, 2048 * 1024 * 1024 * 1024)?;
   private_file(&disk)?;
-  disk
-    .try_lock_exclusive()
-    .context("Native disk is already in use")?;
+  let disk = store::lock::exclusive(disk).context("Native disk is already in use")?;
   ensure!(
     disk.metadata()?.len() == u64::from(machine.resources.disk_gib) * 1024 * 1024 * 1024,
     "Native disk capacity does not match the VM record"

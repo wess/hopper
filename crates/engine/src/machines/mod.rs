@@ -11,7 +11,6 @@ mod snapshots;
 pub mod windows;
 
 use anyhow::{bail, Context};
-use fs2::FileExt;
 use model::{CreateMachine, Machine, MachineProfile, MachineStatus};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -86,11 +85,11 @@ impl Machines {
         Ok(machine)
     }
 
-    fn lock(&self, id: &str) -> anyhow::Result<std::fs::File> {
+    fn lock(&self, id: &str) -> anyhow::Result<store::lock::Lease> {
         self.guard(id, "")
     }
 
-    fn guard(&self, id: &str, suffix: &str) -> anyhow::Result<std::fs::File> {
+    fn guard(&self, id: &str, suffix: &str) -> anyhow::Result<store::lock::Lease> {
         validate_id(id)?;
         let dir = self.root.join("locks");
         std::fs::create_dir_all(&dir)?;
@@ -100,9 +99,7 @@ impl Machines {
             .read(true)
             .write(true)
             .open(dir.join(format!("{id}{suffix}")))?;
-        file.try_lock_exclusive()
-            .context("Another operation is in progress for this VM")?;
-        Ok(file)
+        store::lock::exclusive(file).context("Another operation is in progress for this VM")
     }
 
     pub fn set_agent_access(&self, id: &str, enabled: bool) -> anyhow::Result<()> {
@@ -115,8 +112,7 @@ impl Machines {
             .read(true)
             .write(true)
             .open(dir.join(format!("{id}.access")))?;
-        policy_lock
-            .try_lock_exclusive()
+        let _policy_lock = store::lock::exclusive(policy_lock)
             .context("Another agent access change is in progress")?;
         let mut machine = self.machine(id, Actor::Person)?;
         machine.agent_access = enabled;

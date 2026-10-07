@@ -6,7 +6,7 @@ use std::{
   path::Path,
 };
 
-const DRIVERS: &[(&str, &[&str])] = &[
+pub(crate) const DRIVERS: &[(&str, &[&str])] = &[
   ("viostor", &["viostor.inf", "viostor.cat", "viostor.sys"]),
   ("vioscsi", &["vioscsi.inf", "vioscsi.cat", "vioscsi.sys"]),
   (

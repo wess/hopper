@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+fs2 = "0.4"
 model = { workspace = true }
 
 serde = { workspace = true }
@@ -18,3 +19,6 @@ uuid = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

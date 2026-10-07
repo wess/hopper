@@ -91,6 +91,16 @@ impl Sessions {
       .await
   }
 
+  pub async fn deploy_bundled(
+    &self,
+    id: &str,
+    progress: watch::Sender<super::deployment::Phase>,
+  ) -> anyhow::Result<()> {
+    let assets = super::assets::locate()?;
+    let tools = crate::machines::windows::assets::locate()?;
+    self.deploy(id, &assets, &tools, progress).await
+  }
+
   async fn start_using(
     &self,
     id: &str,

@@ -1,3 +1,4 @@
+pub mod assets;
 pub mod deploy;
 pub mod image;
 pub mod inspect;

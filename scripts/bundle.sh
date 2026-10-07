@@ -50,6 +50,7 @@ mkdir -p "$contents/MacOS" "$contents/Resources"
 [ -f native/build/docker ] || scripts/build/docker.sh
 [ -f native/build/compose ] || scripts/build/compose.sh
 [ -x native/build/qemu/bin/swtpm ] || scripts/build/qemu.sh
+[ -f native/build/windows/manifest.json ] || scripts/build/windows.sh
 [ -f native/build/firmware/manifest.json ] && \
   [ -f native/build/firmware/windows.fd ] && \
   [ -f native/build/firmware/variables.fd ] && \
@@ -60,6 +61,7 @@ for artifact in windows.fd variables.fd manifest.json revision.txt license.txt; 
 done
 cp -R native/build/firmware/licenses "$contents/Resources/firmware/licenses"
 cp -R native/build/qemu "$contents/Resources/qemu"
+cp -R native/build/windows "$contents/Resources/windows"
 mkdir -p "$contents/Resources/lima/bin" "$contents/Resources/lima/share/doc/lima"
 cp native/build/lima/bin/limactl "$contents/Resources/lima/bin/limactl"
 cp -R native/build/lima/share/lima "$contents/Resources/lima/share/"
@@ -103,7 +105,7 @@ if [ -d "$contents/MacOS/sidecars" ]; then
       echo "error: sidecar $sidecar does not contain host architecture $required_arch (has: ${arches:-unknown})" >&2
       exit 1
     }
-  done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/qemu/bin" "$contents/Resources/qemu/lib" -type f -perm -111)
+  done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/qemu/bin" "$contents/Resources/qemu/lib" "$contents/Resources/windows/bin" "$contents/Resources/windows/lib" -type f -perm -111)
 fi
 
 cat > "$contents/Info.plist" << PLIST
@@ -155,7 +157,9 @@ while IFS= read -r sidecar; do
     codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
       --preserve-metadata=entitlements --sign "$identity" "$sidecar"
   fi
-done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/qemu/bin" "$contents/Resources/qemu/lib" -type f -perm -111)
+done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/qemu/bin" "$contents/Resources/qemu/lib" "$contents/Resources/windows/bin" "$contents/Resources/windows/lib" -type f -perm -111)
+python3 scripts/build/windowsmanifest.py "$contents/Resources/windows"
+python3 scripts/build/windowsmanifest.py --verify "$contents/Resources/windows"
 codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
   --entitlements assets/hopper.entitlements \
   --sign "$identity" "$contents/MacOS/$bin_name"

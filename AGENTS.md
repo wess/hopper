@@ -33,9 +33,16 @@ inspects a supplied installer read-only, selects Professional and recovery capac
 preserves guest credentials, builds media and allocates a new sparse target before
 launch. Retry checks also match installer and deployment-plan hashes. Preparation
 retains ownership through cancellation; abandoned preparation does not launch hardware.
-Automatic downloads, production tool packaging, persisted install-phase handoff and
-app integration remain pending. Existing prototype instances need migration before
+Native Windows resources bundle the two media tools, relocated libraries, pinned
+ARM64 drivers and license notices. `Sessions::deploy_bundled` verifies their inventory
+and hashes and resolves them coherently for the app and its sidecars. Signing refreshes
+the asset manifest before sealing the app. Automatic downloads, persisted install-phase
+handoff and app integration remain pending. Existing prototype instances need migration before
 native startup.
+VM and temporary target leases explicitly unlock on owner teardown; closing a file
+alone can retain a flock through a duplicated or inherited descriptor. Do not replace
+those leases with bare file handles. The download writer retains its inode lock through
+pending asynchronous writes and has a different ownership lifetime.
 Dropping the final client stops the worker.
 Started means allocated hardware, and Deployed means deployment completed; neither
 proves a usable desktop. App integration and running-memory snapshots remain pending.
