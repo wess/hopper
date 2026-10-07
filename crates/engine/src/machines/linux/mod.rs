@@ -1,4 +1,7 @@
 pub mod download;
+pub mod boot;
+pub mod iso;
+pub mod kernel;
 mod files;
 pub mod provision;
 pub mod records;

@@ -27,6 +27,8 @@ quick-xml = { version = "0.41", features = ["serialize"] }
 sha1_smol = "1"
 sha2 = "0.10"
 sha-crypt = "0.5"
+flate2 = "1"
+zstd = "0.13"
 libc = "0.2"
 uuid = { workspace = true }
 

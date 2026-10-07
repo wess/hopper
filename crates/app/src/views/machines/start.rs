@@ -133,7 +133,7 @@ impl Machines {
             .prepare_virtual_linux(
               &identity,
               MachineActor::Person,
-              host::VirtualLinuxStage::Installer,
+              host::VirtualLinuxStage::Unattended,
             )
             .await
         },

@@ -8,7 +8,7 @@ pub fn profiles() -> Vec<MachineProfile> {
             "ubuntu",
             "Ubuntu Desktop",
             GuestOs::Linux,
-            "Ubuntu 24.04 LTS ARM64. Downloads its desktop installer on first start. Native installation and guest tools are in development.",
+            "Ubuntu 24.04 LTS ARM64. Downloads its desktop installer and prepares unattended setup. Installation verification and guest tools are in development.",
             Some("https://cdimage.ubuntu.com/ubuntu/releases/24.04/release/"),
             false,
             true,

@@ -60,7 +60,8 @@ fn main() -> anyhow::Result<()> {
     "Rejected migration changed the previous image"
   );
   boot.disk = raw;
-  let vm = vz::create(main, &boot)?;
+  let mut vm = vz::create(main, &boot)?;
+  vz::restrict_installer_restart(&mut vm)?;
   let (client, mut owner) = vz::queue::channel();
   owner.insert("diagnostic", vm)?;
   let main_thread = std::thread::current().id();
@@ -122,6 +123,28 @@ fn main() -> anyhow::Result<()> {
     );
     println!("VZ state: {state:?}");
   }
+  let control = client.clone();
+  let refused = runtime.spawn(async move { control.transition("diagnostic", Action::Start).await });
+  let deadline = Instant::now() + Duration::from_secs(30);
+  while !refused.is_finished() {
+    owner.tick();
+    ensure!(
+      Instant::now() < deadline,
+      "Installer restart check timed out"
+    );
+    run_loop.runMode_beforeDate(
+      unsafe { NSDefaultRunLoopMode },
+      &NSDate::dateWithTimeIntervalSinceNow(0.01),
+    );
+  }
+  ensure!(
+    runtime.block_on(refused)?.is_err(),
+    "Installer restart was accepted"
+  );
+  ensure!(
+    owner.state("diagnostic")? == State::Stopped,
+    "Rejected installer restart touched hardware"
+  );
   owner.retire("diagnostic")?;
   println!("VZ queued hardware transitions verified; no guest OS was installed or booted");
   Ok(())

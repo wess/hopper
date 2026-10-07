@@ -3,7 +3,7 @@ mod config;
 mod console;
 mod display;
 pub mod install;
-mod kernel;
+pub mod kernel;
 pub mod mac;
 pub mod network;
 pub mod queue;
@@ -64,6 +64,8 @@ pub struct Vm {
   installing: Rc<Cell<bool>>,
   ownership: Option<std::sync::Arc<dyn Send + Sync>>,
   displaying: Rc<Cell<bool>>,
+  installer: bool,
+  started: Cell<bool>,
 }
 
 #[derive(Clone, Copy)]
@@ -100,6 +102,8 @@ fn configured(
     installing: Rc::new(Cell::new(false)),
     ownership: None,
     displaying: Rc::new(Cell::new(false)),
+    installer: false,
+    started: Cell::new(false),
   }
 }
 
@@ -113,6 +117,15 @@ pub fn retain(vm: &mut Vm, ownership: std::sync::Arc<dyn Send + Sync>) -> anyhow
     "VZ runtime ownership is already bound"
   );
   vm.ownership = Some(ownership);
+  Ok(())
+}
+
+pub fn restrict_installer_restart(vm: &mut Vm) -> anyhow::Result<()> {
+  ensure!(
+    state(vm) == VZVirtualMachineState::Stopped && !vm.installing.get() && !vm.started.get(),
+    "Restrict installer restart before hardware startup"
+  );
+  vm.installer = true;
   Ok(())
 }
 
@@ -165,6 +178,13 @@ fn scoped_transition(
       Action::Stop => vm.machine.canStop(),
     };
     ensure!(permitted, "VZ state does not permit this transition");
+    if matches!(action, Action::Start) {
+      ensure!(
+        !vm.installer || !vm.started.get(),
+        "Installer has already started; preserve this VM for installation recovery or system boot"
+      );
+      vm.started.set(true);
+    }
     match action {
       Action::Start => vm.machine.startWithCompletionHandler(&completion),
       Action::Pause => vm.machine.pauseWithCompletionHandler(&completion),

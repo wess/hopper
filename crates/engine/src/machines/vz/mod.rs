@@ -66,7 +66,7 @@ impl Service {
       "Linux admission requires a Linux VM"
     );
     crate::machines::config::validate_resources(&machine)?;
-    if matches!(stage, Stage::Installer) && machine.installer.is_none() {
+    if matches!(stage, Stage::Installer | Stage::Unattended) && machine.installer.is_none() {
       ensure!(
         machine.profile == "ubuntu",
         "Automatic Linux media requires the Ubuntu profile"
@@ -81,8 +81,15 @@ impl Service {
     }
     let manager = self.manager.clone();
     let client = self.client.clone();
-    tokio::task::spawn_blocking(move || prepare::prepare(manager, machine, check, client, stage))
-      .await?
+    tokio::task::spawn_blocking(move || {
+      let prepared = prepare::prepare(manager.clone(), machine, check, client, stage)?;
+      if matches!(stage, Stage::Unattended) {
+        prepared.unattended(&manager, actor)
+      } else {
+        Ok(prepared)
+      }
+    })
+    .await?
   }
 
   fn scope(

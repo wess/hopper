@@ -57,8 +57,9 @@ generic identity and EFI state together. Host exposes preparation. Already-admit
 now route View and start/stop through a dedicated native window and the authorized owner.
 New Ubuntu records explicitly select Virtualization.framework and the app routes first
 start through automatic media acquisition, preparation, main-thread admission and its
-dedicated viewer. First start boots installation media; automatic OS installation, Ubuntu
-provisioning and guest tools remain pending. Previous untagged records keep their recovery
+dedicated viewer. First start now stages an EFI installer with unattended boot flags and
+private provisioning media. Complete installation, transition to the installed system
+and guest tools remain unverified. Previous untagged records keep their recovery
 path, and macOS creation still uses the prototype. macOS has SDK restore-image discovery
 and platform configuration with image-specific CPU/RAM minimums, independent
 Mac identity, boot loader and graphics. Its auxiliary directory publishes firmware state
@@ -99,8 +100,14 @@ Plans contain separate normal/admin account hashes, an explicit guest disk targe
 normal-user desktop login configuration. Linux credentials use `machines.linux` keychain
 keys; existing `machines.windows` keys stay unchanged. Prepared VMs can attach private
 read-only seed media. Cancellation cleans unadmitted seeds; admitted hardware, callbacks
-and surviving displays retain seed lifetime with runtime ownership. Actual autoinstall
-boot selection, account creation, guest tools and desktop readiness remain unverified.
+and surviving displays retain seed lifetime with runtime ownership. First start now selects
+unattended preparation: validate Ubuntu Desktop sources and ARM64 kernel, clone the ISO
+into a private stage, and replace only its existing GRUB configuration with bounded padding.
+APFS clones avoid full media copies; unsupported filesystems require preflighted copying.
+Retain EFI boot for ARM64 installer/bootloader compatibility. The official cache stays
+unchanged. Written target disks reject unattended preparation, and an admitted installer
+allows only one hardware start. Completion detection, installation recovery/system-boot
+transition, actual account creation, guest tools and desktop readiness remain unverified.
 `Machine.runtime` is optional for previous JSON records; new Ubuntu/Windows records
 explicitly select virtualization/hypervisor. Reject incompatible guest/runtime combinations
 and native records must never invoke previous helpers. Original runtime choice is captured

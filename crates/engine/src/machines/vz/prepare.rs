@@ -15,6 +15,7 @@ use std::{
 #[derive(Clone, Copy)]
 pub enum Stage {
   Installer,
+  Unattended,
   System,
 }
 
@@ -24,6 +25,8 @@ pub struct Prepared {
   temporary: Option<tempfile::TempDir>,
   installer: Option<PathBuf>,
   seed: Option<tempfile::TempDir>,
+  media: Option<tempfile::TempDir>,
+  unattended: bool,
   runtime: Arc<store::lock::Lease>,
   check: Check,
   client: Client,
@@ -60,7 +63,7 @@ pub(super) fn prepare(
     "VZ identity must be canonical"
   );
   let installer = match stage {
-    Stage::Installer => {
+    Stage::Installer | Stage::Unattended => {
       let path = PathBuf::from(
         machine
           .installer
@@ -92,7 +95,7 @@ pub(super) fn prepare(
     }
     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
       ensure!(
-        matches!(stage, Stage::Installer),
+        matches!(stage, Stage::Installer | Stage::Unattended),
         "Prepare Linux installation before system boot"
       );
       let temporary = tempfile::Builder::new()
@@ -115,6 +118,20 @@ pub(super) fn prepare(
       "Linux system disk has no installation data"
     );
   }
+  if matches!(stage, Stage::Unattended) {
+    ensure!(
+      machine.profile == "ubuntu" && machine.runtime == Some(model::MachineRuntime::Virtualization),
+      "Unattended installation requires native Ubuntu"
+    );
+    let disk = temporary.as_ref().map_or_else(
+      || target.join("disk"),
+      |directory| directory.path().join("disk"),
+    );
+    ensure!(
+      files::read(&disk, 2048 << 30)?.metadata()?.blocks() == 0,
+      "This VM disk contains data; preserve it for installation recovery or system boot"
+    );
+  }
   check()?;
   Ok(Prepared {
     machine,
@@ -122,6 +139,8 @@ pub(super) fn prepare(
     temporary,
     installer,
     seed: None,
+    media: None,
+    unattended: false,
     runtime,
     check,
     client,
@@ -129,6 +148,34 @@ pub(super) fn prepare(
 }
 
 impl Prepared {
+  pub(super) fn unattended(
+    mut self,
+    manager: &Machines,
+    actor: crate::machines::Actor,
+  ) -> anyhow::Result<Self> {
+    (self.check)()?;
+    let installer = self
+      .installer
+      .as_deref()
+      .context("Unattended installation requires media")?;
+    let directory = crate::machines::linux::boot::stage(
+      installer,
+      self.target.parent().context("VZ state needs a parent")?,
+      &self.check,
+    )?;
+    (self.check)()?;
+    let credentials =
+      crate::machines::linux::provision::persisted(manager, &self.machine.id, actor)?;
+    (self.check)()?;
+    let plan = crate::machines::linux::provision::prepare(&self.machine.id, &credentials)?;
+    self = self.provision(&plan)?;
+    self.installer = Some(directory.path().join("installer"));
+    self.media = Some(directory);
+    self.unattended = true;
+    (self.check)()?;
+    Ok(self)
+  }
+
   pub fn provision(
     mut self,
     plan: &crate::machines::linux::provision::Plan,
@@ -194,7 +241,10 @@ impl Prepared {
       console: None,
     };
     let mut vm = vz::create(main, &boot)?;
-    vz::retain(&mut vm, Arc::new((self.runtime, self.seed)))?;
+    if self.unattended {
+      vz::restrict_installer_restart(&mut vm)?;
+    }
+    vz::retain(&mut vm, Arc::new((self.runtime, self.seed, self.media)))?;
     (self.check)()?;
     owner.insert(&self.machine.id, vm)?;
     Ok(Admission {

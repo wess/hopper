@@ -22,8 +22,8 @@ quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and 
   installation and first boot remain unverified. A local installer is optional.
   Guest VMs live under `~/.hopper/machines`. Closing the native viewer keeps Windows
   running; quitting Hopper stops its owned Windows sessions. Windows snapshots,
-  clones and accelerated graphics remain unfinished. Ubuntu first start boots its installer;
-  automatic installation and guest tools remain unfinished. Previous untagged Linux
+  clones and accelerated graphics remain unfinished. Ubuntu first start prepares unattended
+  installation; completed installation, system-boot transition and guest tools remain unverified. Previous untagged Linux
   records retain their recovery path.
 - **Agent access** — enabled for new VMs, revocable per VM. The MCP server creates
   and lists native Windows/Ubuntu records and captures Windows displays through the running app.
@@ -250,8 +250,9 @@ resolution. The signed admission probe verifies display binding/lifetime on stop
 hardware, not real rendering, keyboard/mouse or window close/reopen. New Ubuntu records
 persist an explicit runtime choice. Their first start acquires media,
 prepares the VM, admits it on the main thread and opens the dedicated viewer after hardware
-starts. First start boots installation media; automatic OS installation, accounts and
-guest tools remain unfinished. A local ARM64 ISO is available as a fallback. Prepared,
+starts. First start now stages unattended EFI installation and guest account configuration;
+completed installation, actual accounts, system-boot transition and guest tools remain
+unverified. A local Ubuntu Desktop ARM64 ISO is available as a fallback. Prepared,
 unowned records show Ready to start only when operation/runtime locks are free; this does
 not assert an installed or usable desktop. Previous untagged records retain their recovery
 path, and mismatched guest/runtime choices are rejected. macOS creation still uses the
@@ -285,9 +286,14 @@ cargo run -p engine --example linuxseed -- /absolute/path/to/newseed.iso
 target/debug/examples/vznetwork /path/to/uncompressed/Image /path/to/network.gz /absolute/path/to/newseed.iso
 ```
 
-The app does not yet pass the unattended installation boot flag or attach this provisioning
-seed automatically. Seed delivery and generated account plans do not prove installed users,
-automatic Ubuntu installation, guest tools or a usable desktop.
+The app now selects unattended preparation for first start, attaches provisioning media and
+passes the unattended boot flag through a privately staged EFI installer. Staging validates
+the ARM64 kernel and desktop installation sources, clones the ISO on APFS, then changes only
+the existing GRUB configuration. Copy fallback requires enough space. The downloaded cache
+stays unchanged. Existing written disks reject unattended preparation, and admitted installer
+hardware cannot start a second time. Completion detection and transition to the installed
+system remain unfinished. Seed delivery, schema checks and staged boot flags do not prove
+installed users, successful Ubuntu installation, guest tools or a usable desktop.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into
