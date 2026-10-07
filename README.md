@@ -289,8 +289,10 @@ downloads and verifies the pinned size and SHA-256 before publication and reuse.
 original agent policy applies throughout acquisition. Local ISO fallback checks only its
 volume descriptor. The live `linuxmedia` diagnostic verifies official checksum metadata,
 size, a bounded ISO HTTP range and insufficient-storage rejection. A complete official
-download and installation remain unverified on this host. This path does not establish
-desktop readiness or provide guest tools. Native-state records cannot fall back to previous
+download, independent checksum verification, unattended installation and automatic installed-system
+handoff have been verified in an isolated signed app profile. Ubuntu reached its desktop as
+the normal `hopper` user (UID 1001, without sudo). Administrator login and guest tools remain
+unverified. Native-state records cannot fall back to previous
 runtime operations. Listing
 queries the app-owned queue for actual hardware state and pending-operation status,
 without acquiring lifecycle/runtime locks. Queries recheck the original agent policy
@@ -306,8 +308,9 @@ hardware, not real rendering, keyboard/mouse or window close/reopen. New Ubuntu 
 persist an explicit runtime choice. Their first start acquires media,
 prepares the VM, admits it on the main thread and opens the dedicated viewer after hardware
 starts. First start now stages unattended EFI installation and guest account configuration;
-a saved deployment result selects installed-system boot on the next Start. Full installation,
-actual accounts, desktop readiness and guest tools remain unverified. A local Ubuntu Desktop ARM64 ISO is available as a fallback. Prepared,
+a saved deployment result selects installed-system boot on the next Start. Live Ubuntu installation,
+automatic system handoff, desktop rendering and normal-user identity are verified; administrator
+login and complete guest tools remain unfinished. A local Ubuntu Desktop ARM64 ISO is available as a fallback. Prepared,
 unowned records show Ready to start only when operation/runtime locks are free; this does
 not assert an installed or usable desktop. Previous untagged records retain their recovery
 path, and mismatched guest/runtime choices are rejected. New macOS creation and library
@@ -544,8 +547,8 @@ the configured `CODESIGN_IDENTITY` credentials.
 Unattended Ubuntu setup now emits attempt-scoped serial phases for installation,
 deployment completion and failure. The runtime drains console noise without saving guest
 logs, and persists a private bounded journal that status checks can read after restart.
-Deployment completion does not establish desktop readiness; full Ubuntu installation
-remains unverified.
+Deployment completion alone does not establish desktop readiness. An isolated app run also
+verified the installed Ubuntu desktop after automatic handoff.
 
 Launch now selects system boot from a saved deployment result and preserves that intent
 across a failed handoff or app restart. Pressing Start on a completed, stopped installer
@@ -555,13 +558,15 @@ EFI variables. Successful installer shutdown now triggers the same handoff autom
 The library exposes Pause and Resume for owned native Linux and Windows machines, including
 a running Ubuntu installer. Controls wait for acknowledged lifecycle completion, recheck
 authorization and refresh status; paused installation time stays outside the watch timeout.
-Native window rendering and desktop application continuity remain unverified.
+Ubuntu installer and installed-desktop rendering are verified. Desktop application continuity
+across lifecycle operations remains unverified.
 Explicit Stop requests and agent-access revocation suppress it, and runtime generations
 prevent stale callbacks from replacing newer hardware. Paused installation time does not
 consume the automatic watch timeout. Incomplete installations remain on the recovery path.
 A signed diagnostic verified real Linux guest shutdown, hardware replacement and cancellation
-using synthetic disk data and completion markers. Full Ubuntu installation, installed-system
-boot, desktop readiness and the dedicated window behavior remain unverified.
+using synthetic disk data and completion markers. A separate isolated app run verified full
+Ubuntu installation, automatic installed-system boot and desktop rendering. Closing and reopening
+the dedicated window while the installer ran preserved its runtime.
 
 The native VZ core also accepts named shared folders with explicit read-only or read-write
 access. In the VM library, **Add folder…** opens the native folder picker, then lets you name
@@ -577,7 +582,11 @@ Replacing the host path while running may make the share unavailable rather than
 
 New Ubuntu provisioning installs a root-owned mount helper and a boot service. The service
 mounts the `hopper` device at `/mnt/hopper` with `nosuid,nodev`, and skips mounting when no
-shared-folder device exists. A `Shared` link in the normal user's home points to that mount.
+shared-folder device exists. A `Shared` link in the normal user's home points to a guest-local
+index at `/run/hopper-shares`, containing links to each named directory under the mount.
+This avoids file-manager metadata queries against Apple's synthetic virtiofs root, which
+appeared as a broken link in the installed Ubuntu desktop. The index is root-owned and
+bounded to 16 entries; unexpected contents are preserved and rejected.
 The helper checks an existing mount before reuse and refuses a symbolic-link mount point.
 Existing guests do not receive these tools automatically.
 
@@ -598,9 +607,11 @@ target/debug/examples/vzsharing /path/to/uncompressed/Image /path/to/sharing.gz
 ```
 
 The diagnostic identity helper is a Linux ARM64 fixture, not an installed guest tool.
-This does not prove service activation or sharing inside an installed Ubuntu desktop or a
-macOS guest. Existing-guest tool updates, Windows sharing and end-to-end desktop sharing
-verification remain unfinished.
+The installed Ubuntu service activated successfully; the ordinary user read a shared fixture
+and was refused a write to its read-only grant. A local-index prototype also opened that folder
+in Files. The updated provisioning helper still needs verification in a freshly installed
+desktop. Existing-guest tool updates, macOS guest access, Windows sharing and complete desktop
+sharing verification remain unfinished.
 
 Native Linux and macOS guests also have a persisted **Speakers** switch in the VM library.
 It defaults on, requires a stopped VM with hardware ownership released, and applies on the

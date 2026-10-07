@@ -28,7 +28,7 @@ fi
 mount -t tmpfs tmpfs /sys/fs || failed
 /mountshares check || failed
 umount /sys/fs || failed
-mkdir -p /mnt
+mkdir -p /mnt /run
 ln -s /tmp /mnt/hopper || failed
 if /mountshares; then failed; fi
 rm /mnt/hopper || failed
@@ -36,8 +36,29 @@ mkdir /mnt/hopper || failed
 mount -t tmpfs tmpfs /mnt/hopper || failed
 if /mountshares; then failed; fi
 umount /mnt/hopper || failed
+ln -s /tmp /run/hopper-shares || failed
+if /mountshares; then failed; fi
+rm /run/hopper-shares || failed
+mkdir -m 0755 /run/hopper-shares || failed
+chmod 0777 /run/hopper-shares || failed
+if /mountshares; then failed; fi
+chmod 0755 /run/hopper-shares || failed
+printf keep > /run/hopper-shares/foreign || failed
+if /mountshares; then failed; fi
+[ "$(cat /run/hopper-shares/foreign)" = keep ] || failed
+rm /run/hopper-shares/foreign || failed
+ln -s /tmp /run/hopper-shares/writable || failed
+if /mountshares; then failed; fi
+[ "$(readlink /run/hopper-shares/writable)" = /tmp ] || failed
+rm /run/hopper-shares/writable || failed
+ln -s /mnt/hopper/removed /run/hopper-shares/removed || failed
 /mountshares || failed
 /mountshares || failed
+[ ! -L /run/hopper-shares/removed ] || failed
+[ "$(stat -c '%u:%g:%a' /run/hopper-shares)" = 0:0:755 ] || failed
+[ "$(readlink /run/hopper-shares/writable)" = /mnt/hopper/writable ] || failed
+[ "$(readlink /run/hopper-shares/readonly)" = /mnt/hopper/readonly ] || failed
+[ "$(readlink /run/hopper-shares/.hidden)" = /mnt/hopper/.hidden ] || failed
 grep -q 'hopper /mnt/hopper virtiofs .*nosuid.*nodev' /proc/mounts || failed
 [ "$(cat /mnt/hopper/writable/sentinel)" = authorized-writable ] || failed
 [ "$(cat /mnt/hopper/readonly/sentinel)" = authorized-readonly ] || failed
@@ -49,6 +70,11 @@ if cat /mnt/hopper/writable/relative; then failed; fi
   [ "$(id -u)" = 1001 ] && [ "$(id -g)" = 1001 ] || exit 1
   if /mountshares; then exit 1; fi
   grep -q "^CapEff:[[:space:]]*0000000000000000$" /proc/self/status || exit 1
+  ls -l /run/hopper-shares >/dev/null || exit 1
+  [ "$(cat /run/hopper-shares/writable/sentinel)" = authorized-writable ] || exit 1
+  [ "$(cat /run/hopper-shares/readonly/sentinel)" = authorized-readonly ] || exit 1
+  [ "$(cat /run/hopper-shares/.hidden/sentinel)" = authorized-readonly ] || exit 1
+  if ln -s /tmp /run/hopper-shares/injected; then exit 1; fi
   [ "$(cat /mnt/hopper/writable/sentinel)" = authorized-writable ] || exit 1
   [ "$(cat /mnt/hopper/readonly/sentinel)" = authorized-readonly ] || exit 1
   printf guest-user-write > /mnt/hopper/writable/usercreated || exit 1

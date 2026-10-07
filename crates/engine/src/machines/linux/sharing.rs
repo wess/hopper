@@ -19,6 +19,6 @@ pub(super) fn commands() -> Value {
     ["modprobe", "virtiofs"],
     ["systemctl", "daemon-reload"],
     ["systemctl", "enable", "--now", "hopper-shares.service"],
-    ["ln", "-sT", "/mnt/hopper", "/home/hopper/Shared"],
+    ["ln", "-sT", "/run/hopper-shares", "/home/hopper/Shared"],
   ])
 }

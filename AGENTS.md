@@ -31,10 +31,14 @@ Missing grants can be removed without opening their old paths. No MCP host-folde
 is exposed. UI selection, naming, mode persistence across reopen and removal are verified
 against an isolated synthetic profile. Signed Linux/Mac admission probes verify a real shared
 filesystem device and mutation exclusion. New Ubuntu seeds install a root-owned conditional
-virtiofs mount service at /mnt/hopper with nosuid,nodev and a ~/Shared link. The signed
-diagnostic exercises the production helper, no-device skip, repeated mounting and ordinary
-UID access. Installed Ubuntu service activation, existing-guest updates, Mac guest access
-and Windows sharing remain pending.
+virtiofs mount service at /mnt/hopper with nosuid,nodev and a ~/Shared link to a root-owned
+guest-local index at /run/hopper-shares. Named links avoid metadata queries against Apple's
+synthetic virtiofs root, which Files treated as broken in installed Ubuntu. Unknown index
+contents reject without deletion; entries remain bounded to 16. The signed diagnostic exercises
+the production helper, no-device skip, repeated mounting, ordinary UID access and index validation.
+Installed Ubuntu service activation, ordinary-user reads and read-only rejection are verified.
+A local-index prototype opens in Files; updated provisioning in a fresh installed desktop,
+existing-guest updates, Mac guest access and Windows sharing remain pending.
 Native Linux and macOS also persist a private bounded identity-bound speaker setting,
 defaulting on. Changes require operation/runtime exclusion and retired stopped hardware;
 preparation freezes the choice before storage allocation. Enabled hardware has one host-output
@@ -111,8 +115,10 @@ now route View and start/stop through a dedicated native window and the authoriz
 New Ubuntu records explicitly select Virtualization.framework and the app routes first
 start through automatic media acquisition, preparation, main-thread admission and its
 dedicated viewer. First start now stages an EFI installer with unattended boot flags and
-private provisioning media. Complete installation, transition to the installed system
-and guest tools remain unverified. Previous untagged records keep their recovery
+private provisioning media. An isolated signed app profile verified complete official Ubuntu
+acquisition, unattended installation, automatic installed-system transition, desktop rendering
+and normal-user UID 1001 without sudo. Administrator login and guest tools remain unverified.
+Previous untagged records keep their recovery
 path; new macOS creation and library setup use the native path. macOS has SDK restore-image discovery
 and platform configuration with image-specific CPU/RAM minimums, independent
 Mac identity, boot loader and graphics. Its auxiliary directory publishes firmware state
@@ -182,8 +188,9 @@ Ubuntu 24.04.5 desktop ISO when no local installer is supplied. Its private cont
 cache verifies exact size and SHA-256 before exclusive publication or reuse, resumes
 interrupted HTTP ranges and retains the original authorization through hashing/download.
 The production client uses HTTPS with redirects disabled. Low storage rejects downloading
-before VM state creation. Full official acquisition and installation remain unverified on
-this host. Local ISO fallback checks its volume descriptor, which does not prove
+before VM state creation. Full official acquisition, independent checksum verification,
+installation and automatic installed-desktop handoff are verified in an isolated app profile.
+Local ISO fallback checks its volume descriptor, which does not prove
 architecture or official origin. System boot rejects unwritten disks but does not establish installation readiness. Records with native state
 never fall back to the previous helper. Host listing queries admitted VMs on their queue
 for actual state and lifecycle/install busy status, without acquiring operation/runtime

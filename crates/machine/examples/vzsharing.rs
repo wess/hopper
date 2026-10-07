@@ -36,6 +36,7 @@ fn main() -> anyhow::Result<()> {
   let shares = vec![
     Directory::open("writable", &writable, false)?,
     Directory::open("readonly", &readonly, true)?,
+    Directory::open(".hidden", &readonly, true)?,
   ];
   let identity = vz::identity();
   let run_loop = NSRunLoop::currentRunLoop();

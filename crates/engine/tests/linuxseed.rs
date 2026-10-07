@@ -121,7 +121,7 @@ fn native_guest_seed_installs_root_owned_mount_tools_without_changing_login_or_g
       ["modprobe", "virtiofs"],
       ["systemctl", "daemon-reload"],
       ["systemctl", "enable", "--now", "hopper-shares.service"],
-      ["ln", "-sT", "/mnt/hopper", "/home/hopper/Shared"],
+      ["ln", "-sT", "/run/hopper-shares", "/home/hopper/Shared"],
     ])
   );
   assert!(file("/etc/gdm3/custom.conf")["content"]
