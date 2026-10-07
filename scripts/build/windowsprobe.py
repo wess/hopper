@@ -14,6 +14,7 @@ FILES = {
   "viostor": ["viostor.inf", "viostor.cat", "viostor.sys"],
   "vioinput": ["vioinput.inf", "vioinput.cat", "vioinput.sys", "viohidkmdf.sys"],
   "vioscsi": ["vioscsi.inf", "vioscsi.cat", "vioscsi.sys"],
+  "vioserial": ["vioser.inf", "vioser.cat", "vioser.sys"],
 }
 DEPLOYMENT = (
   "partitions.txt", "deploy.cmd", "unattend.xml", "hopperspecialize.ps1", "hopperfirstlogon.ps1",
@@ -53,7 +54,7 @@ def validate(path):
   return hashlib.sha256(data).hexdigest()
 
 
-def bootstrap(deployment=False):
+def bootstrap(deployment=False, serial=False):
   if deployment:
     return (
       "@echo off\r\n"
@@ -67,7 +68,7 @@ def bootstrap(deployment=False):
       ":finished\r\n"
       "cmd /k\r\n"
     )
-  return (
+  commands = (
     "@echo off\r\n"
     "title Hopper native Windows driver diagnostic\r\n"
     "wpeinit\r\n"
@@ -84,11 +85,29 @@ def bootstrap(deployment=False):
     "echo list volume >> X:\\hopper\\disks.txt\r\n"
     "diskpart /s X:\\hopper\\disks.txt\r\n"
     "echo Driver diagnostic finished. No installation was started.\r\n"
-    "cmd /k\r\n"
   )
+  if serial:
+    commands += (
+      "drvload X:\\hopper\\vioserial\\vioser.inf\r\n"
+      "if errorlevel 1 goto serialfailed\r\n"
+      "for /L %%I in (1,1,10) do (\r\n"
+      "  echo hopper native setup channel>\\\\.\\org.hopper.setup\r\n"
+      "  if not errorlevel 1 goto serialdone\r\n"
+      "  ping 127.0.0.1 -n 2 >nul\r\n"
+      ")\r\n"
+      ":serialfailed\r\n"
+      "echo Hopper guest serial diagnostic failed.\r\n"
+      "goto finished\r\n"
+      ":serialdone\r\n"
+      "echo Hopper guest serial diagnostic sent its marker.\r\n"
+      ":finished\r\n"
+    )
+  return commands + "cmd /k\r\n"
 
 
-def build(installer, drivers, out, mkisofs, deployment=None):
+def build(installer, drivers, out, mkisofs, deployment=None, serial=False):
+  if deployment is not None and serial:
+    raise ValueError("Serial diagnostic and deployment are separate boot modes")
   staged = deployment_files(deployment) if deployment is not None else {}
   hashes = {}
   for name, files in FILES.items():
@@ -122,7 +141,7 @@ def build(installer, drivers, out, mkisofs, deployment=None):
     path = payload / name
     path.write_bytes(data)
     path.chmod(0o600)
-  (payload / "drivers.cmd").write_bytes(bootstrap(bool(staged)).encode("ascii"))
+  (payload / "drivers.cmd").write_bytes(bootstrap(bool(staged), serial).encode("ascii"))
   shell = out / "winpeshl.ini"
   shell.write_bytes(
     b"[LaunchApps]\r\n%SYSTEMROOT%\\System32\\cmd.exe, /c X:\\hopper\\drivers.cmd\r\n"
@@ -161,9 +180,10 @@ def main():
   parser.add_argument("--mkisofs", default="mkisofs", help="UDF-capable mkisofs executable")
   parser.add_argument("--deployment", type=Path,
     help="Private generated deployment bundle; only attach a new writable target as disk 0")
+  parser.add_argument("--serial-check", action="store_true", help="Send a bounded guest serial marker")
   args = parser.parse_args()
   build(args.installer.resolve(), args.drivers.resolve(), args.output.resolve(), args.mkisofs,
-    args.deployment)
+    args.deployment, args.serial_check)
 
 
 if __name__ == "__main__":

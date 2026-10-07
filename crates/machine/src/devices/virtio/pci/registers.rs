@@ -92,6 +92,7 @@ pub(super) fn write(
         let mut next = value as u8 & 0x8f | device.common[20] & 64;
         if next & 8 != 0
           && (device.driver_features & VERSION == 0
+            || !backend::accepts(&device.backend, device.driver_features)
             || device.driver_features & !features(device) != 0
             || device.unsupported
             || next & 3 != 3)

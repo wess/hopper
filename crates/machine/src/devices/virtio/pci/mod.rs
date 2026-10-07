@@ -5,7 +5,7 @@ pub mod msix;
 mod registers;
 pub use memory::{memory_read, memory_write, read, write};
 
-use super::{block, gpu, input, queue, scsi};
+use super::{block, console, gpu, input, queue, scsi};
 use crate::{devices::pci::Function, dma::Memory};
 use backend::Backend;
 
@@ -67,6 +67,31 @@ pub fn optical(media: scsi::Optical) -> anyhow::Result<Device> {
   build(Backend::Optical(media))
 }
 
+pub fn serial(port: console::Port) -> anyhow::Result<Device> {
+  build(Backend::Console(port))
+}
+
+pub fn send_serial(
+  device: &mut Device,
+  memory: &mut impl Memory,
+  bytes: &[u8],
+) -> anyhow::Result<()> {
+  let Backend::Console(port) = &mut device.backend else {
+    anyhow::bail!("Device is not a guest serial controller");
+  };
+  console::send(port, bytes)?;
+  notify(device, memory, 0)
+}
+
+pub fn receive_serial(device: &mut Device, memory: &mut impl Memory) -> anyhow::Result<Vec<u8>> {
+  let Backend::Console(port) = &mut device.backend else {
+    anyhow::bail!("Device is not a guest serial controller");
+  };
+  let bytes = console::receive(port);
+  notify(device, memory, 1)?;
+  Ok(bytes)
+}
+
 pub fn optical_stats(device: &Device) -> Option<scsi::Stats> {
   match &device.backend {
     Backend::Optical(media) => Some(scsi::stats(media)),
@@ -119,6 +144,7 @@ fn build(backend: Backend) -> anyhow::Result<Device> {
     Backend::Gpu(_) => (0x1050, 0x038000, 2, 16),
     Backend::Input(_) => (0x1052, 0x098000, 2, 136),
     Backend::Optical(_) => (0x1048, 0x010000, 3, 36),
+    Backend::Console(_) => (0x1043, 0x078000, 4, 12),
   };
   let mut pci = Function::new(0x1af4, id, class, 1)?;
   pci.add_bar(0, 0x4000, true)?;
@@ -239,5 +265,8 @@ fn notify(device: &mut Device, memory: &mut impl Memory, index: usize) -> anyhow
     raise(device, vector);
   }
   interrupt_status(device);
+  if index == 3 && matches!(device.backend, Backend::Console(_)) {
+    notify(device, memory, 2)?;
+  }
   Ok(())
 }

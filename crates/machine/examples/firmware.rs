@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
   use anyhow::{bail, ensure, Context};
   use machine::{
     arm,
-    devices::{flash as nor, pci, serial, virtio::{block, gpu, input as vinput, pci as vpci, scsi}},
+    devices::{flash as nor, pci, serial, virtio::{block, console as channel, gpu, input as vinput, pci as vpci, scsi}},
     acpi, hypervisor as hv, platform, psci, smccc,
   };
   use hv::{registers as regs, secondary};
@@ -36,6 +36,8 @@ fn main() -> anyhow::Result<()> {
   let arguments: Vec<_> = std::env::args().collect();
   let boot_media = arguments.iter().any(|argument| argument == "--boot-media");
   let optical_boot = arguments.iter().any(|argument| argument == "--optical-boot");
+  let serial_check = arguments.iter().any(|argument| argument == "--check-serial");
+  ensure!(!serial_check || boot_media, "Serial check requires guest boot mode");
   ensure!(!optical_boot || boot_media, "Optical boot requires guest boot mode");
   let guest_input = arguments.iter().any(|argument| argument == "--check-guest-input");
   ensure!(!guest_input || boot_media, "Guest input check requires boot-only driver media");
@@ -126,7 +128,9 @@ fn main() -> anyhow::Result<()> {
   let pointer = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Tablet))?) } else { None };
   let target_disk = target_path.map(|path| target::create(std::path::Path::new(path))).transpose()?;
   let optical = optical_path.map(|path| vpci::optical(scsi::open(std::path::Path::new(path))?)).transpose()?;
-  let mut devices = [disk, graphics, keyboard, pointer, target_disk, optical];
+  let serial_port = if serial_check { Some(vpci::serial(channel::create("org.hopper.setup")?)?) } else { None };
+  let mut devices = [disk, graphics, keyboard, pointer, target_disk, optical, serial_port];
+  let mut received_serial = Vec::new();
   ensure!(!boot_media || devices[0].is_some(), "Media boot requires an installer image");
   ensure!(!boot_media || (!check_input && !check_storage), "Media boot and shell checks are separate modes");
   let mut media_key = None;
@@ -139,7 +143,7 @@ fn main() -> anyhow::Result<()> {
   let mut pci_reads = 0usize;
   let mut handed_off = false;
   let mut firmware_optical = None;
-  let mut guest_pci = [[0usize; 2]; 6];
+  let mut guest_pci = [[0usize; 2]; 7];
   let mut guest_bus = [0usize; 2];
   let mut listed_acpi = false;
   let mut seen_acpi = [false; 5];
@@ -174,6 +178,12 @@ fn main() -> anyhow::Result<()> {
     } else { None };
     let boot = hv::paced(&mut cpu, std::time::Duration::from_secs(deadline), std::time::Duration::from_millis(20), |cpu| {
     for _ in 0..2000000 {
+      if let Some(device) = &mut devices[6] {
+        let bytes = vpci::receive_serial(device, &mut ram)?;
+        ensure!(received_serial.len() + bytes.len() <= 4096, "Serial diagnostic output exceeded its bound");
+        received_serial.extend(bytes);
+        messages += interrupts::deliver(&gic, 6, device)?;
+      }
       if (guest_input || target_path.is_some() || optical_check || driver_check) && !guest_sent && handed_off && start.elapsed().as_secs() >= 35
         && vpci::read(devices[2].as_mut().context("Missing keyboard")?, 20, 1)? == 15 {
         if driver_check {
@@ -442,6 +452,10 @@ fn main() -> anyhow::Result<()> {
   });
   eprintln!("Firmware serviced {pulses} host polling exits");
   eprintln!("Delivered {messages} native MSI messages");
+  if serial_check {
+    eprintln!("Received {} guest serial bytes; marker verified: {}", received_serial.len(),
+      received_serial == b"hopper native setup channel\r\n");
+  }
   if boot_media && boot.is_err() {
     fault::report(&cpu)?;
   }
