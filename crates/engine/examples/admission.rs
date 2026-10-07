@@ -48,7 +48,29 @@ fn main() -> anyhow::Result<()> {
     .build()?;
   let (client, mut owner) = vz::channel();
   let service = Arc::new(Service::new(manager.clone(), client));
+  let plan = engine::machines::linux::provision::prepare(
+    id,
+    &engine::machines::linux::provision::accounts(),
+  )?;
+  let seed_path = || -> anyhow::Result<std::path::PathBuf> {
+    let seeds = std::fs::read_dir(manager.root.join("vz"))?
+      .collect::<Result<Vec<_>, _>>()?
+      .into_iter()
+      .filter(|entry| entry.file_name().to_string_lossy().starts_with("seed"))
+      .collect::<Vec<_>>();
+    ensure!(seeds.len() == 1, "Expected one owned provisioning seed");
+    Ok(seeds[0].path().join("seed"))
+  };
   let prepared = runtime.block_on(service.prepare_linux(id, Actor::Person, Stage::Installer))?;
+  let prepared = prepared.provision(&plan)?;
+  let cancelled_seed = seed_path()?;
+  drop(prepared);
+  ensure!(
+    !cancelled_seed.exists(),
+    "Cancelled preparation retained its seed"
+  );
+  let prepared = runtime.block_on(service.prepare_linux(id, Actor::Person, Stage::Installer))?;
+  let prepared = prepared.provision(&plan)?;
   let admission = prepared.admit(main, &mut owner)?;
   let target = manager.root.join("vz").join(id);
   let identity = std::fs::read(target.join("identity"))?;
@@ -165,6 +187,7 @@ fn main() -> anyhow::Result<()> {
   FileExt::unlock(&lock)?;
   let variables = std::fs::read(target.join("variables"))?;
   let prepared = runtime.block_on(service.prepare_linux(id, Actor::Person, Stage::Installer))?;
+  let prepared = prepared.provision(&plan)?;
   let admission = prepared.admit(main, &mut owner)?;
   drop(admission);
   ensure!(
@@ -180,11 +203,20 @@ fn main() -> anyhow::Result<()> {
   ensure!(retained.is_some(), "Retry display lacks hardware");
   drop(retained);
   drop(owner);
+  let seed = seed_path()?;
+  ensure!(
+    seed.exists(),
+    "A surviving display lost its provisioning seed"
+  );
   ensure!(
     lock.try_lock_exclusive().is_err(),
     "A surviving display lost runtime ownership"
   );
   drop(display);
+  ensure!(
+    !seed.exists(),
+    "Released hardware retained its provisioning seed"
+  );
   lock.try_lock_exclusive()?;
   FileExt::unlock(&lock)?;
   let rows = runtime.block_on(manager.list_non_windows(Actor::Person))?;
@@ -195,6 +227,7 @@ fn main() -> anyhow::Result<()> {
   let (client, mut owner) = vz::channel();
   let service = Service::new(manager.clone(), client);
   let prepared = runtime.block_on(service.prepare_linux(id, Actor::Person, Stage::Installer))?;
+  let prepared = prepared.provision(&plan)?;
   drop(prepared.admit(main, &mut owner)?);
   ensure!(
     std::fs::read(target.join("identity"))? == identity,
@@ -205,7 +238,7 @@ fn main() -> anyhow::Result<()> {
     !manager.root.join("lima").exists(),
     "Native admission must not invoke the previous helper"
   );
-  println!("Native Linux admission, persisted identity/EFI reuse, runtime ownership, authorized status, native creation, repeated admission, exclusive display lifetime and agent lifecycle verified; no desktop installation was performed");
+  println!("Native Linux admission, persisted identity/EFI reuse, provisioning seed cancellation/lifetime, runtime ownership, authorized status, native creation, repeated admission, exclusive display lifetime and agent lifecycle verified; no desktop installation was performed");
   Ok(())
 }
 

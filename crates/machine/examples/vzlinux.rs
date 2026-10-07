@@ -44,6 +44,7 @@ fn main() -> anyhow::Result<()> {
     },
     disk,
     installer: None,
+    seed: None,
     network: None,
     console: Some(console),
   };

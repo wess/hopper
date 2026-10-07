@@ -94,6 +94,13 @@ Its local unicast MAC derives from the persisted generic identity with the versi
 also supports a disconnected device configuration, but app settings and live switching
 remain pending. A signed Alpine diagnostic verifies guest DHCP, DNS, a public metadata
 download and a disconnected link. This does not prove Ubuntu installation or guest tools.
+Ubuntu provisioning now builds bounded ISO9660/Joliet NoCloud media entirely in Rust.
+Plans contain separate normal/admin account hashes, an explicit guest disk target and
+normal-user desktop login configuration. Linux credentials use `machines.linux` keychain
+keys; existing `machines.windows` keys stay unchanged. Prepared VMs can attach private
+read-only seed media. Cancellation cleans unadmitted seeds; admitted hardware, callbacks
+and surviving displays retain seed lifetime with runtime ownership. Actual autoinstall
+boot selection, account creation, guest tools and desktop readiness remain unverified.
 `Machine.runtime` is optional for previous JSON records; new Ubuntu/Windows records
 explicitly select virtualization/hypervisor. Reject incompatible guest/runtime combinations
 and native records must never invoke previous helpers. Original runtime choice is captured

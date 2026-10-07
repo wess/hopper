@@ -11,8 +11,8 @@ fn main() -> anyhow::Result<()> {
 
   let args: Vec<_> = std::env::args_os().skip(1).collect();
   ensure!(
-    args.len() == 2,
-    "Provide diagnostic ARM64 kernel and network initramfs"
+    (2..=3).contains(&args.len()),
+    "Provide diagnostic ARM64 kernel, network initramfs and optional NoCloud seed"
   );
   let main = MainThreadMarker::new().context("VZ probe requires the main thread")?;
   let root = tempfile::tempdir()?;
@@ -44,10 +44,14 @@ fn main() -> anyhow::Result<()> {
       boot: Boot::Kernel {
         kernel: args[0].clone().into(),
         initramfs: Some(args[1].clone().into()),
-        command_line: format!("console=hvc0 rdinit=/init hopper.network={option}"),
+        command_line: format!(
+          "console=hvc0 rdinit=/init hopper.network={option} hopper.seed={}",
+          if args.len() == 3 { 1 } else { 0 }
+        ),
       },
       disk: disk.clone(),
       installer: None,
+      seed: args.get(2).map(|path| path.clone().into()),
       network: Some(mode),
       console: Some(console),
     };
@@ -74,7 +78,7 @@ fn main() -> anyhow::Result<()> {
           "Serial output exceeds bounds"
         );
         let text = std::fs::read_to_string(&output)?;
-        if text.contains(marker) {
+        if text.contains(marker) && (args.len() == 2 || text.contains("HOPPER_SEED_OK")) {
           return Ok(());
         }
         if text.contains("HOPPER_NETWORK_FAILED") || Instant::now() >= deadline {
@@ -92,6 +96,9 @@ fn main() -> anyhow::Result<()> {
     let stopped = wait(vz::transition(&vm, Action::Stop)?);
     result?;
     stopped?;
+    if args.len() == 3 {
+      println!("Read-only NoCloud seed files and account configuration verified in the guest");
+    }
     println!("Guest network verified: {mode:?}");
   }
   println!("NAT DHCP, DNS and public download plus disconnected guest link verified; no OS installation was performed");

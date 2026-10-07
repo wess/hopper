@@ -26,7 +26,9 @@ struct Memory {
 impl CredentialBuilderApi for Builder {
   fn build(&self, _: Option<&str>, service: &str, user: &str) -> keyring::Result<Box<Credential>> {
     assert_eq!(service, "io.wess.hopper");
-    assert!(user.starts_with("machines.windows."));
+    assert!(["windows", "linux", "macos"]
+      .iter()
+      .any(|platform| user.starts_with(&format!("machines.{platform}."))));
     self.0.opens.fetch_add(1, Ordering::SeqCst);
     Ok(Box::new(Memory {
       key: user.to_string(),

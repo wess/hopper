@@ -1,6 +1,8 @@
 pub mod download;
 mod files;
+pub mod provision;
 pub mod records;
+pub mod seed;
 
 use anyhow::ensure;
 use machine::vz::queue::Check;

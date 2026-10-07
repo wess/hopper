@@ -23,6 +23,7 @@ pub struct Prepared {
   target: PathBuf,
   temporary: Option<tempfile::TempDir>,
   installer: Option<PathBuf>,
+  seed: Option<tempfile::TempDir>,
   runtime: Arc<store::lock::Lease>,
   check: Check,
   client: Client,
@@ -120,6 +121,7 @@ pub(super) fn prepare(
     target,
     temporary,
     installer,
+    seed: None,
     runtime,
     check,
     client,
@@ -127,6 +129,32 @@ pub(super) fn prepare(
 }
 
 impl Prepared {
+  pub fn provision(
+    mut self,
+    plan: &crate::machines::linux::provision::Plan,
+  ) -> anyhow::Result<Self> {
+    (self.check)()?;
+    ensure!(
+      self.installer.is_some(),
+      "Provisioning media requires an installer boot"
+    );
+    ensure!(
+      self.seed.is_none(),
+      "Provisioning media is already attached"
+    );
+    let image = crate::machines::linux::seed::image(plan)?;
+    let directory = tempfile::Builder::new()
+      .prefix("seed")
+      .tempdir_in(self.target.parent().context("VZ state needs a parent")?)?;
+    std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
+    let mut file = files::write(&directory.path().join("seed"))?;
+    file.write_all(&image)?;
+    file.sync_all()?;
+    (self.check)()?;
+    self.seed = Some(directory);
+    Ok(self)
+  }
+
   pub fn admit(mut self, main: MainThreadMarker, owner: &mut Owner) -> anyhow::Result<Admission> {
     (self.check)()?;
     if let Some(temporary) = self.temporary.take() {
@@ -158,11 +186,15 @@ impl Prepared {
       },
       disk: self.target.join("disk"),
       installer: self.installer,
+      seed: self
+        .seed
+        .as_ref()
+        .map(|directory| directory.path().join("seed")),
       network: Some(vz::network::Mode::Nat),
       console: None,
     };
     let mut vm = vz::create(main, &boot)?;
-    vz::retain(&mut vm, self.runtime)?;
+    vz::retain(&mut vm, Arc::new((self.runtime, self.seed)))?;
     (self.check)()?;
     owner.insert(&self.machine.id, vm)?;
     Ok(Admission {

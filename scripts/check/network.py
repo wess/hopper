@@ -6,7 +6,7 @@ import pathlib
 import sys
 
 
-INIT = b'''#!/bin/sh
+INIT = rb'''#!/bin/sh
 export PATH=/usr/bin:/bin:/usr/sbin:/sbin
 /usr/bin/busybox --install -s /usr/bin
 mount -t proc proc /proc
@@ -18,6 +18,19 @@ failed() {
   while :; do sleep 60; done
 }
 modprobe virtio_net || failed
+if grep -q 'hopper.seed=1' /proc/cmdline; then
+  modprobe virtio_blk || failed
+  modprobe isofs || failed
+  mkdir -p /media/seed
+  mount -t iso9660 -o ro /dev/vdb /media/seed || failed
+  [ "$(cat /sys/class/block/vdb/ro)" = 1 ] || failed
+  grep -q '^#cloud-config' /media/seed/user-data || failed
+  grep -q 'instance-id: hopper-' /media/seed/meta-data || failed
+  grep -q 'username: hopperadmin' /media/seed/user-data || failed
+  grep -q 'name: hopper' /media/seed/user-data || failed
+  grep -q '\$6\$rounds=100000\$' /media/seed/user-data || failed
+  echo HOPPER_SEED_OK
+fi
 iface=
 for device in /sys/class/net/*; do
   [ "${device##*/}" = lo ] || iface=${device##*/}

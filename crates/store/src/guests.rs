@@ -15,16 +15,29 @@ pub struct Slot {
 }
 
 pub fn key(id: &str) -> Result<String> {
+  key_for(id, model::GuestOs::Windows)
+}
+
+pub fn key_for(id: &str, guest: model::GuestOs) -> Result<String> {
   if id.len() != 36 {
     return Err(Error::new(ErrorKind::InvalidInput, "Invalid VM id"));
   }
   let id =
     uuid::Uuid::parse_str(id).map_err(|_| Error::new(ErrorKind::InvalidInput, "Invalid VM id"))?;
-  Ok(format!("machines.windows.{id}.accounts"))
+  let platform = match guest {
+    model::GuestOs::Linux => "linux",
+    model::GuestOs::Macos => "macos",
+    model::GuestOs::Windows => "windows",
+  };
+  Ok(format!("machines.{platform}.{id}.accounts"))
 }
 
 pub fn open(id: &str) -> Result<Slot> {
-  let key = key(id)?;
+  open_for(id, model::GuestOs::Windows)
+}
+
+pub fn open_for(id: &str, guest: model::GuestOs) -> Result<Slot> {
+  let key = key_for(id, guest)?;
   let entry = keyring::Entry::new("io.wess.hopper", &key)
     .map_err(|_| Error::other("Guest credential store is unavailable"))?;
   Ok(Slot { entry })

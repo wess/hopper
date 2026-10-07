@@ -44,6 +44,7 @@ fn main() -> anyhow::Result<()> {
     boot: vz::Boot::Efi { variables },
     disk,
     installer: None,
+    seed: None,
     network: None,
     console: None,
   };

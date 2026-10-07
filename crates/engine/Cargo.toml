@@ -26,6 +26,7 @@ tempfile = { workspace = true }
 quick-xml = { version = "0.41", features = ["serialize"] }
 sha1_smol = "1"
 sha2 = "0.10"
+sha-crypt = "0.5"
 libc = "0.2"
 uuid = { workspace = true }
 

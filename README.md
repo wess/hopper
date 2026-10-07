@@ -273,6 +273,22 @@ codesign --verify --strict target/debug/examples/vznetwork
 target/debug/examples/vznetwork /path/to/uncompressed/Image /path/to/network.gz
 ```
 
+Ubuntu provisioning plans now generate separate normal and administrator password hashes
+and NoCloud `user-data`/`meta-data` in a bounded ISO9660/Joliet image. Linux keychain entries
+are separate from Windows entries, and retries reuse generated guest credentials. Prepared
+native VMs can attach this seed read-only; its private files live until hardware and pending
+callbacks release ownership. The signed diagnostic also verifies mounting the seed and
+reading its configuration in a real guest:
+
+```sh
+cargo run -p engine --example linuxseed -- /absolute/path/to/newseed.iso
+target/debug/examples/vznetwork /path/to/uncompressed/Image /path/to/network.gz /absolute/path/to/newseed.iso
+```
+
+The app does not yet pass the unattended installation boot flag or attach this provisioning
+seed automatically. Seed delivery and generated account plans do not prove installed users,
+automatic Ubuntu installation, guest tools or a usable desktop.
+
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into
 `native/build/firmware/windows.fd` and `variables.fd`, with a provenance manifest

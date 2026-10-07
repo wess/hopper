@@ -34,6 +34,7 @@ pub struct Linux {
   pub boot: Boot,
   pub disk: PathBuf,
   pub installer: Option<PathBuf>,
+  pub seed: Option<PathBuf>,
   pub network: Option<network::Mode>,
   pub console: Option<std::fs::File>,
 }

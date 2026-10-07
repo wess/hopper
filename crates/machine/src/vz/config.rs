@@ -34,9 +34,17 @@ pub(super) fn linux(boot: &Linux) -> anyhow::Result<Retained<VZVirtualMachineCon
       .as_deref()
       .map(|path| storage(path, true))
       .transpose()?;
+    let seed = boot
+      .seed
+      .as_deref()
+      .map(|path| storage(path, true))
+      .transpose()?;
     let mut disks: Vec<&VZStorageDeviceConfiguration> = vec![&disk];
     if let Some(media) = &media {
       disks.push(media);
+    }
+    if let Some(seed) = &seed {
+      disks.push(seed);
     }
     config.setStorageDevices(&NSArray::from_slice(&disks));
     let graphics = VZVirtioGraphicsDeviceConfiguration::new();
