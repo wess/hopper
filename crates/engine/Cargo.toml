@@ -33,4 +33,5 @@ apple = { workspace = true }
 
 [dev-dependencies]
 keyring = { workspace = true }
+machine = { path = "../machine" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

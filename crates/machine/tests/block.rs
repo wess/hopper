@@ -5,6 +5,7 @@ use disk::image;
 
 use machine::devices::virtio::{block, queue};
 use std::fs::{self, OpenOptions};
+use std::io::{Read, Seek, SeekFrom};
 use support::{descriptor, Ram, BASE};
 
 fn request(kind: u32, sector: u64, length: u32) -> (Ram, queue::Queue, queue::Chain) {
@@ -125,4 +126,27 @@ fn malformed_disk_geometry_and_requests_fail_before_io() {
   chain.buffers[0].span.length = 0;
   assert!(block::execute(&mut disk, &mut ram, &chain).is_err());
   assert_eq!(ram.0[0x4000], 0xff);
+}
+
+#[test]
+fn owned_backing_file_survives_path_replacement_without_writing_the_replacement() {
+  let original = image(&[b'a'; 512]);
+  let replacement = image(&[b'r'; 512]);
+  let file = OpenOptions::new()
+    .read(true)
+    .write(true)
+    .open(&original.0)
+    .unwrap();
+  let mut retained = file.try_clone().unwrap();
+  let mut disk = block::attach(file, false, [b'd'; 20]).unwrap();
+  fs::rename(&replacement.0, &original.0).unwrap();
+  let (mut ram, _, chain) = request(1, 0, 512);
+  ram.0[0x2000..0x2200].fill(b'z');
+  block::execute(&mut disk, &mut ram, &chain).unwrap();
+  assert_eq!(ram.0[0x4000], 0);
+  assert_eq!(fs::read(&original.0).unwrap(), vec![b'r'; 512]);
+  retained.seek(SeekFrom::Start(0)).unwrap();
+  let mut bytes = Vec::new();
+  retained.read_to_end(&mut bytes).unwrap();
+  assert_eq!(bytes, vec![b'z'; 512]);
 }

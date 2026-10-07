@@ -22,6 +22,12 @@ pub fn open(path: &Path, readonly: bool, id: [u8; 20]) -> anyhow::Result<Disk> {
     .write(!readonly)
     .open(path)
     .with_context(|| format!("Open VM disk {}", path.display()))?;
+  attach(file, readonly, id)
+}
+
+/// retain the installer's already-created file and lock without reopening its pathname.
+pub fn attach(file: File, readonly: bool, id: [u8; 20]) -> anyhow::Result<Disk> {
+  ensure!(id.is_ascii(), "Virtio disk identity must be ASCII");
   let metadata = file.metadata()?;
   ensure!(
     metadata.is_file() && metadata.len() > 0 && metadata.len().is_multiple_of(512),

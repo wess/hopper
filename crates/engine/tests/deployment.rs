@@ -87,6 +87,26 @@ fn invalid_plan_never_creates_a_disk() {
 }
 
 #[test]
+fn native_disk_handoff_keeps_the_installer_lock_until_the_device_is_dropped() {
+  let root = tempfile::tempdir().unwrap();
+  let path = root.path().join("disk");
+  let file = deploy::create_disk(&path, &layout()).unwrap();
+  let disk = machine::devices::virtio::block::attach(file, false, [b'd'; 20]).unwrap();
+  let peer = std::fs::OpenOptions::new()
+    .read(true)
+    .write(true)
+    .open(&path)
+    .unwrap();
+  assert!(fs2::FileExt::try_lock_exclusive(&peer).is_err());
+  assert_eq!(
+    machine::devices::virtio::block::capacity(&disk),
+    64 * 1024 * 1024 * 1024 / 512
+  );
+  drop(disk);
+  fs2::FileExt::try_lock_exclusive(&peer).unwrap();
+}
+
+#[test]
 fn scripts_target_the_new_disk_and_stop_before_readiness_on_failure() {
   let plan = deploy::prepare(&layout()).unwrap();
   assert!(plan
