@@ -18,6 +18,13 @@ fn response(status: &str, headers: &str, data: &str) -> String {
 }
 
 async fn server(responses: Vec<String>) -> (String, tokio::task::JoinHandle<Vec<String>>) {
+  server_with_ack(responses, None).await
+}
+
+async fn server_with_ack(
+  responses: Vec<String>,
+  mut accepted: Option<tokio::sync::watch::Receiver<Phase>>,
+) -> (String, tokio::task::JoinHandle<Vec<String>>) {
   use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -38,6 +45,18 @@ async fn server(responses: Vec<String>) -> (String, tokio::task::JoinHandle<Vec<
       }
       requests.push(String::from_utf8(request).unwrap());
       socket.write_all(response.as_bytes()).await.unwrap();
+      if let Some(mut accepted) = accepted.take() {
+        tokio::time::timeout(Duration::from_secs(5), async {
+          loop {
+            if matches!(*accepted.borrow(), Phase::Downloading { bytes: 4, .. }) {
+              break;
+            }
+            accepted.changed().await.unwrap();
+          }
+        })
+        .await
+        .unwrap();
+      }
       socket.shutdown().await.unwrap();
     }
     requests
@@ -78,21 +97,24 @@ fn entry(root: &std::path::Path) -> std::path::PathBuf {
 #[tokio::test]
 async fn interrupted_download_resumes_with_frozen_etag_and_rechecks_cached_bytes() {
   let root = cache();
-  let (url, task) = server(vec![
-    response(
-      "200 OK",
-      "Content-Length: 10\r\nETag: \"fixture\"\r\n",
-      "0123",
-    ),
-    response(
-      "206 Partial Content",
-      "Content-Length: 6\r\nContent-Range: bytes 4-9/10\r\nETag: \"fixture\"\r\n",
-      "456789",
-    ),
-  ])
+  let (progress, status) = tokio::sync::watch::channel(Phase::Inspecting);
+  let (url, task) = server_with_ack(
+    vec![
+      response(
+        "200 OK",
+        "Content-Length: 10\r\nETag: \"fixture\"\r\n",
+        "0123",
+      ),
+      response(
+        "206 Partial Content",
+        "Content-Length: 6\r\nContent-Range: bytes 4-9/10\r\nETag: \"fixture\"\r\n",
+        "456789",
+      ),
+    ],
+    Some(status.clone()),
+  )
   .await;
   let source = source(url);
-  let (progress, status) = tokio::sync::watch::channel(Phase::Inspecting);
   assert!(
     download::fetch(&client(), &source, root.path(), check(), &progress)
       .await
@@ -144,21 +166,24 @@ async fn changed_etag_and_inexact_ranges_preserve_partial_media() {
     "ETag: \"fixture\"\r\nContent-Range: bytes 3-8/10\r\n",
   ] {
     let root = cache();
-    let (url, task) = server(vec![
-      response(
-        "200 OK",
-        "Content-Length: 10\r\nETag: \"fixture\"\r\n",
-        "0123",
-      ),
-      response(
-        "206 Partial Content",
-        &format!("Content-Length: 6\r\n{headers}"),
-        "456789",
-      ),
-    ])
+    let (progress, status) = tokio::sync::watch::channel(Phase::Inspecting);
+    let (url, task) = server_with_ack(
+      vec![
+        response(
+          "200 OK",
+          "Content-Length: 10\r\nETag: \"fixture\"\r\n",
+          "0123",
+        ),
+        response(
+          "206 Partial Content",
+          &format!("Content-Length: 6\r\n{headers}"),
+          "456789",
+        ),
+      ],
+      Some(status),
+    )
     .await;
     let source = source(url);
-    let (progress, _) = tokio::sync::watch::channel(Phase::Inspecting);
     assert!(
       download::fetch(&client(), &source, root.path(), check(), &progress)
         .await

@@ -6,6 +6,9 @@ Repository guidance for agent sessions.
 
 User VMs are managed by `engine::machines`, separate from the managed Docker VM.
 The app routes Windows ARM64 and new Ubuntu VMs through owned native runtimes.
+QEMU and swtpm are not bundled or launched. Untagged Windows records require explicit
+migration even without a legacy instance directory; preserve their records and disks.
+The previous helper must not operate on either native or legacy Windows records.
 New macOS creation persists native VZ records. Library Start discovers and downloads supported
 official restore media when no local image is selected, then inspects it, prepares hardware, opens its dedicated viewer and installs through
 the owned queue. Creation offers a local restore picker and automatic acquisition; profile

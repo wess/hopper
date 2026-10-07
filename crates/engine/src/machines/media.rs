@@ -103,7 +103,7 @@ async fn command(program: &Path, args: &[&str]) -> anyhow::Result<std::process::
 }
 
 fn tool(name: &str) -> anyhow::Result<PathBuf> {
-    super::cli::runtime_paths()
+    super::cli::media_paths()
         .iter()
         .map(|p| p.join(name))
         .find(|p| p.is_file())

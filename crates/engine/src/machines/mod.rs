@@ -1,4 +1,4 @@
-//! User VMs have their own Lima home, independent of the Docker engine.
+//! Desktop VMs use owned runtimes, independent of the Docker engine.
 
 mod cli;
 pub mod config;
@@ -6,7 +6,6 @@ mod input;
 mod macos;
 pub mod media;
 pub mod native;
-mod qmp;
 mod records;
 mod snapshots;
 pub mod windows;
@@ -86,7 +85,11 @@ impl Machines {
     }
 
     fn cli_for(&self, id: &str) -> anyhow::Result<cli::Cli> {
-        if self.machine(id, Actor::Person)?.runtime == Some(model::MachineRuntime::Hypervisor) {
+        let machine = self.machine(id, Actor::Person)?;
+        if machine.guest == model::GuestOs::Windows && machine.runtime != Some(model::MachineRuntime::Hypervisor) {
+            bail!("Migration required; the previous Windows disk is preserved");
+        }
+        if machine.runtime == Some(model::MachineRuntime::Hypervisor) {
             bail!("This VM uses the native runtime; the previous helper cannot control it");
         }
         if self.native_vz(id)? {
@@ -179,6 +182,15 @@ impl Machines {
         let mut previous = Vec::new();
         for machine in records {
             self.machine(&machine.id, actor)?;
+            if machine.guest == model::GuestOs::Windows {
+                native.push(MachineStatus {
+                    state: if machine.runtime == Some(model::MachineRuntime::Hypervisor) { "Unavailable" } else { "Migration required" }.into(),
+                    busy: false,
+                    progress: Some("Use the native VM registry; previous Windows disks are preserved for migration".into()),
+                    machine,
+                });
+                continue;
+            }
             if self.native_vz(&machine.id)? {
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 if machine.runtime == Some(model::MachineRuntime::Virtualization) {
@@ -255,45 +267,16 @@ impl Machines {
         if matches!(request.profile.as_str(), "ubuntu" | "macos") {
             return vz::records::create(self, request);
         }
-        if request.name.trim().is_empty() || request.name.len() > 100 {
-            bail!("Choose a VM name of 1–100 characters");
+        if request.profile == "windows" {
+            return native::sessions::Sessions::new(self.clone()).create_windows(request);
         }
-        let profile = self
-            .profiles()
-            .into_iter()
-            .find(|p| p.id == request.profile)
-            .context("Unknown VM profile")?;
-        let machine = Machine {
-            id: model::new_uuid(),
-            name: request.name.trim().into(),
-            guest: profile.guest,
-            profile: profile.id,
-            resources: request.resources,
-            installer: request.installer,
-            agent_access: request.agent_access,
-            agent_generation: 0,
-            runtime: None,
-        };
-        let yaml = config::render(&machine)?;
-        let _lock = self.lock(&machine.id)?;
-        let cli = self.cli()?;
-        std::fs::create_dir_all(&cli.home)?;
-        let config_dir = self.root.join("configs");
-        std::fs::create_dir_all(&config_dir)?;
-        let path = config_dir.join(format!("{}.yaml", machine.id));
-        std::fs::write(&path, yaml)?;
-        store::json::write(&self.record(&machine.id)?, &machine)?;
-        Ok(machine)
+        bail!("Unknown VM profile")
     }
 
     pub async fn start(&self, id: &str, actor: Actor) -> anyhow::Result<()> {
         let _lock = self.lock(id)?;
-        let mut machine = self.machine(id, actor)?;
-        if machine.guest == model::GuestOs::Windows && !cli::windows_ready() {
-            bail!(
-                "The Windows runtime is missing. Hopper needs QEMU and swtpm bundled with the app."
-            );
-        }
+        self.machine(id, actor)?;
+        let cli = self.cli_for(id)?;
         let progress = self.root.join("progress").join(id);
         std::fs::create_dir_all(progress.parent().unwrap())?;
         struct Progress(PathBuf);
@@ -303,23 +286,6 @@ impl Machines {
             }
         }
         let _progress = Progress(progress.clone());
-        let cli = self.cli_for(id)?;
-        if !cli.home.join(id).exists()
-            && machine.guest == model::GuestOs::Windows
-            && machine.installer.is_none()
-        {
-            machine.installer = Some(
-                media::prepare(&self.root, &progress)
-                    .await?
-                    .to_string_lossy()
-                    .into_owned(),
-            );
-            std::fs::write(
-                self.root.join("configs").join(format!("{id}.yaml")),
-                config::render(&machine)?,
-            )?;
-            store::json::write(&self.record(id)?, &machine)?;
-        }
         std::fs::write(&progress, "Starting VM and preparing its desktop…")?;
         if !cli.home.join(id).exists() {
             let path = self.root.join("configs").join(format!("{id}.yaml"));
@@ -335,38 +301,12 @@ impl Machines {
             )
             .await?;
         }
-        let windows = machine.guest == model::GuestOs::Windows;
-        let timeout = if windows {
-            "--timeout=15s"
-        } else {
-            "--timeout=30m"
-        };
-        let result = cli
-            .run(
-                id,
-                &["start".into(), id.into(), timeout.into()],
-                Duration::from_secs(31 * 60),
-            )
-            .await;
-        if result.is_err() && windows {
-            // Windows setup can wait for user input before SSH becomes available.
-            // A live display is enough to return control to the viewer and agents.
-            if qmp::execute(
-                &cli.home.join(id).join("qmp.sock"),
-                serde_json::json!({"execute":"query-status"}),
-            )
-            .await
-            .is_ok()
-            {
-                return Ok(());
-            }
-        }
-        result
+        cli.run(id, &["start".into(), id.into(), "--timeout=30m".into()], Duration::from_secs(31 * 60)).await
     }
 
     pub async fn viewer_pid(&self, id: &str) -> anyhow::Result<i32> {
         let _lock = self.lock(id)?;
-        let machine = self.machine(id, Actor::Person)?;
+        self.machine(id, Actor::Person)?;
         let output = self
             .cli_for(id)?
             .output(&["list".into(), "--json".into()], Duration::from_secs(10))
@@ -381,14 +321,8 @@ impl Machines {
         if !running {
             bail!("Start this VM before opening its viewer");
         }
-        let file = if machine.guest == model::GuestOs::Windows {
-            "qemu.pid"
-        } else {
-            "vz.pid"
-        };
-        let pid: i32 = std::fs::read_to_string(self.root.join("lima").join(id).join(file))?
-            .trim()
-            .parse()?;
+        let pid: i32 = std::fs::read_to_string(self.root.join("lima").join(id).join("vz.pid"))?
+            .trim().parse()?;
         if pid <= 0 {
             bail!("Invalid VM viewer process");
         }
@@ -426,9 +360,6 @@ impl Machines {
         )?;
         let machine = self.machine(id, actor)?;
         let cli = self.cli_for(id)?;
-        if machine.guest == model::GuestOs::Windows {
-            return qmp::screenshot(&cli.home.join(id).join("qmp.sock"), path).await;
-        }
         if machine.guest == model::GuestOs::Linux {
             let guest = format!("/tmp/hopper-screen-{}.png", model::new_uuid());
             cli.output(&["shell".into(),id.into(),"--".into(),"sh".into(),"-c".into(),"export DISPLAY=:0 XAUTHORITY=\"$HOME/.Xauthority\"; exec scrot --overwrite \"$1\"".into(),"hopper-screen".into(),guest.clone()],Duration::from_secs(15)).await?;

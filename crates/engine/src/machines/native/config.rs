@@ -133,6 +133,10 @@ pub fn prepare(
 
 pub(crate) fn validate(machine: &model::Machine) -> anyhow::Result<()> {
   ensure!(
+    machine.runtime == Some(model::MachineRuntime::Hypervisor),
+    "Windows VM needs migration to the native runtime; its disk is preserved"
+  );
+  ensure!(
     machine.guest == model::GuestOs::Windows,
     "Native Windows startup needs a Windows VM"
   );

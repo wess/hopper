@@ -38,7 +38,7 @@ impl Fixture {
       },
       agent_access: true,
       agent_generation: 0,
-      runtime: None,
+      runtime: Some(model::MachineRuntime::Hypervisor),
       installer: None,
     };
     store::json::write(

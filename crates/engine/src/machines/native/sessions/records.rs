@@ -63,7 +63,9 @@ impl Sessions {
         continue;
       }
       manager.machine(&machine.id, actor)?;
-      if manager.root.join("lima").join(&machine.id).try_exists()? {
+      if machine.runtime != Some(model::MachineRuntime::Hypervisor)
+        || manager.root.join("lima").join(&machine.id).try_exists()?
+      {
         rows.push(MachineStatus {
           machine,
           state: "Migration required".into(),

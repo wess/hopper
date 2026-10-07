@@ -143,19 +143,31 @@ pub(super) async fn fetch(
       written = 0;
       digest = Sha256::new();
     }
-    while let Some(bytes) = super::checked(&check, response.chunk()).await?? {
-      check()?;
-      ensure!(
-        bytes.len() as u64 <= source.size - written,
-        "Restore download exceeds its expected size"
-      );
-      file.write_all(&bytes).await?;
-      digest.update(&bytes);
-      written += bytes.len() as u64;
-      progress.send_replace(Phase::Downloading {
-        bytes: written,
-        total: source.size,
-      });
+    let streamed: anyhow::Result<()> = async {
+      while let Some(bytes) = super::checked(&check, response.chunk()).await?? {
+        check()?;
+        ensure!(
+          bytes.len() as u64 <= source.size - written,
+          "Restore download exceeds its expected size"
+        );
+        file.write_all(&bytes).await?;
+        digest.update(&bytes);
+        written += bytes.len() as u64;
+        progress.send_replace(Phase::Downloading {
+          bytes: written,
+          total: source.size,
+        });
+      }
+      Ok(())
+    }
+    .await;
+    if let Err(error) = streamed {
+      // finish accepted writes before returning a retryable partial image.
+      file
+        .sync_all()
+        .await
+        .context("Flush interrupted restore download")?;
+      return Err(error);
     }
   }
   file.sync_all().await?;

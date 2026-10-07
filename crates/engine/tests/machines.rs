@@ -160,25 +160,16 @@ fn ids_cannot_escape_the_machine_directory() {
 }
 
 #[test]
-fn windows_downloads_by_default_and_accepts_a_local_installer() {
+fn windows_has_no_previous_runtime_template() {
     let mut machine = machine();
     machine.guest = GuestOs::Windows;
     machine.resources.disk_gib = 64;
-    assert!(config::render(&machine).is_ok());
-    assert!(
-        !config::profiles()
-            .iter()
-            .find(|p| p.id == "windows")
-            .unwrap()
-            .installer_required
-    );
+    assert!(config::render(&machine).unwrap_err().to_string().contains("native runtime"));
+    assert!(!config::profiles().iter().find(|profile| profile.id == "windows").unwrap().installer_required);
     let file = tempfile::NamedTempFile::new().unwrap();
     machine.installer = Some(file.path().to_string_lossy().into_owned());
-    let value: serde_yaml::Value =
-        serde_yaml::from_str(&config::render(&machine).unwrap()).unwrap();
-    assert_eq!(value["base"][0].as_str(), Some("template:windows-11"));
-    assert_eq!(value["images"][0]["arch"].as_str(), Some("aarch64"));
-    assert!(value["tpm"].is_null()); // the Windows template enables TPM; never bypass it
+    assert!(config::render(&machine).is_err());
+    assert!(file.path().exists());
 }
 
 #[test]

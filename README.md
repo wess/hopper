@@ -12,7 +12,8 @@ on the Mac, and **Import from Docker** brings your images and containers across.
 
 No bundled browser or Electron. The VM runs in a separate helper process, so a
 UI crash does not take down containers. Settings controls whether a normal app
-quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and the Windows QEMU/TPM runtime.
+quit stops the engine. Bundles include the container VM helper, Docker CLI, Compose,
+Hopper's native Windows worker and firmware, and Windows installation tools.
 
 ## Features
 
@@ -132,8 +133,10 @@ cargo run -p mcp            # the stdio MCP server
 For development, run `scripts/build/lima.sh` once to fetch the pinned VM helper
 and matching templates. `HOPPER_LIMA_BIN` overrides its path. The helper is bundled
 automatically by `scripts/bundle.sh`; users do not need Homebrew or Lima installed.
-`scripts/build/qemu.sh` fetches official Homebrew bottles and relocates the Windows
-QEMU/TPM runtime, firmware, dependencies, and licenses without installing packages.
+`scripts/build/windows.sh` fetches and relocates Windows installation tools and drivers,
+including their provenance and licenses, without installing packages. Desktop VMs use
+Hopper's native runtimes; QEMU and swtpm are not bundled. Previous Windows records require
+explicit migration and retain their disks without being started by the old helper.
 `cargo run -p engine --example machine -- create ubuntu "Desktop"` exercises
 user VM creation; `start <id>` downloads and opens its viewer.
 `cargo run -p engine --example vm -- start` exercises the managed VM directly.

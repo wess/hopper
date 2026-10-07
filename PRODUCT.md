@@ -18,7 +18,8 @@ Keep the existing native interface and visual system. Guest support must describ
 
 ## Major VM release requirements
 
-These are release gates, not descriptions of the current implementation. The existing desktop VM prototype still uses Lima and QEMU. Its records and guest disks must remain recoverable during replacement.
+These are release gates, not descriptions of the current implementation. Earlier desktop VM
+records used Lima and QEMU. Their records and guest disks must remain recoverable during replacement.
 
 - Hopper owns each VM's runtime and dedicated viewer. Linux and macOS use Virtualization.framework directly; Windows ARM64 uses Hypervisor.framework with Hopper's firmware and device integration. The desktop VM runtime must not launch QEMU or delegate lifecycle and viewers to Lima.
 - Creation downloads, verifies, and caches official installation media, installs the selected system, provisions the guest account and guest tools, and opens a usable desktop. Progress covers each phase and supports interrupted-download recovery. Windows setup must not require a product key to proceed; Windows activation remains separate.

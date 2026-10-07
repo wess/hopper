@@ -6,8 +6,8 @@
 # CODESIGN_IDENTITY when set (a real Developer ID for a notarizable build),
 # otherwise ad-hoc ("-") so it still runs locally.
 #
-# Lima's detached helper owns the Linux VM. Its virtualization entitlement
-# stays on the helper; Hopper itself only needs files and networking.
+# Lima owns the container engine; Hopper owns desktop VZ machines and its
+# native Windows worker. Sign each executable with its required entitlements.
 #
 # Usage: scripts/bundle.sh
 set -euo pipefail
@@ -49,7 +49,6 @@ mkdir -p "$contents/MacOS" "$contents/Resources"
 [ -x native/build/lima/bin/limactl ] || scripts/build/lima.sh
 [ -f native/build/docker ] || scripts/build/docker.sh
 [ -f native/build/compose ] || scripts/build/compose.sh
-[ -x native/build/qemu/bin/swtpm ] || scripts/build/qemu.sh
 [ -f native/build/windows/manifest.json ] || scripts/build/windows.sh
 [ -f native/build/firmware/manifest.json ] && \
   [ -f native/build/firmware/windows.fd ] && \
@@ -60,7 +59,6 @@ for artifact in windows.fd variables.fd manifest.json revision.txt license.txt; 
   cp "native/build/firmware/$artifact" "$contents/Resources/firmware/$artifact"
 done
 cp -R native/build/firmware/licenses "$contents/Resources/firmware/licenses"
-cp -R native/build/qemu "$contents/Resources/qemu"
 cp -R native/build/windows "$contents/Resources/windows"
 mkdir -p "$contents/Resources/lima/bin" "$contents/Resources/lima/share/doc/lima"
 cp native/build/lima/bin/limactl "$contents/Resources/lima/bin/limactl"
@@ -85,7 +83,7 @@ if [ -f native/build/docker ]; then
 fi
 
 # The MCP server is part of the release, too. Keeping it beside the app gives
-# AI clients a stable executable path without requiring a global install.
+# agent clients a stable executable path without requiring a global install.
 mkdir -p "$contents/MacOS/sidecars"
 cp "$target_dir/hoppermcp" "$contents/MacOS/sidecars/hoppermcp"
 cp "$target_dir/hoppervm" "$contents/MacOS/sidecars/hoppervm"
@@ -105,7 +103,7 @@ if [ -d "$contents/MacOS/sidecars" ]; then
       echo "error: sidecar $sidecar does not contain host architecture $required_arch (has: ${arches:-unknown})" >&2
       exit 1
     }
-  done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/qemu/bin" "$contents/Resources/qemu/lib" "$contents/Resources/windows/bin" "$contents/Resources/windows/lib" -type f -perm -111)
+  done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/windows/bin" "$contents/Resources/windows/lib" -type f -perm -111)
 fi
 
 cat > "$contents/Info.plist" << PLIST
@@ -157,7 +155,7 @@ while IFS= read -r sidecar; do
     codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
       --preserve-metadata=entitlements --sign "$identity" "$sidecar"
   fi
-done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/qemu/bin" "$contents/Resources/qemu/lib" "$contents/Resources/windows/bin" "$contents/Resources/windows/lib" -type f -perm -111)
+done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/windows/bin" "$contents/Resources/windows/lib" -type f -perm -111)
 python3 scripts/build/windowsmanifest.py "$contents/Resources/windows"
 python3 scripts/build/windowsmanifest.py --verify "$contents/Resources/windows"
 codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
@@ -167,7 +165,7 @@ codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
   --entitlements assets/hopper.entitlements \
   --sign "$identity" "$app"
 
-codesign --verify --strict --verbose=2 "$app"
+python3 scripts/check/bundle.py "$app"
 rm -rf "dist/$app_name.app"
 mv "$app" "dist/$app_name.app"
 echo "[bundle] -> dist/$app_name.app"

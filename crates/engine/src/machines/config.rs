@@ -52,7 +52,7 @@ pub fn render(machine: &Machine) -> anyhow::Result<String> {
     let base = match machine.guest {
         GuestOs::Linux => "template:ubuntu-24.04",
         GuestOs::Macos => "template:macos-26",
-        GuestOs::Windows => "template:windows-11",
+        GuestOs::Windows => bail!("Windows creation requires the native runtime; previous disks need migration"),
     };
     let resources = machine.resources;
     let mut config = json!({
@@ -68,9 +68,7 @@ pub fn render(machine: &Machine) -> anyhow::Result<String> {
         "ssh": {"loadDotSSHPubKeys": false, "forwardAgent": false},
         "portForwards": [{"guestPortRange": [1,65535], "proto":"tcp", "ignore": true},{"guestPortRange": [1,65535], "proto":"udp", "ignore": true}]
     });
-    if machine.guest != GuestOs::Windows {
-        config["vmType"] = json!("vz");
-    }
+    config["vmType"] = json!("vz");
     if machine.guest == GuestOs::Linux {
         config["provision"] = json!([{"mode": "system", "script": r#"#!/bin/bash
 set -euo pipefail
@@ -87,16 +85,6 @@ CONF
 systemctl enable lightdm
 systemctl restart lightdm
 "#}]);
-    }
-    if machine.guest == GuestOs::Windows {
-        if let Some(installer) = &machine.installer {
-            if !std::path::Path::new(installer).is_absolute()
-                || !std::path::Path::new(installer).is_file()
-            {
-                bail!("The Windows installer must be an existing absolute file path");
-            }
-            config["images"] = json!([{"location":installer,"arch":"aarch64"}]);
-        }
     }
     Ok(serde_yaml::to_string(&config)?)
 }

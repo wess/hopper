@@ -112,7 +112,6 @@ jobs:
           scripts/build/compose.sh
           scripts/build/lima.sh
           scripts/build/docker.sh
-          scripts/build/qemu.sh
           scripts/build/windows.sh
 
       - name: Import signing certificate
@@ -164,23 +163,9 @@ jobs:
           helper="$app/Resources/lima/bin/limactl"
           test -x "$helper"
           test -f "$app/Resources/lima/share/lima/lima-guestagent.Linux-aarch64.gz"
-          qemu="$app/Resources/qemu/bin/qemu-system-aarch64"
-          test -x "$qemu"
-          test -x "$app/Resources/qemu/bin/swtpm"
-          test -f "$app/Resources/qemu/share/qemu/edk2-aarch64-code.fd"
-          python3 scripts/build/probe.py "$app/Resources/qemu"
-          "$qemu" --version
-          "$app/Resources/qemu/bin/swtpm" --version
-          codesign --verify --strict "$qemu"
-          codesign -d --entitlements - "$qemu" 2>/dev/null | grep -q com.apple.security.hypervisor
           codesign --verify --strict "$helper"
           codesign -d --entitlements - "$helper" 2>/dev/null | grep -q 'com.apple.security.virtualization'
-          # Only the VM helper needs virtualization privileges.
-          if codesign -d --entitlements - "$app/MacOS/hopper" 2>/dev/null | grep -q virtualization; then
-            echo "FATAL: virtualization entitlement belongs on the helper"
-            exit 1
-          fi
-          echo "OK: signed, and asking for no virtualization entitlement"
+          python3 scripts/check/bundle.py dist/Hopper.app
 
       - name: Upload DMG
         run: gh release upload "v${{ needs.check-version.outputs.version }}" dist/Hopper.dmg --clobber

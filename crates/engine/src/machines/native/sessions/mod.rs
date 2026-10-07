@@ -186,7 +186,8 @@ impl Sessions {
       "Native worker requires a Windows VM"
     );
     ensure!(
-      !self.inner.manager.root.join("lima").join(id).exists(),
+      machine.runtime == Some(model::MachineRuntime::Hypervisor)
+        && !self.inner.manager.root.join("lima").join(id).try_exists()?,
       "This VM needs migration from the previous runtime before native startup"
     );
     if let Some(previous) = session.as_ref() {

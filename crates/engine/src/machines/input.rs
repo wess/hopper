@@ -1,29 +1,13 @@
 use super::{Actor, Machines};
 use anyhow::bail;
 use model::{GuestOs, MachineInput};
-use serde_json::json;
 
 impl Machines {
     pub async fn input(&self, id: &str, actor: Actor, input: MachineInput) -> anyhow::Result<()> {
         let machine = self.machine(id, actor)?;
         if machine.guest == GuestOs::Windows {
-            let _lock = self.lock(id)?;
-            self.machine(id, actor)?;
-            let events = match input {
-                MachineInput::Key {keys} => super::qmp::key_events(&keys)?,
-                MachineInput::Pointer {x,y,button} => {
-                    if x>32767 || y>32767 { bail!("Pointer coordinates must be between 0 and 32767"); }
-                    let mut events=vec![json!({"type":"abs","data":{"axis":"x","value":x}}),json!({"type":"abs","data":{"axis":"y","value":y}})];
-                    if let Some(button)=button {
-                        if !["left","right","middle"].contains(&button.as_str()) { bail!("Use left, middle, or right for the mouse button"); }
-                        for down in [true,false] {events.push(json!({"type":"btn","data":{"down":down,"button":button}}));}
-                    }
-                    events
-                }
-                MachineInput::Text {..} => bail!("Windows text input requires a guest command; use vm.exec with PowerShell, or vm.input with individual QEMU key names"),
-            };
-            return super::qmp::input(&self.root.join("lima").join(id).join("qmp.sock"), events)
-                .await;
+            self.cli_for(id)?;
+            bail!("Windows input requires the native VM registry");
         }
         let args = match (machine.guest, input) {
             (GuestOs::Linux, input) => {

@@ -176,6 +176,26 @@ async fn legacy_instances_are_preserved_and_not_started_by_the_native_runtime() 
 }
 
 #[tokio::test]
+async fn untagged_records_cannot_start_without_explicit_runtime_migration() {
+  let f = Fixture::new();
+  let mut machine = f.manager.machine(ID, Actor::Person).unwrap();
+  machine.runtime = None;
+  store::json::write(
+    &f.manager.root.join("records").join(format!("{ID}.json")),
+    &machine,
+  )
+  .unwrap();
+  assert!(f
+    .sessions
+    .start(ID, &f.helper, f.boot("normal"))
+    .await
+    .unwrap_err()
+    .to_string()
+    .contains("migration"));
+  assert!(!f.probe().join("pid").exists());
+}
+
+#[tokio::test]
 async fn guest_shutdown_can_restart_in_the_same_registry() {
   let f = Fixture::new();
   f.start("shutdown").await;
