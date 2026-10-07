@@ -8,7 +8,7 @@ use model::{
   native::{Installation, SetupPhase, SetupStatus},
   CreateMachine, GuestOs, Machine, MachineStatus,
 };
-use std::{io::Read, path::Path};
+use std::path::Path;
 
 impl Sessions {
   pub fn create_windows(&self, request: CreateMachine) -> anyhow::Result<Machine> {
@@ -55,24 +55,9 @@ impl Sessions {
   /// Native records and hardware state do not require the previous VM helper.
   pub async fn list_windows(&self, actor: Actor) -> anyhow::Result<Vec<MachineStatus>> {
     let manager = &self.inner.manager;
-    let folder = manager.root.join("records");
-    if !folder.try_exists()? {
-      return Ok(Vec::new());
-    }
     let mut rows = Vec::new();
-    for entry in std::fs::read_dir(folder)? {
-      let path = entry?.path();
-      if path.extension().is_none_or(|extension| extension != "json") {
-        continue;
-      }
-      let file = assets::regular(&path, 1024 * 1024)?;
-      let machine: Machine = serde_json::from_reader(file.take(1024 * 1024 + 1))?;
-      crate::machines::validate_id(&machine.id)?;
-      ensure!(
-        path.file_stem().and_then(|stem| stem.to_str()) == Some(machine.id.as_str()),
-        "VM record does not match its filename"
-      );
-      if machine.guest != GuestOs::Windows || (actor == Actor::Agent && !machine.agent_access) {
+    for machine in manager.records(actor)? {
+      if machine.guest != GuestOs::Windows {
         continue;
       }
       manager.machine(&machine.id, actor)?;

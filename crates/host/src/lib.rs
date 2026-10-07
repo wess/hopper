@@ -10,6 +10,7 @@ pub mod appleinstall;
 pub mod engine;
 pub mod facade;
 pub mod import;
+pub mod machines;
 pub mod registry;
 pub mod runtime;
 pub mod stacks;
@@ -21,3 +22,5 @@ pub use ::engine::machines::{Actor as MachineActor, Machines};
 /// Re-export the interactive exec session so the UI can hold one without
 /// depending on the docker crate directly.
 pub use docker::exec as docker_exec;
+
+pub use ::engine::machines::native::{deployment::Phase as MachinePhase, Frame as MachineFrame, State as MachineState};

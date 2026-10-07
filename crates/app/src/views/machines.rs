@@ -1,4 +1,6 @@
 mod viewer;
+mod native;
+mod start;
 use gpui::prelude::*;
 use gpui::{div, px, Context, Entity, PathPromptOptions, SharedString, Window};
 use guise::prelude::*;
@@ -90,11 +92,11 @@ impl Machines {
     }
 
     fn reload(&mut self, cx: &mut Context<Self>) {
-        let manager = self.state.host.machines();
+        let host = self.state.host.clone();
         let weak = cx.entity().downgrade();
         bridge::run(
             cx,
-            async move { manager.list(MachineActor::Person).await },
+            async move { host.list_machines(MachineActor::Person).await },
             move |result, cx| {
                 if let Some(view) = weak.upgrade() {
                     view.update(cx, |this, cx| {
@@ -158,12 +160,12 @@ impl Machines {
             installer: self.installer.clone(),
             agent_access: self.agent_access,
         };
-        let manager = self.state.host.machines();
+        let host = self.state.host.clone();
         self.operate(
             "create".into(),
             "Creating…",
             async move {
-                manager.create(request).await?;
+                host.create_machine(request).await?;
                 Ok(())
             },
             cx,
@@ -211,7 +213,9 @@ impl Machines {
         let machine = &row.machine;
         let id = machine.id.clone();
         let manager = self.state.host.machines();
-        let running = row.state == "Running";
+        let running = row.state == "Running" || row.state == "Paused";
+        let windows = machine.guest == model::GuestOs::Windows;
+        let start_name = machine.name.clone();
         let stopped = row.state == "Stopped";
         let uncreated = row.state == "Not created";
         let busy = self.busy.contains_key(&id) || row.busy;
@@ -231,6 +235,7 @@ impl Machines {
         let access = machine.agent_access;
         let palette = theme::palette(cx);
         let view_id = id.clone();
+        let view_name = machine.name.clone();
         let mut controls = Group::new()
             .gap(Size::Xs)
             .wrap(true)
@@ -246,6 +251,10 @@ impl Machines {
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let manager = manager.clone();
                     let id = start_id.clone();
+                    if windows {
+                        this.start_windows(id, start_name.clone(), running, cx);
+                        return;
+                    }
                     let operation_id = id.clone();
                     this.operate(
                         operation_id,
@@ -269,7 +278,7 @@ impl Machines {
                 Button::new(SharedString::from(format!("snapshot-{id}")), "Snapshot")
                     .size(Size::Sm)
                     .variant(Variant::Subtle)
-                    .disabled(busy || !stopped)
+                    .disabled(busy || !stopped || windows)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let manager = this.state.host.machines();
                         let id = snapshot_id.clone();
@@ -289,7 +298,7 @@ impl Machines {
                 Button::new(SharedString::from(format!("clone-{id}")), "Clone")
                     .size(Size::Sm)
                     .variant(Variant::Subtle)
-                    .disabled(busy || !stopped)
+                    .disabled(busy || !stopped || windows)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let manager = this.state.host.machines();
                         let id = clone_id.clone();
@@ -311,7 +320,7 @@ impl Machines {
                 Button::new(SharedString::from(format!("history-{id}")), "Snapshots")
                     .size(Size::Sm)
                     .variant(Variant::Subtle)
-                    .disabled(busy)
+                    .disabled(busy || windows)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.show_snapshots(history_id.clone(), cx)
                     })),
@@ -324,16 +333,29 @@ impl Machines {
                     .disabled(busy)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let manager = this.state.host.machines();
+                        let host = this.state.host.clone();
                         let id = view_id.clone();
+                        let identity = id.clone();
+                        let name = view_name.clone();
                         let weak = cx.entity().downgrade();
                         this.error = None;
                         bridge::run(
                             cx,
-                            async move { manager.viewer_pid(&id).await },
+                            async move {
+                                if windows {
+                                    Ok(None)
+                                } else {
+                                    manager.viewer_pid(&id).await.map(Some)
+                                }
+                            },
                             move |result, cx| {
                                 if let Some(view) = weak.upgrade() {
                                     view.update(cx, |this, cx| {
-                                        if let Err(error) = result.and_then(viewer::show) {
+                                        let shown = result.and_then(|pid| match pid {
+                                            Some(pid) => viewer::show(pid),
+                                            None => native::open(host, identity, name, cx),
+                                        });
+                                        if let Err(error) = shown {
                                             this.error = Some(format!("{error:#}"));
                                         }
                                         cx.notify();
@@ -420,6 +442,9 @@ impl Machines {
                 )
             })
             .child(controls)
+            .when(windows, |view| view.child(Text::new(
+                "Guest tools, agent connections, snapshots and clones are not available yet"
+            ).size(Size::Xs).dimmed()))
     }
 }
 
@@ -519,6 +544,16 @@ impl Render for Machines {
                     .disabled(create_busy)
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.profile = id.clone();
+                        let windows = id == "windows";
+                        this.cpus.update(cx, |input, cx| {
+                            input.set_max(if windows { 2.0 } else { 64.0 }, cx);
+                        });
+                        this.memory.update(cx, |input, cx| {
+                            input.set_max(if windows { 64.0 } else { 256.0 }, cx);
+                        });
+                        this.disk.update(cx, |input, cx| {
+                            input.set_min(if windows { 64.0 } else { 10.0 }, cx);
+                        });
                         cx.notify();
                     })),
                 );

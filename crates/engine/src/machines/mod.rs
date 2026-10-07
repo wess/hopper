@@ -7,6 +7,7 @@ mod macos;
 pub mod media;
 pub mod native;
 mod qmp;
+mod records;
 mod snapshots;
 pub mod windows;
 
@@ -131,10 +132,17 @@ impl Machines {
     }
 
     pub async fn list(&self, actor: Actor) -> anyhow::Result<Vec<MachineStatus>> {
-        let dir = self.root.join("records");
-        if !dir.exists() {
-            return Ok(Vec::new());
-        }
+        self.list_records(self.records(actor)?).await
+    }
+
+    pub async fn list_non_windows(&self, actor: Actor) -> anyhow::Result<Vec<MachineStatus>> {
+        let records = self.records(actor)?.into_iter()
+            .filter(|machine| machine.guest != model::GuestOs::Windows).collect();
+        self.list_records(records).await
+    }
+
+    async fn list_records(&self, records: Vec<Machine>) -> anyhow::Result<Vec<MachineStatus>> {
+        if records.is_empty() { return Ok(Vec::new()); }
         let output = self
             .cli()?
             .output(&["list".into(), "--json".into()], Duration::from_secs(10))
@@ -145,16 +153,7 @@ impl Machines {
             .map(serde_json::from_str)
             .collect::<Result<_, _>>()?;
         let mut result = Vec::new();
-        for file in std::fs::read_dir(dir)? {
-            let path = file?.path();
-            if path.extension().is_none_or(|ext| ext != "json") {
-                continue;
-            }
-            let machine: Machine = serde_json::from_slice(&std::fs::read(&path)?)?;
-            validate_id(&machine.id)?;
-            if actor == Actor::Agent && !machine.agent_access {
-                continue;
-            }
+        for machine in records {
             let state = instances
                 .iter()
                 .find(|i| i.name == machine.id)

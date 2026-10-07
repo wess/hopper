@@ -5,11 +5,14 @@ Repository guidance for agent sessions.
 ## Desktop virtual machines
 
 User VMs are managed by `engine::machines`, separate from the managed Docker VM.
-The current prototype uses Lima/VZ for Linux and macOS, and bundled QEMU/swtpm
-for Windows ARM64. macOS and Windows guests are experimental. Release hosts remain
+The app routes Windows ARM64 through the owned native runtime. Linux and macOS
+still use the Lima/VZ prototype. Previous QEMU/swtpm Windows instances remain
+preserved for migration and are not started through the native path. macOS and Windows
+guests are experimental. Release hosts remain
 Apple silicon macOS 26+.
 Each VM has a dedicated viewer. Agent access defaults on for new VMs and clones
-inherit it. MCP operations recheck the persisted access setting, use per-VM
+inherit it. Native Windows guest tools and agent transport are still pending.
+Prototype MCP operations recheck the persisted access setting, use per-VM
 cross-process locks, and expose only guest files/input. Snapshots require a
 stopped VM and use APFS copies, with a rollback snapshot on restore.
 
@@ -61,20 +64,30 @@ The controller follows explicit guest resets through system-worker replacement, 
 DVDs detached and the same disk/firmware identity. Manual system startup installs the same
 supervision. Guest shutdown and requested stop do not trigger automatic startup; failed
 reboots retain retry intent. Full official ESD conversion and Windows installation/first-boot
-verification and app integration remain pending. Existing prototype instances
+verification, live viewer inspection and guest-tool integration remain pending. Existing prototype instances
 need migration before native startup. Native registry creation validates Windows resources
 and stores policy without invoking legacy helpers or allocating a disk. Its Windows listing
 uses records, durable phases and VM-scoped hardware state without Lima, marks previous
-instances for migration, and detects external runtime ownership. Runtime probes retain the operation lease and
-skip probing while another operation owns it, so status polling cannot contend with startup. The app still calls the
-prototype create/list/start/viewer path; switching it requires the native viewer.
+instances for migration, and detects external runtime ownership. Runtime probes retain the
+operation lease and skip probing during another operation, avoiding contention with startup.
+The app and host facade now create/list/start Windows through native sessions. Windows
+viewing never falls back to the previous helper. Each VM has one Hopper viewer window;
+closing it keeps the VM running. Frame polling is serial and bounded, slows in the background,
+and evicts old uploaded images. Guest input has a bounded queue, focus generations, priority
+release and cancellation of an in-flight request on focus loss. Closing or losing activation
+releases held input and invalidates queued transitions. Pointer mapping excludes letterbox
+margins. Startup reports download, inspection, media, disk and boot stages.
+CPU/memory/disk creation bounds match native limits. Windows snapshots/clones are
+disabled until their native implementation exists. Visual and physical Windows display/input
+verification remain pending; synthetic worker checks do not prove Windows desktop readiness.
 VM and temporary target leases explicitly unlock on owner teardown; closing a file
 alone can retain a flock through a duplicated or inherited descriptor. Do not replace
 those leases with bare file handles. The download writer retains its inode lock through
 pending asynchronous writes and has a different ownership lifetime.
 Dropping the final client stops the worker.
 Started means allocated hardware, and Deployed means deployment completed; neither
-proves a usable desktop. App integration and running-memory snapshots remain pending.
+proves a usable desktop. Direct VZ integration, native agent transport, guest tools and
+running-memory snapshots remain pending.
 
 ## What this is
 
