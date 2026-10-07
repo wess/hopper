@@ -204,6 +204,13 @@ hardware through asynchronous completion, and lifecycle commands remain blocked 
 installation is active. The signed probe checks malformed-media installation failure;
 successful installation and cancellation of a valid IPSW remain unverified.
 
+A bounded VZ lifecycle bridge lets Tokio callers request operations while the native
+owner stays on the VM queue. The signed `vz` diagnostic sends real start/pause/resume/stop
+requests from a separate service thread, rejects retirement of active hardware and
+checks that a cancelled queued start does not run. Native transitions retain the
+framework machine until completion. This internal bridge is not yet connected to Host,
+VM records, agent authorization or dedicated viewers.
+
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into
 `native/build/firmware/windows.fd` and `variables.fd`, with a provenance manifest

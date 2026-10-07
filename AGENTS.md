@@ -65,7 +65,12 @@ handle requests cancellation; callback ownership retains the installer and hardw
 completion, and the VM rejects lifecycle changes while installation remains active.
 The signed probe verifies invalid-media failure. IPSW download, successful installation,
 valid-media cancellation, first boot and viewer integration remain pending.
-Neither diagnostic establishes a usable desktop. Keep the prototype records intact.
+The VZ queue bridge accepts at most 16 queued lifecycle requests and processes at most
+16 per tick. The main-queue owner retains each VM across viewer lifetime, rejects
+concurrent transitions and retires only stopped hardware with no pending operation.
+Cancelled queued requests do not dispatch; started transitions retain native hardware
+through completion. Host routing and dispatch-time agent authorization remain pending;
+the low-level bridge is not an agent endpoint. Neither diagnostic establishes a usable desktop. Keep the prototype records intact.
 The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware
 and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in
 `model::native` and `machine::ipc`; host paths in Start are never an agent API.

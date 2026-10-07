@@ -28,3 +28,4 @@ objc2-foundation = "0.3"
 objc2-virtualization = "0.3.2"
 block2 = "0.6"
 tempfile = { workspace = true }
+tokio = { workspace = true }

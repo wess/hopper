@@ -4,6 +4,7 @@ mod console;
 pub mod install;
 mod kernel;
 pub mod mac;
+pub mod queue;
 pub mod restore;
 
 use anyhow::{ensure, Context};
@@ -12,7 +13,12 @@ pub use config::{create_variables, identity};
 use objc2::{rc::Retained, AllocAnyThread, MainThreadMarker};
 use objc2_foundation::NSError;
 use objc2_virtualization::{VZVirtualMachine, VZVirtualMachineState};
-use std::{cell::Cell, path::PathBuf, rc::Rc, sync::mpsc};
+use std::{
+  cell::{Cell, RefCell},
+  path::PathBuf,
+  rc::Rc,
+  sync::mpsc,
+};
 
 pub struct Linux {
   pub cpus: usize,
@@ -96,6 +102,7 @@ pub fn transition(vm: &Vm, action: Action) -> anyhow::Result<Pending> {
     "macOS installation owns the VM lifecycle"
   );
   let (send, receive) = mpsc::sync_channel(1);
+  let held = Rc::new(RefCell::new(Some(vm.machine.clone())));
   let completion = RcBlock::new(move |error: *mut NSError| {
     let result = if error.is_null() {
       Ok(())
@@ -104,6 +111,7 @@ pub fn transition(vm: &Vm, action: Action) -> anyhow::Result<Pending> {
       Err(anyhow::anyhow!("VZ transition failed: {message}"))
     };
     let _ = send.try_send(result);
+    held.borrow_mut().take();
   });
   unsafe {
     let permitted = match action {

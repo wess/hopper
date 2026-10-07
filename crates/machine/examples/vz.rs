@@ -59,6 +59,26 @@ fn main() -> anyhow::Result<()> {
   );
   boot.disk = raw;
   let vm = vz::create(main, &boot)?;
+  let (client, mut owner) = vz::queue::channel();
+  owner.insert("diagnostic", vm)?;
+  let main_thread = std::thread::current().id();
+  let runtime = tokio::runtime::Builder::new_multi_thread()
+    .worker_threads(1)
+    .build()?;
+  let control = client.clone();
+  let cancelled =
+    runtime.spawn(async move { control.transition("diagnostic", Action::Start).await });
+  runtime.block_on(async { tokio::task::yield_now().await });
+  cancelled.abort();
+  ensure!(
+    runtime.block_on(cancelled).is_err(),
+    "Queued caller cancellation must complete"
+  );
+  owner.tick();
+  ensure!(
+    owner.state("diagnostic")? == State::Stopped,
+    "Cancelled queued start touched hardware"
+  );
   let run_loop = NSRunLoop::currentRunLoop();
   for (action, state) in [
     (Action::Start, State::Running),
@@ -66,11 +86,20 @@ fn main() -> anyhow::Result<()> {
     (Action::Resume, State::Running),
     (Action::Stop, State::Stopped),
   ] {
-    let pending = vz::transition(&vm, action)?;
+    let control = client.clone();
+    let pending = runtime.spawn(async move {
+      ensure!(
+        std::thread::current().id() != main_thread,
+        "VZ client must run on the async service thread"
+      );
+      control.transition("diagnostic", action).await
+    });
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-      if let Some(result) = vz::poll(&pending)? {
-        result?;
+      runtime.block_on(async { tokio::task::yield_now().await });
+      owner.tick();
+      if pending.is_finished() {
+        runtime.block_on(pending)??;
         break;
       }
       ensure!(Instant::now() < deadline, "VZ probe transition timed out");
@@ -79,13 +108,20 @@ fn main() -> anyhow::Result<()> {
         &NSDate::dateWithTimeIntervalSinceNow(0.01),
       );
     }
+    if state != State::Stopped {
+      ensure!(
+        owner.retire("diagnostic").is_err(),
+        "Active hardware cannot retire ownership"
+      );
+    }
     ensure!(
-      vz::state(&vm) == state,
+      owner.state("diagnostic")? == state,
       "VZ state differs from completed transition"
     );
     println!("VZ state: {state:?}");
   }
-  println!("VZ hardware transitions verified; no guest OS was installed or booted");
+  owner.retire("diagnostic")?;
+  println!("VZ queued hardware transitions verified; no guest OS was installed or booted");
   Ok(())
 }
 
