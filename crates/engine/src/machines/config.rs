@@ -17,7 +17,7 @@ pub fn profiles() -> Vec<MachineProfile> {
             "macos",
             "macOS",
             GuestOs::Macos,
-            "Native macOS on Apple silicon. Restore-image discovery and runtime support are in development; installation and guest tools are not yet available.",
+            "Native macOS on Apple silicon. Downloads a supported Apple restore image on first start. Installation verification and guest tools are in development.",
             None,
             false,
             true,

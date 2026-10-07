@@ -12,6 +12,9 @@ use tokio::sync::watch;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Phase {
+  Discovering,
+  Downloading { bytes: u64, total: u64 },
+  Verifying { bytes: u64, total: u64 },
   Inspecting,
   Preparing,
   Installing(u8),
@@ -21,12 +24,23 @@ pub enum Phase {
 impl Phase {
   pub fn message(self) -> String {
     match self {
+      Self::Discovering => "Finding supported macOS restore image…".into(),
+      Self::Downloading { bytes, total } => amount("Downloading macOS", bytes, total),
+      Self::Verifying { bytes, total } => amount("Verifying macOS", bytes, total),
       Self::Inspecting => "Checking macOS restore image…".into(),
       Self::Preparing => "Preparing macOS hardware…".into(),
       Self::Installing(percent) => format!("Installing macOS… {percent}%"),
       Self::Starting => "Starting macOS…".into(),
     }
   }
+}
+
+fn amount(action: &str, bytes: u64, total: u64) -> String {
+  format!(
+    "{action}: {:.1} / {:.1} MiB",
+    bytes as f64 / 1048576.0,
+    total as f64 / 1048576.0
+  )
 }
 
 enum Stage {
@@ -108,7 +122,7 @@ impl Service {
     actor: Actor,
     progress: watch::Sender<Phase>,
   ) -> anyhow::Result<Launch> {
-    let (machine, check) = self.mac_scope(id, actor)?;
+    let (mut machine, check) = self.mac_scope(id, actor)?;
     progress.send_replace(Phase::Inspecting);
     let directory = self.manager.root.join("vz").join(id);
     let phase = match std::fs::symlink_metadata(&directory) {
@@ -120,6 +134,12 @@ impl Service {
       phase != Some(deployment::Phase::Installing),
       "macOS installation requires recovery; its disk is preserved"
     );
+    if phase.is_none() && directory.join("platform").try_exists()? {
+      ensure!(
+        !deployment::written(&directory)?,
+        "Written macOS disk requires recovery; its data is preserved"
+      );
+    }
     let stage = if phase == Some(deployment::Phase::Installed) {
       progress.send_replace(Phase::Preparing);
       let manager = self.manager.clone();
@@ -133,7 +153,24 @@ impl Service {
         .await??,
       )
     } else {
+      let expected = if machine.installer.is_none() {
+        let (path, image) =
+          super::acquire::fetch(&self.manager, &machine, check.clone(), &progress).await?;
+        machine.installer = Some(
+          path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Restore path is not UTF-8"))?
+            .into(),
+        );
+        Some(image)
+      } else {
+        None
+      };
+      progress.send_replace(Phase::Inspecting);
       let restore = self.inspect_restore(machine, check.clone()).await?;
+      if let Some(expected) = expected {
+        super::acquire::matches(&expected, restore.image())?;
+      }
       progress.send_replace(Phase::Preparing);
       Stage::Install(restore.prepare().await?)
     };

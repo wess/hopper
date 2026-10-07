@@ -17,8 +17,8 @@ quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and 
 ## Features
 
 - **Virtual machines** — new Ubuntu Desktop and Windows 11 ARM64 records use
-  Hopper's native runtimes and dedicated viewers. New macOS records use native VZ setup with local restore media.
-  Automatic image acquisition and installation preparation are implemented for Ubuntu and Windows; complete native Windows
+  Hopper's native runtimes and dedicated viewers. New macOS records use native VZ setup.
+  Automatic image acquisition and installation preparation are implemented for all three guest families; complete native Windows
   installation and first boot remain unverified. A local installer is optional.
   Guest VMs live under `~/.hopper/machines`. Closing the native viewer keeps Windows
   running; quitting Hopper stops its owned Windows sessions. Windows snapshots,
@@ -225,9 +225,18 @@ desktop. Library Start now inspects local restore media, prepares Mac hardware, 
 dedicated viewer, streams bounded installation progress and starts the installed system after
 authorized successful completion. Cancel setup invalidates the original stop intent without
 waiting for its retained operation lock. Installed records reopen through saved platform
-preparation without restore media. Direct installation wakes the queue owner. Automatic IPSW
-acquisition, valid-media installation, installed macOS boot and actual viewer rendering/input
-remain pending.
+preparation without restore media. Direct installation wakes the queue owner. With no local
+restore image, first start discovers the latest supported image through Apple’s framework,
+checks official HTTPS metadata and downloads into a private cache. Resume binds the URL,
+exact size and strong ETag; conditional ranges reject changed responses. Each completed cache
+reuse rechecks its SHA-256, and staged SDK inspection must match the discovered build, version,
+hardware model and resource requirements. The SHA-256 is a local cache integrity receipt,
+not an Apple-published checksum. Downloads preflight remaining space and preserve partial
+bytes across interruption; original authorization is checked while waiting for network data.
+Full IPSW acquisition, valid-media installation, installed macOS boot and actual viewer
+rendering/input remain unverified. A signed live diagnostic verifies official metadata and a
+1 KiB conditional range. An isolated signed app verifies automatic first-start discovery and
+low-storage rejection before image transfer or hardware creation.
 
 The `vzmac` example discovers Apple's supported restore-image metadata and configures
 a macOS platform with its CPU/RAM requirements, independent identity and matching

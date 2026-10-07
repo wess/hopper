@@ -1,4 +1,6 @@
+pub mod acquire;
 mod admit;
+pub mod download;
 mod launch;
 pub use launch::{Admission, Launch, Phase};
 pub mod deployment;

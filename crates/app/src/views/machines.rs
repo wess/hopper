@@ -183,7 +183,7 @@ impl Machines {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(if self.profile == "ubuntu" { "Use Linux ARM64 ISO" } else { "Use Windows ARM64 ISO" }.into()),
+            prompt: Some(match self.profile.as_str() { "ubuntu" => "Use Linux ARM64 ISO", "macos" => "Use macOS restore image", _ => "Use Windows ARM64 ISO" }.into()),
         });
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(paths))) = paths.await {
@@ -608,6 +608,7 @@ impl Render for Machines {
                     .color(ColorName::Blue)
                     .disabled(create_busy)
                     .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.profile != id { this.installer = None; }
                         this.profile = id.clone();
                         let windows = id == "windows";
                         this.cpus.update(cx, |input, cx| {
@@ -617,7 +618,7 @@ impl Render for Machines {
                             input.set_max(if windows { 64.0 } else { 256.0 }, cx);
                         });
                         this.disk.update(cx, |input, cx| {
-                            input.set_min(if windows { 64.0 } else { 10.0 }, cx);
+                            input.set_min(if windows || id == "macos" { 64.0 } else { 10.0 }, cx);
                         });
                         cx.notify();
                     })),
@@ -664,14 +665,16 @@ impl Render for Machines {
                         .size(Size::Xs),
                 );
             }
-            if profile.guest == model::GuestOs::Windows || profile.guest == model::GuestOs::Linux {
+            {
                 let automatic = if profile.guest == model::GuestOs::Linux {
                     "Ubuntu downloads its ARM64 desktop installer automatically on first start. Installation and guest tools are still in development."
+                } else if profile.guest == model::GuestOs::Macos {
+                    "macOS downloads a supported Apple restore image automatically on first start."
                 } else {
                     "Windows downloads from Microsoft and prepares its installer automatically on first start."
                 };
                 form = form.child(Group::new().gap(Size::Sm).wrap(true)
-                    .child(Button::new("choose-installer", "Use a local ARM64 ISO…")
+                    .child(Button::new("choose-installer", if profile.guest == model::GuestOs::Macos { "Use a local restore image…" } else { "Use a local ARM64 ISO…" })
                         .size(Size::Sm).variant(Variant::Subtle).disabled(create_busy)
                         .on_click(cx.listener(|this, _, _, cx| this.installer(cx))))
                     .when(self.installer.is_some(), |group| group.child(

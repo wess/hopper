@@ -6,14 +6,15 @@ Repository guidance for agent sessions.
 
 User VMs are managed by `engine::machines`, separate from the managed Docker VM.
 The app routes Windows ARM64 and new Ubuntu VMs through owned native runtimes.
-New macOS creation persists native VZ records. Library Start inspects optional local restore
-media, prepares hardware, opens its dedicated viewer and installs through the owned queue.
+New macOS creation persists native VZ records. Library Start discovers and downloads supported
+official restore media when no local image is selected, then inspects it, prepares hardware, opens its dedicated viewer and installs through
+the owned queue. Creation offers a local restore picker and automatic acquisition; profile
+changes clear selected media and enforce the macOS 64 GiB disk minimum.
 Local restore inspection stages private APFS media,
 retains original policy/stop intent and keeps staging/operation ownership through SDK callbacks.
 Inspected restore results prepare private native platform state and admit stopped hardware on
 the main thread. Identity, requirements and auxiliary firmware remain bound to the selected
-restore build. Normal Start is blocked until successful native installation; automatic download
-remains pending. Inspected preparation can start
+restore build. Normal Start is blocked until successful native installation. Inspected preparation can start
 owned queue installation with bounded progress, caller cancellation and original-policy
 checks through SDK acknowledgement. Installed readiness is persisted only through authorized successful SDK completion and is
 bound to the saved platform. Interrupted or written untracked disks require recovery. System
@@ -86,7 +87,13 @@ and checks the returned URL against the requested file; invalid media is preserv
 The installer controller borrows the VM exclusively and stays on its queue. Dropping its
 handle requests cancellation; callback ownership retains the installer and hardware until
 completion, and the VM rejects lifecycle changes while installation remains active.
-The signed probe verifies invalid-media failure. IPSW download, successful installation,
+Automatic acquisition uses SDK discovery, official HTTPS without redirects, exact size and
+strong ETag-bound conditional resume. Private cache receipts store SHA-256 for reuse integrity;
+this is not an Apple-published checksum. Staged SDK metadata must match discovery before
+admission. Original authorization is polled through stalled network requests, partial inode
+locks survive outstanding async writes, and written recovery disks reject before discovery.
+Signed live checks verify official metadata and a 1 KiB conditional range; isolated app QA
+verifies discovery and storage preflight without transferring image bytes. Full IPSW download, successful installation,
 valid-media cancellation, first boot and live viewer verification remain pending.
 The VZ queue bridge accepts at most 16 queued lifecycle requests and processes at most
 16 per tick. The main-queue owner retains each VM across viewer lifetime, rejects

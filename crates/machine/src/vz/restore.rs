@@ -23,9 +23,14 @@ pub struct Image {
 pub struct Discovery(mpsc::Receiver<anyhow::Result<Image>>);
 
 pub fn latest() -> Discovery {
+  latest_owned(Arc::new(()))
+}
+
+pub fn latest_owned(ownership: Arc<dyn Any + Send + Sync>) -> Discovery {
   let (send, receive) = mpsc::sync_channel(1);
   let completion = RcBlock::new(
     move |image: *mut VZMacOSRestoreImage, error: *mut NSError| {
+      let _ownership = &ownership;
       let result = result(image, error, None);
       let _ = send.try_send(result);
     },

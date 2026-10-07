@@ -12,6 +12,29 @@ use engine::machines::{
 use support::fixture;
 
 #[tokio::test]
+async fn written_untracked_disk_rejects_setup_before_network_discovery() {
+  use std::io::Write;
+  let (_root, manager, machine, _image, target) = fixture();
+  std::fs::OpenOptions::new()
+    .write(true)
+    .open(target.join("disk"))
+    .unwrap()
+    .write_all(b"preserved guest state")
+    .unwrap();
+  let (client, _owner) = vz::channel();
+  let service = vz::Service::new(manager.clone(), client);
+  let (progress, updates) = tokio::sync::watch::channel(Phase::Inspecting);
+  let error = service
+    .prepare_mac(&machine.id, Actor::Person, progress)
+    .await
+    .err()
+    .unwrap();
+  assert!(error.to_string().contains("recovery"));
+  assert_eq!(*updates.borrow(), Phase::Inspecting);
+  assert!(!manager.root.join("images").exists());
+}
+
+#[tokio::test]
 async fn setup_cancel_invalidates_prepared_launch_while_its_operation_lock_is_held() {
   let (_root, manager, machine, _image, target) = fixture();
   deployment::installed(&deployment::begin(&target, &machine.id).unwrap()).unwrap();
