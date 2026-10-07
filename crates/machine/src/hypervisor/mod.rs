@@ -1,11 +1,13 @@
 //! Each VM owns a process; each CPU stays on its creating thread.
 
 mod config;
+mod cpu;
 mod exception;
 mod ffi;
 pub mod gic;
 mod watch;
 
+pub use cpu::{affinity, cpu, create_cpu, enter, factory, get, run, set, Cpu, CpuFactory};
 pub use exception::{fault, Fault};
 pub use watch::{bounded, paced};
 
@@ -24,12 +26,6 @@ pub struct Memory<'a> {
   address: NonNull<u8>,
   guest: u64,
   size: usize,
-  _vm: PhantomData<&'a Vm>,
-}
-
-pub struct Cpu<'a> {
-  id: u64,
-  exit: NonNull<ffi::Exit>,
   _vm: PhantomData<&'a Vm>,
 }
 
@@ -150,91 +146,26 @@ pub fn protect(memory: &Memory<'_>, flags: u64) -> anyhow::Result<()> {
 
 impl crate::dma::Memory for Memory<'_> {
   fn contains(&self, address: u64, length: usize) -> bool {
-    address.checked_sub(self.guest)
+    address
+      .checked_sub(self.guest)
       .and_then(|offset| offset.checked_add(length as u64))
       .is_some_and(|end| end <= self.size as u64)
   }
 
   fn read(&self, address: u64, bytes: &mut [u8]) -> anyhow::Result<()> {
-    ensure!(self.contains(address, bytes.len()), "DMA read exceeds guest RAM");
+    ensure!(
+      self.contains(address, bytes.len()),
+      "DMA read exceeds guest RAM"
+    );
     read(self, (address - self.guest) as usize, bytes)
   }
 
   fn write(&mut self, address: u64, bytes: &[u8]) -> anyhow::Result<()> {
-    ensure!(self.contains(address, bytes.len()), "DMA write exceeds guest RAM");
+    ensure!(
+      self.contains(address, bytes.len()),
+      "DMA write exceeds guest RAM"
+    );
     write(self, (address - self.guest) as usize, bytes)
-  }
-}
-
-pub fn cpu(vm: &Vm) -> anyhow::Result<Cpu<'_>> {
-  let mut id = 0;
-  let mut exit = null_mut();
-  check(
-    unsafe { ffi::hv_vcpu_create(&mut id, &mut exit, null_mut()) },
-    "Create CPU",
-  )?;
-  let Some(exit) = NonNull::new(exit) else {
-    unsafe { ffi::hv_vcpu_destroy(id) };
-    bail!("Hypervisor did not provide CPU exit information");
-  };
-  let _ = vm;
-  let cpu = Cpu {
-    id,
-    exit,
-    _vm: PhantomData,
-  };
-  config::cpu(cpu.id, vm.gic.get())?;
-  Ok(cpu)
-}
-
-pub fn set(cpu: &mut Cpu<'_>, register: u32, value: u64) -> anyhow::Result<()> {
-  ensure!(register <= ffi::CPSR, "Invalid CPU register");
-  check(
-    unsafe { ffi::hv_vcpu_set_reg(cpu.id, register, value) },
-    "Set CPU register",
-  )
-}
-
-pub fn get(cpu: &Cpu<'_>, register: u32) -> anyhow::Result<u64> {
-  ensure!(register <= ffi::CPSR, "Invalid CPU register");
-  let mut value = 0;
-  check(
-    unsafe { ffi::hv_vcpu_get_reg(cpu.id, register, &mut value) },
-    "Read CPU register",
-  )?;
-  Ok(value)
-}
-
-pub fn affinity(cpu: &mut Cpu<'_>, value: u64) -> anyhow::Result<()> {
-  check(
-    unsafe { ffi::hv_vcpu_set_sys_reg(cpu.id, 0xc005, value) },
-    "Set CPU affinity",
-  )
-}
-
-pub fn enter(cpu: &mut Cpu<'_>, address: u64) -> anyhow::Result<()> {
-  set(cpu, ffi::PC, address)?;
-  set(cpu, ffi::CPSR, 0x3c5)
-}
-
-pub fn run(cpu: &mut Cpu<'_>) -> anyhow::Result<Exit> {
-  check(unsafe { ffi::hv_vcpu_run(cpu.id) }, "Run CPU")?;
-  let exit = unsafe { *cpu.exit.as_ptr() };
-  Ok(match exit.reason {
-    0 => Exit::Canceled,
-    1 => Exit::Exception {
-      syndrome: exit.exception.syndrome,
-      virtual_address: exit.exception.virtual_address,
-      physical_address: exit.exception.physical_address,
-    },
-    2 => Exit::Timer,
-    _ => Exit::Unknown,
-  })
-}
-
-impl Drop for Cpu<'_> {
-  fn drop(&mut self) {
-    unsafe { ffi::hv_vcpu_destroy(self.id) };
   }
 }
 
