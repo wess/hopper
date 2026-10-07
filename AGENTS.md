@@ -11,8 +11,12 @@ migration even without a legacy instance directory; preserve their records and d
 The previous helper must not operate on either native or legacy Windows records.
 Native Linux and macOS admission attach virtio NAT using a stable local unicast address
 derived from saved VM identity. Mac core configuration also supports a disconnected attachment.
-The signed SDK probe validates both modes without starting an uninstalled guest; Mac traffic,
-app disconnect controls and localhost forwarding remain unverified or unfinished.
+The VM library persists per-VM NAT/disconnected settings in private bounded identity-bound
+documents. Changes require operation/runtime exclusion; stopped owned hardware must be
+detached and retired first. Linux and Mac preparation freeze the mode under runtime ownership.
+Malformed or foreign settings reject instead of reconnecting. Signed SDK probes validate both
+persisted modes and blocked replacement while owned. Mac traffic, live switching and localhost
+forwarding remain unverified or unfinished.
 New macOS creation persists native VZ records. Library Start discovers and downloads supported
 official restore media when no local image is selected, then inspects it, prepares hardware, opens its dedicated viewer and installs through
 the owned queue. Creation offers a local restore picker and automatic acquisition; profile

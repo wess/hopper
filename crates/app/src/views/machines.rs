@@ -7,6 +7,8 @@ mod preparation;
 mod lifecycle;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod macos;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod network;
 use gpui::prelude::*;
 use gpui::{div, px, Context, Entity, PathPromptOptions, SharedString, Window};
 use guise::prelude::*;
@@ -23,6 +25,7 @@ use crate::theme;
 pub struct Machines {
     state: AppState,
     rows: Load<Vec<MachineStatus>>,
+    networks: BTreeMap<String, Result<bool, String>>,
     busy: BTreeMap<String, String>,
     error: Option<String>,
     creating: bool,
@@ -46,6 +49,7 @@ impl Machines {
         let mut view = Self {
             state,
             rows: Load::Loading,
+            networks: BTreeMap::new(),
             busy: BTreeMap::new(),
             error: None,
             creating: false,
@@ -102,12 +106,31 @@ impl Machines {
         let weak = cx.entity().downgrade();
         bridge::run(
             cx,
-            async move { host.list_machines(MachineActor::Person).await },
+            async move {
+                let rows = host.list_machines(MachineActor::Person).await?;
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let networks = rows
+                    .iter()
+                    .filter(|row| row.machine.runtime == Some(model::MachineRuntime::Virtualization))
+                    .map(|row| {
+                        let connected = host
+                            .virtual_machine_network(&row.machine.id, MachineActor::Person)
+                            .map_err(|error| format!("{error:#}"));
+                        (row.machine.id.clone(), connected)
+                    })
+                    .collect();
+                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                let networks = BTreeMap::<String, Result<bool, String>>::new();
+                Ok::<_, anyhow::Error>((rows, networks))
+            },
             move |result, cx| {
                 if let Some(view) = weak.upgrade() {
                     view.update(cx, |this, cx| {
                         this.rows = match result {
-                            Ok(rows) => Load::Ready(rows),
+                            Ok((rows, networks)) => {
+                                this.networks = networks;
+                                Load::Ready(rows)
+                            },
                             Err(error) => Load::Failed(format!("{error:#}")),
                         };
                         cx.notify();
@@ -507,6 +530,12 @@ impl Machines {
                 )
             })
             .child(controls)
+            .when(row_native, |view| {
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                { view.child(self.network(row, busy, cx)) }
+                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                { view }
+            })
             .when(windows, |view| view.child(Text::new(
                 "Guest tools, agent connections, snapshots and clones are not available yet"
             ).size(Size::Xs).dimmed()))

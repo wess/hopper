@@ -70,7 +70,7 @@ fn focus_release_discards_queued_input_and_overflow_releases_before_viewer_drop(
     installer: None,
     agent_access: true,
     agent_generation: 0,
-    runtime: None,
+    runtime: Some(model::MachineRuntime::Hypervisor),
   };
   store::json::write(
     &root

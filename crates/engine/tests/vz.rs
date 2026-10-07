@@ -128,6 +128,7 @@ fn installer(manager: &Machines) -> std::path::PathBuf {
   file.write_all(b"\x01CD001\x01").unwrap();
   let mut machine = manager.machine(ID, Actor::Person).unwrap();
   machine.installer = Some(path.to_str().unwrap().into());
+  machine.runtime = Some(model::MachineRuntime::Virtualization);
   store::json::write(
     &manager.root.join("records").join(format!("{ID}.json")),
     &machine,

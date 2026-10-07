@@ -94,8 +94,15 @@ pub fn installer(id: &str, cx: &App) -> bool {
 }
 
 pub fn retire_installer(id: &str, cx: &mut App) -> anyhow::Result<()> {
+  anyhow::ensure!(
+    cx.global::<Runtime>().owner.installer(id)?,
+    "This VM is not an installer"
+  );
+  retire(id, cx)
+}
+
+pub fn retire(id: &str, cx: &mut App) -> anyhow::Result<()> {
   let runtime = cx.global_mut::<Runtime>();
-  anyhow::ensure!(runtime.owner.installer(id)?, "This VM is not an installer");
   runtime.owner.can_replace(id)?;
   if let Some(viewer) = runtime.viewers.get_mut(id) {
     viewer.detach();

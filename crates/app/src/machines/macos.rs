@@ -47,14 +47,7 @@ pub fn ready(id: &str, cx: &App) -> bool {
     .is_ok_and(|status| status.mac_ready)
 }
 
-pub fn retire(id: &str, cx: &mut App) -> anyhow::Result<()> {
-  let runtime = cx.global_mut::<Runtime>();
-  runtime.owner.can_replace(id)?;
-  if let Some(viewer) = runtime.viewers.get_mut(id) {
-    viewer.detach();
-  }
-  runtime.owner.retire(id)
-}
+pub use super::retire;
 
 pub fn finish(id: &str, result: &anyhow::Result<()>, cx: &mut App) {
   if result.is_err() && super::owns(id, cx) && cx.global::<Runtime>().owner.can_replace(id).is_ok()

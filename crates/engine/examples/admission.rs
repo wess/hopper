@@ -43,6 +43,7 @@ fn main() -> anyhow::Result<()> {
     "Native runtime choice was not persisted"
   );
   let id = record.id.as_str();
+  vz::network::set_connected(&manager, id, false)?;
   let runtime = tokio::runtime::Builder::new_multi_thread()
     .worker_threads(1)
     .build()?;
@@ -72,6 +73,14 @@ fn main() -> anyhow::Result<()> {
   let prepared = runtime.block_on(service.prepare_linux(id, Actor::Person, Stage::Installer))?;
   let prepared = prepared.provision(&plan)?;
   let admission = prepared.admit(main, &mut owner)?;
+  ensure!(
+    owner.inspect(id)?.network_connected == Some(false),
+    "Persisted offline policy was not applied to Linux hardware"
+  );
+  ensure!(
+    vz::network::set_connected(&manager, id, true).is_err(),
+    "Admitted Linux hardware allowed network policy replacement"
+  );
   let target = manager.root.join("vz").join(id);
   let identity = std::fs::read(target.join("identity"))?;
   let lock = OpenOptions::new()
@@ -183,12 +192,17 @@ fn main() -> anyhow::Result<()> {
   }
   drop(display);
   owner.retire(id)?;
+  vz::network::set_connected(&manager, id, true)?;
   lock.try_lock_exclusive()?;
   FileExt::unlock(&lock)?;
   let variables = std::fs::read(target.join("variables"))?;
   let prepared = runtime.block_on(service.prepare_linux(id, Actor::Person, Stage::Installer))?;
   let prepared = prepared.provision(&plan)?;
   let admission = prepared.admit(main, &mut owner)?;
+  ensure!(
+    owner.inspect(id)?.network_connected == Some(true),
+    "Persisted NAT policy was not applied on Linux readmission"
+  );
   drop(admission);
   ensure!(
     std::fs::read(target.join("identity"))? == identity,

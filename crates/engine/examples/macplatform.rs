@@ -49,6 +49,7 @@ fn main() -> anyhow::Result<()> {
     },
   )?;
   let media = Arc::new(tempfile::tempdir()?);
+  vz::network::set_connected(&manager, &machine.id, false)?;
   let (client, mut owner) = vz::channel();
   let service = Service::new(manager.clone(), client);
   let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -72,6 +73,14 @@ fn main() -> anyhow::Result<()> {
   let target = manager.root.join("vz").join(&machine.id);
   let original = std::fs::read(target.join("platform"))?;
   prepared.admit(main, &mut owner, media.clone())?;
+  ensure!(
+    owner.inspect(&machine.id)?.network_connected == Some(false),
+    "Persisted offline policy was not applied to macOS hardware"
+  );
+  ensure!(
+    vz::network::set_connected(&manager, &machine.id, true).is_err(),
+    "Admitted macOS hardware allowed network policy replacement"
+  );
   ensure!(
     owner.state(&machine.id)? == State::Stopped,
     "Admission unexpectedly started macOS"
@@ -114,6 +123,7 @@ fn main() -> anyhow::Result<()> {
   );
   drop(display);
   owner.retire(&machine.id)?;
+  vz::network::set_connected(&manager, &machine.id, true)?;
   run_loop.runMode_beforeDate(
     unsafe { NSDefaultRunLoopMode },
     &NSDate::dateWithTimeIntervalSinceNow(0.01),
@@ -125,6 +135,10 @@ fn main() -> anyhow::Result<()> {
     "Repeated admission changed platform identity"
   );
   prepared.admit(main, &mut owner, media.clone())?;
+  ensure!(
+    owner.inspect(&machine.id)?.network_connected == Some(true),
+    "Persisted NAT policy was not applied on macOS readmission"
+  );
   let invalid = media.path().join("restore.ipsw");
   std::fs::write(&invalid, b"owned malformed restore media")?;
   for attempt in 0..4 {

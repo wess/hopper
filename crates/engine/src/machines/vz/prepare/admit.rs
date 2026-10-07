@@ -55,7 +55,7 @@ impl Prepared {
         .seed
         .as_ref()
         .map(|directory| directory.path().join("seed")),
-      network: Some(vz::network::Mode::Nat),
+      network: Some(self.network),
       console: observation
         .as_ref()
         .map(|(output, _)| output.try_clone())

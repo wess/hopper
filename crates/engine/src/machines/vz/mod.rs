@@ -2,6 +2,7 @@ pub(crate) mod files;
 mod identity;
 mod intent;
 pub mod mac;
+pub mod network;
 mod prepare;
 pub mod records;
 mod watch;

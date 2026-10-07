@@ -111,6 +111,14 @@ impl Host {
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 impl Host {
+  pub fn virtual_machine_network(&self, id: &str, actor: MachineActor) -> anyhow::Result<bool> {
+    ::engine::machines::vz::network::connected(&self.machines(), id, actor)
+  }
+
+  pub fn set_virtual_machine_network(&self, id: &str, connected: bool) -> anyhow::Result<()> {
+    ::engine::machines::vz::network::set_connected(&self.machines(), id, connected)
+  }
+
   pub fn virtual_machine_owner(&self) -> anyhow::Result<::engine::machines::vz::Owner> {
     let mut service = self
       .virtual_machines

@@ -26,6 +26,7 @@ pub struct Prepared {
   pub(super) target: PathBuf,
   pub(super) temporary: Option<tempfile::TempDir>,
   pub(super) runtime: Arc<store::lock::Lease>,
+  pub(super) network: machine::vz::network::Mode,
   pub(super) check: Check,
   pub(super) installed: bool,
 }
@@ -65,6 +66,7 @@ pub fn prepare(
     "Previous VM requires migration; its disk is preserved"
   );
   let runtime = Arc::new(manager.guard(&machine.id, ".runtime")?);
+  let network = super::super::network::mode(manager, &machine.id)?;
   let parent = manager.root.join("vz");
   files::parent(&parent)?;
   let target = parent.join(&machine.id);
@@ -101,6 +103,7 @@ pub fn prepare(
     target,
     temporary,
     runtime,
+    network,
     check,
     installed,
   })

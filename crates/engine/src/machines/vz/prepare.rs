@@ -33,6 +33,7 @@ pub struct Prepared {
   unattended: bool,
   attempt: Option<String>,
   runtime: Arc<store::lock::Lease>,
+  network: vz::network::Mode,
   check: Check,
   client: Client,
 }
@@ -85,6 +86,7 @@ pub(super) fn prepare(
     Stage::Launch => unreachable!(),
   };
   let runtime = Arc::new(manager.guard(&machine.id, ".runtime")?);
+  let network = super::network::mode(&manager, &machine.id)?;
   let parent = manager.root.join("vz");
   files::parent(&parent)?;
   let target = parent.join(&machine.id);
@@ -147,6 +149,7 @@ pub(super) fn prepare(
     unattended: false,
     attempt: None,
     runtime,
+    network,
     check,
     client,
   })

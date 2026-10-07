@@ -316,10 +316,15 @@ unfinished.
 
 Native Linux and macOS admission configure a virtio network device with Apple's NAT.
 Its local unicast address derives from the persisted VM identity and stays stable across
-admission retries. The core also accepts a disconnected Mac configuration. A freshly signed
-SDK probe verifies both Mac attachment modes without starting uninstalled hardware; actual
-macOS guest networking, app disconnect controls and localhost forwarding remain unverified
-or unfinished. [Apple's NAT attachment](https://developer.apple.com/documentation/virtualization/vznatnetworkdeviceattachment)
+admission retries. The VM library saves a per-VM NAT/disconnected choice for native Linux
+and macOS guests. Shut down a guest before changing this setting; the new choice applies
+on its next start. Stopped owned hardware is detached and retired before saving the choice.
+Private settings reject malformed, foreign, symlinked or unbounded data instead of silently
+reconnecting. Operation/runtime ownership excludes concurrent policy changes during preparation
+and admission. Signed SDK probes verify both persisted modes, readmission identity and
+blocked policy replacement while hardware is owned. Actual macOS guest traffic, live attachment
+switching and localhost forwarding remain unverified or unfinished.
+[Apple's NAT attachment](https://developer.apple.com/documentation/virtualization/vznatnetworkdeviceattachment)
 routes guest traffic through the host without requiring the bridged-network entitlement.
 
 For Linux, a signed diagnostic verifies guest DHCP, DNS, downloading public Alpine

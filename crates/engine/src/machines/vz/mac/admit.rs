@@ -51,7 +51,7 @@ impl Prepared {
       identity: platform.identity,
       auxiliary: self.target.join("auxiliary"),
       disk: self.target.join("disk"),
-      network: machine::vz::network::Mode::Nat,
+      network: self.network,
     };
     let mut vm = if installed {
       machine::vz::recover_mac(main, &boot)?
