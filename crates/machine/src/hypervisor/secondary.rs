@@ -35,6 +35,7 @@ pub struct Config<'vm> {
   pub timeout: Duration,
   pub boot: Receiver<Boot>,
   pub requests: SyncSender<Request>,
+  pub wake: Option<super::Wake>,
   pub ready: SyncSender<()>,
   pub stop: Arc<AtomicBool>,
   pub power: Arc<Mutex<power::Power>>,
@@ -132,7 +133,15 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
               "Secondary CPU request timed out"
             );
             match config.requests.try_send(request) {
-              Ok(()) => break,
+              Ok(()) => {
+                if let Some(wake) = &config.wake {
+                  ensure!(
+                    super::request_exit(wake)?,
+                    "Device handler CPU was destroyed"
+                  );
+                }
+                break;
+              }
               Err(TrySendError::Full(pending)) => {
                 request = pending;
                 std::thread::sleep(interval);

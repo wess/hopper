@@ -7,10 +7,12 @@ mod ffi;
 pub mod gic;
 pub mod registers;
 pub mod secondary;
+mod wake;
 mod watch;
 
 pub use cpu::{affinity, cpu, create_cpu, enter, factory, get, run, set, Cpu, CpuFactory};
 pub use exception::{fault, Fault};
+pub use wake::{request_exit, wake, Wake};
 pub use watch::{bounded, paced};
 
 use anyhow::{bail, ensure, Context};

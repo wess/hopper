@@ -162,7 +162,7 @@ fn main() -> anyhow::Result<()> {
       let config = secondary::Config {
         factory, index: 1, affinity: 1,
         timeout: std::time::Duration::from_secs(deadline),
-        boot: launches, requests, ready, stop: stop.clone(), power: power.clone(),
+        boot: launches, requests, wake: Some(hv::wake(&cpu)), ready, stop: stop.clone(), power: power.clone(),
       };
       let worker = scope.spawn(move || secondary::serve(config));
       initialized.recv_timeout(std::time::Duration::from_secs(5))?;

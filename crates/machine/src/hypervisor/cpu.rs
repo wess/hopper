@@ -1,4 +1,4 @@
-use super::{check, config, ffi, Exit, Vm};
+use super::{check, config, ffi, wake, Exit, Vm};
 use anyhow::{bail, ensure};
 use std::{
   marker::PhantomData,
@@ -13,6 +13,7 @@ use std::{
 /// ```
 pub struct Cpu<'a> {
   pub(super) id: u64,
+  pub(super) wake: wake::Wake,
   exit: NonNull<ffi::Exit>,
   _vm: PhantomData<&'a Vm>,
 }
@@ -57,6 +58,7 @@ pub fn create_cpu(factory: CpuFactory<'_>) -> anyhow::Result<Cpu<'_>> {
   };
   let cpu = Cpu {
     id,
+    wake: wake::create(id),
     exit,
     _vm: PhantomData,
   };
@@ -111,6 +113,6 @@ pub fn run(cpu: &mut Cpu<'_>) -> anyhow::Result<Exit> {
 
 impl Drop for Cpu<'_> {
   fn drop(&mut self) {
-    unsafe { ffi::hv_vcpu_destroy(self.id) };
+    wake::destroy(&self.wake);
   }
 }

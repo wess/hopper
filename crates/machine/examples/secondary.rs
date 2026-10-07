@@ -44,6 +44,7 @@ fn main() -> anyhow::Result<()> {
       timeout: Duration::from_secs(3),
       boot: starts,
       requests,
+      wake: None,
       ready,
       stop: stop.clone(),
       power: controller.clone(),
