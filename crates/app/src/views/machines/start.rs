@@ -110,6 +110,7 @@ impl Machines {
     owned: bool,
     cx: &mut Context<Self>,
   ) {
+    crate::machines::clear(&id, cx);
     self.busy.insert(
       id.clone(),
       if running {
@@ -164,11 +165,17 @@ impl Machines {
               this.finish_virtual(&id, &name, false, Err(error), cx)
             }),
             Ok(admission) => {
+              let installation = admission.installation();
               view.update(cx, |this, cx| {
                 this.busy.insert(id.clone(), "Starting Linux…".into());
                 cx.notify();
               });
               bridge::run(cx, admission.start(), move |result, cx| {
+                if result.is_ok() {
+                  if let Some(installation) = installation {
+                    crate::machines::watch(installation, cx);
+                  }
+                }
                 let _ = weak.update(cx, |this, cx| {
                   this.finish_virtual(&id, &name, false, result, cx)
                 });

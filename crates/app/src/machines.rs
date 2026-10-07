@@ -1,13 +1,21 @@
+mod automatic;
 mod viewer;
+pub use automatic::watch;
 
 use gpui::{App, Global, Task};
 use host::{Host, VirtualMachineOwner};
-use std::{collections::BTreeMap, time::Duration};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  time::Duration,
+};
 
 struct Runtime {
   owner: VirtualMachineOwner,
   _poll: Task<()>,
   viewers: BTreeMap<String, viewer::Viewer>,
+  watching: BTreeMap<String, u64>,
+  pending: BTreeSet<String>,
+  messages: BTreeMap<String, String>,
 }
 impl Global for Runtime {}
 
@@ -38,6 +46,9 @@ pub fn install(host: &Host, cx: &mut App) -> anyhow::Result<()> {
     owner,
     _poll: task,
     viewers: BTreeMap::new(),
+    watching: BTreeMap::new(),
+    pending: BTreeSet::new(),
+    messages: BTreeMap::new(),
   });
   Ok(())
 }
@@ -87,4 +98,24 @@ pub fn retire_installer(id: &str, cx: &mut App) -> anyhow::Result<()> {
     viewer.detach();
   }
   runtime.owner.retire(id)
+}
+
+pub fn clear(id: &str, cx: &mut App) {
+  if !cx.has_global::<Runtime>() {
+    return;
+  }
+  let runtime = cx.global_mut::<Runtime>();
+  runtime.watching.remove(id);
+  runtime.pending.remove(id);
+  runtime.messages.remove(id);
+}
+
+pub fn pending(id: &str, cx: &App) -> bool {
+  cx.has_global::<Runtime>() && cx.global::<Runtime>().pending.contains(id)
+}
+
+pub fn message(id: &str, cx: &App) -> Option<String> {
+  cx.has_global::<Runtime>()
+    .then(|| cx.global::<Runtime>().messages.get(id).cloned())
+    .flatten()
 }

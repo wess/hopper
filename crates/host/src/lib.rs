@@ -38,5 +38,5 @@ pub use ::engine::machines::vz::{Action as VirtualMachineAction, Owner as Virtua
 pub use ::engine::machines::vz::{
   Admission as VirtualMachineAdmission, Display as VirtualMachineDisplay,
   MainThreadMarker as VirtualMachineThread, Prepared as VirtualLinuxPrepared,
-  Stage as VirtualLinuxStage,
+  Stage as VirtualLinuxStage, Installation as VirtualLinuxInstallation,
 };

@@ -223,7 +223,15 @@ impl Machines {
         let start_name = machine.name.clone();
         let stopped = row.state == "Stopped";
         let uncreated = row.state == "Not created";
-        let busy = self.busy.contains_key(&id) || row.busy;
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        let automatic = crate::machines::pending(&id, cx);
+        #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+        let automatic = false;
+        let busy = self.busy.contains_key(&id) || row.busy || automatic;
+        let mut progress = row.progress.clone();
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        if let Some(message) = crate::machines::message(&id, cx) { progress = Some(message); }
+        if automatic { progress = Some("Starting Ubuntu automatically…".into()); }
         let toggle_id = id.clone();
         let start_id = id.clone();
         let clone_id = id.clone();
@@ -450,9 +458,9 @@ impl Machines {
                             ),
                     ),
             )
-            .when(row.busy && row.progress.is_some(), |view| {
+            .when(progress.is_some(), |view| {
                 view.child(
-                    Text::new(row.progress.clone().unwrap())
+                    Text::new(progress.clone().unwrap())
                         .size(Size::Xs)
                         .dimmed(),
                 )

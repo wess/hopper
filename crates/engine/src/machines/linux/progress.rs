@@ -149,3 +149,16 @@ pub(crate) fn system(directory: &Path) -> anyhow::Result<()> {
   }
   Ok(())
 }
+
+pub fn read_attempt(directory: &Path, attempt: &str) -> anyhow::Result<Option<Phase>> {
+  Decoder::new(attempt)?;
+  record(directory)?
+    .map(|record| {
+      ensure!(
+        record.attempt == attempt,
+        "Installation attempt was replaced"
+      );
+      Ok(record.phase)
+    })
+    .transpose()
+}

@@ -293,8 +293,10 @@ the ARM64 kernel and desktop installation sources, clones the ISO on APFS, then 
 the existing GRUB configuration. Copy fallback requires enough space. The downloaded cache
 stays unchanged. Existing written disks reject unattended preparation, and admitted installer
 hardware cannot start a second time. Attempt-scoped completion markers and a private
-journal support manually starting the installed system; automatic shutdown handoff remains
-unfinished. Seed delivery, schema checks and staged boot flags do not prove
+journal support automatic system startup after successful installer shutdown, with a manual
+Start path after an app restart. Explicit Stop requests cancel preparation and automatic
+startup; agent watches retain their original access policy. Seed delivery, schema checks
+and staged boot flags do not prove
 installed users, successful Ubuntu installation, guest tools or a usable desktop.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
@@ -485,5 +487,10 @@ Launch now selects system boot from a saved deployment result and preserves that
 across a failed handoff or app restart. Pressing Start on a completed, stopped installer
 retires its hardware and reuses the dedicated window for the replacement VM. The installed
 system omits installation and seed media, while retaining its disk, platform identity and
-EFI variables. Incomplete installations remain on the recovery path. Automatic handoff
-after guest shutdown, full Ubuntu installation and desktop readiness remain unfinished.
+EFI variables. Successful installer shutdown now triggers the same handoff automatically.
+Explicit Stop requests and agent-access revocation suppress it, and runtime generations
+prevent stale callbacks from replacing newer hardware. Paused installation time does not
+consume the automatic watch timeout. Incomplete installations remain on the recovery path.
+A signed diagnostic verified real Linux guest shutdown, hardware replacement and cancellation
+using synthetic disk data and completion markers. Full Ubuntu installation, installed-system
+boot, desktop readiness and the dedicated window behavior remain unverified.

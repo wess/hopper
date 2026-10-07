@@ -66,6 +66,8 @@ pub struct Vm {
   displaying: Rc<Cell<bool>>,
   installer: bool,
   started: Cell<bool>,
+  stop_requested: Cell<bool>,
+  generation: Cell<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -104,6 +106,8 @@ fn configured(
     displaying: Rc::new(Cell::new(false)),
     installer: false,
     started: Cell::new(false),
+    stop_requested: Cell::new(false),
+    generation: Cell::new(0),
   }
 }
 
@@ -170,6 +174,9 @@ fn scoped_transition(
     };
     let _ = send.try_send(result);
   });
+  if matches!(action, Action::Stop) {
+    vm.stop_requested.set(true);
+  }
   unsafe {
     let permitted = match action {
       Action::Start => vm.machine.canStart(),

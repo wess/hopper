@@ -1,0 +1,26 @@
+use super::Owner;
+use anyhow::Context;
+
+#[derive(Clone, Copy, Debug)]
+pub struct Status {
+  pub state: super::super::VZVirtualMachineState,
+  pub busy: bool,
+  pub generation: u64,
+  pub installer: bool,
+  pub started: bool,
+  pub stop_requested: bool,
+}
+
+impl Owner {
+  pub fn inspect(&self, id: &str) -> anyhow::Result<Status> {
+    let vm = self.machines.get(id).context("VZ machine is not owned")?;
+    Ok(Status {
+      state: super::super::state(vm),
+      busy: self.pending.contains_key(id) || vm.installing.get(),
+      generation: vm.generation.get(),
+      installer: vm.installer,
+      started: vm.started.get(),
+      stop_requested: vm.stop_requested.get(),
+    })
+  }
+}

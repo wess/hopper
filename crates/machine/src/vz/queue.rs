@@ -1,3 +1,6 @@
+mod status;
+pub use status::Status;
+
 use super::{Action, Pending, Vm};
 use anyhow::{ensure, Context};
 use std::{collections::BTreeMap, sync::Arc};
@@ -21,17 +24,12 @@ pub struct Owner {
   wake: Arc<Notify>,
   machines: BTreeMap<String, Vm>,
   pending: BTreeMap<String, Operation>,
+  generation: u64,
 }
 
 enum Request {
   Transition(Transition),
   Status(Query),
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Status {
-  pub state: super::VZVirtualMachineState,
-  pub busy: bool,
 }
 
 struct Query {
@@ -62,6 +60,7 @@ pub fn channel() -> (Client, Owner) {
       wake,
       machines: BTreeMap::new(),
       pending: BTreeMap::new(),
+      generation: 0,
     },
   )
 }
@@ -141,6 +140,11 @@ impl Owner {
       !self.machines.contains_key(id),
       "VZ identity is already owned"
     );
+    self.generation = self
+      .generation
+      .checked_add(1)
+      .context("VZ generation exhausted")?;
+    vm.generation.set(self.generation);
     self.machines.insert(id.into(), vm);
     Ok(())
   }
@@ -221,10 +225,10 @@ impl Owner {
         Request::Status(query) => {
           if !query.send.is_closed() {
             let result = (query.check)().map(|()| {
-              self.machines.get(&query.id).map(|vm| Status {
-                state: super::state(vm),
-                busy: self.pending.contains_key(&query.id) || vm.installing.get(),
-              })
+              self
+                .machines
+                .get(&query.id)
+                .and_then(|_| self.inspect(&query.id).ok())
             });
             let _ = query.send.send(result);
           }
@@ -238,14 +242,17 @@ impl Owner {
         if let Some(check) = &request.check {
           check()?;
         }
-        ensure!(
-          !self.pending.contains_key(&request.id),
-          "Another VZ operation is active"
-        );
         let vm = self
           .machines
           .get(&request.id)
           .context("VZ machine is not owned")?;
+        if matches!(request.action, Action::Stop) {
+          vm.stop_requested.set(true);
+        }
+        ensure!(
+          !self.pending.contains_key(&request.id),
+          "Another VZ operation is active"
+        );
         super::scoped_transition(vm, request.action, request.check.clone())
       })();
       match result {

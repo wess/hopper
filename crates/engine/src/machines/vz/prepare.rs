@@ -1,14 +1,11 @@
-use super::{
-  files,
-  identity::{validate, Identity},
-  Client, Owner,
-};
+mod admit;
+
+use super::{files, identity::validate, Client};
 use crate::machines::{native::assets, Machines};
 use anyhow::{ensure, Context};
-use machine::vz::{self, queue::Check, MainThreadMarker};
+use machine::vz::{self, queue::Check};
 use model::Machine;
 use std::{
-  fs::File,
   io::{Read, Seek, SeekFrom, Write},
   os::unix::fs::{MetadataExt, PermissionsExt},
   path::PathBuf,
@@ -25,6 +22,9 @@ pub enum Stage {
 
 pub struct Prepared {
   machine: Machine,
+  manager: Machines,
+  actor: crate::machines::Actor,
+  intent: Option<String>,
   target: PathBuf,
   temporary: Option<tempfile::TempDir>,
   installer: Option<PathBuf>,
@@ -41,6 +41,7 @@ pub struct Admission {
   id: String,
   check: Check,
   client: Client,
+  installation: Option<super::Installation>,
 }
 
 pub(super) fn prepare(
@@ -135,6 +136,9 @@ pub(super) fn prepare(
   check()?;
   Ok(Prepared {
     machine,
+    manager,
+    actor: crate::machines::Actor::Person,
+    intent: None,
     target,
     temporary,
     installer,
@@ -149,6 +153,11 @@ pub(super) fn prepare(
 }
 
 impl Prepared {
+  pub(super) fn control(mut self, actor: crate::machines::Actor, intent: Option<String>) -> Self {
+    self.actor = actor;
+    self.intent = intent;
+    self
+  }
   pub fn stage(&self) -> Stage {
     if self.installer.is_none() {
       Stage::System
@@ -215,79 +224,12 @@ impl Prepared {
     self.seed = Some(directory);
     Ok(self)
   }
-
-  pub fn admit(mut self, main: MainThreadMarker, owner: &mut Owner) -> anyhow::Result<Admission> {
-    (self.check)()?;
-    if let Some(temporary) = self.temporary.take() {
-      vz::create_variables(&temporary.path().join("variables"))?;
-      File::open(temporary.path().join("variables"))?.sync_all()?;
-      let identity = Identity {
-        id: self.machine.id.clone(),
-        version: 1,
-        guest: self.machine.guest,
-        disk_gib: self.machine.resources.disk_gib,
-        identity: vz::identity(),
-      };
-      let mut file = files::write(&temporary.path().join("identity"))?;
-      serde_json::to_writer(&mut file, &identity)?;
-      file.flush()?;
-      file.sync_all()?;
-      (self.check)()?;
-      files::publish(temporary, &self.target)?;
-    }
-    let identity = validate(&self.target, &self.machine)?;
-    if self.installer.is_none() {
-      (self.check)()?;
-      crate::machines::linux::progress::system(&self.target)?;
-    }
-    let observation = self
-      .attempt
-      .as_deref()
-      .map(|attempt| {
-        crate::machines::linux::observe::start_owned(&self.target, attempt, self.runtime.clone())
-      })
-      .transpose()?;
-    let installer = self.installer.is_some();
-    let boot = vz::Linux {
-      cpus: self.machine.resources.cpus as usize,
-      memory: u64::from(self.machine.resources.memory_gib) << 30,
-      width: 1024,
-      height: 768,
-      identity: identity.identity,
-      boot: vz::Boot::Efi {
-        variables: self.target.join("variables"),
-      },
-      disk: self.target.join("disk"),
-      installer: self.installer,
-      seed: self
-        .seed
-        .as_ref()
-        .map(|directory| directory.path().join("seed")),
-      network: Some(vz::network::Mode::Nat),
-      console: observation
-        .as_ref()
-        .map(|(output, _)| output.try_clone())
-        .transpose()?,
-    };
-    let mut vm = vz::create(main, &boot)?;
-    if installer {
-      vz::restrict_installer_restart(&mut vm)?;
-    }
-    vz::retain(
-      &mut vm,
-      Arc::new((self.runtime, self.seed, self.media, observation)),
-    )?;
-    (self.check)()?;
-    owner.insert(&self.machine.id, vm)?;
-    Ok(Admission {
-      id: self.machine.id,
-      check: self.check,
-      client: self.client,
-    })
-  }
 }
 
 impl Admission {
+  pub fn installation(&self) -> Option<super::Installation> {
+    self.installation.clone()
+  }
   pub async fn start(self) -> anyhow::Result<()> {
     self
       .client

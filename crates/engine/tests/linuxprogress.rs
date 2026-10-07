@@ -64,6 +64,11 @@ fn pipe_drains_noise_and_persists_only_installation_phases() {
     );
     std::thread::sleep(Duration::from_millis(10));
   }
+  assert_eq!(
+    progress::read_attempt(root.path(), ATTEMPT).unwrap(),
+    Some(Phase::Deployed)
+  );
+  assert!(progress::read_attempt(root.path(), "8197e0f0-0603-43e9-a817-eaf7ab0327b0").is_err());
   let record = root.path().join("installation");
   assert_eq!(
     std::fs::metadata(&record).unwrap().permissions().mode() & 0o777,

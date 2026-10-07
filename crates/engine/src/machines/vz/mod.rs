@@ -1,6 +1,9 @@
 pub(crate) mod files;
 mod identity;
+mod intent;
 mod prepare;
+mod watch;
+pub use watch::{Installation, Permit};
 
 use super::{Actor, Machines};
 use anyhow::ensure;
@@ -25,7 +28,36 @@ impl Service {
   }
 
   pub async fn transition(&self, id: &str, actor: Actor, action: Action) -> anyhow::Result<()> {
-    let (_, check) = self.scope(id, actor)?;
+    let original = self.manager.machine(id, actor)?;
+    let control = if matches!(action, Action::Start) {
+      intent::read(&self.manager, id)?
+    } else {
+      None
+    };
+    if matches!(action, Action::Stop) {
+      let machine = self.manager.machine(id, actor)?;
+      if machine.guest == GuestOs::Linux
+        && machine.runtime == Some(model::MachineRuntime::Virtualization)
+      {
+        ensure!(
+          !self.manager.root.join("lima").join(id).try_exists()?,
+          "Previous VM requires migration; its disk is preserved"
+        );
+        intent::cancel(&self.manager, &original, actor)?;
+      }
+    }
+    let (current, check) = self.scope(id, actor)?;
+    ensure!(
+      current.guest == original.guest
+        && current.runtime == original.runtime
+        && (actor != Actor::Agent || current.agent_generation == original.agent_generation),
+      "VM transition policy changed"
+    );
+    let check = if matches!(action, Action::Start) {
+      intent::checked(self.manager.clone(), id.into(), control, check)
+    } else {
+      check
+    };
     self.client.transition_checked(id, action, check).await
   }
 
@@ -62,6 +94,8 @@ impl Service {
     stage: Stage,
   ) -> anyhow::Result<Prepared> {
     let (mut machine, check) = self.scope(id, actor)?;
+    let control = intent::read(&self.manager, id)?;
+    let check = intent::checked(self.manager.clone(), id.into(), control.clone(), check);
     ensure!(
       machine.guest == GuestOs::Linux,
       "Linux admission requires a Linux VM"
@@ -128,6 +162,7 @@ impl Service {
           Err(error) => return Err(error),
         }
       };
+      let prepared = prepared.control(actor, control);
       if matches!(stage, Stage::Unattended) {
         prepared.unattended(&manager, actor)
       } else {
@@ -162,6 +197,36 @@ impl Service {
       "VM installation policy changed"
     );
     Ok(phase)
+  }
+
+  pub async fn watch_installation(
+    &self,
+    id: &str,
+    actor: Actor,
+    attempt: &str,
+  ) -> anyhow::Result<Installation> {
+    let machine = self.manager.machine(id, actor)?;
+    let control = intent::read(&self.manager, id)?;
+    let check = watch::access(
+      self.manager.clone(),
+      machine.clone(),
+      actor,
+      control.clone(),
+    );
+    let status = self
+      .client
+      .status_checked(id, check)
+      .await?
+      .ok_or_else(|| anyhow::anyhow!("Installer runtime is not owned"))?;
+    ensure!(status.installer, "Installation watch requires an installer");
+    Installation::new(
+      self.clone(),
+      machine,
+      actor,
+      attempt.into(),
+      status.generation,
+      control,
+    )
   }
 
   fn scope(
