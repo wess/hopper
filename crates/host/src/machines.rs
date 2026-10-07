@@ -15,6 +15,14 @@ impl Host {
   }
 
   #[cfg(unix)]
+  pub async fn control_native_machine(
+    &self,
+    id: &str,
+  ) -> anyhow::Result<::engine::machines::native::sessions::remote::control::Control> {
+    ::engine::machines::native::sessions::remote::control::connect(&self.machines(), id).await
+  }
+
+  #[cfg(unix)]
   pub async fn capture_native_machine(&self, id: &str) -> anyhow::Result<crate::MachineFrame> {
     ::engine::machines::native::sessions::remote::capture(&self.machines(), id).await
   }

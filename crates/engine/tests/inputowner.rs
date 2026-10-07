@@ -178,3 +178,19 @@ async fn paused_workers_end_ownership_and_reject_input_before_dispatch() {
   assert_eq!(f.trace().lines().filter(|line| *line == "input").count(), 2);
   f.sessions.stop(ID, Actor::Person).await.unwrap();
 }
+
+#[tokio::test]
+async fn an_agent_lease_cannot_survive_an_off_on_policy_toggle() {
+  let f = Fixture::new();
+  f.start("normal").await;
+  let old = f.sessions.acquire_input(ID, Actor::Agent).await.unwrap();
+  f.manager.set_agent_access(ID, false).unwrap();
+  f.manager.set_agent_access(ID, true).unwrap();
+  assert!(old.send(input()).await.is_err());
+  old.close().await.unwrap();
+  let fresh = f.sessions.acquire_input(ID, Actor::Agent).await.unwrap();
+  fresh.send(input()).await.unwrap();
+  fresh.close().await.unwrap();
+  assert_eq!(f.trace().lines().filter(|line| *line == "input").count(), 1);
+  f.sessions.stop(ID, Actor::Person).await.unwrap();
+}

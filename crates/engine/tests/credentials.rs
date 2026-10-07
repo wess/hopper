@@ -21,6 +21,7 @@ fn record(manager: &Machines, id: &str, guest: GuestOs, access: bool) {
       disk_gib: 64,
     },
     agent_access: access,
+    agent_generation: 0,
     installer: None,
   };
   store::json::write(

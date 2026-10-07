@@ -116,6 +116,12 @@ impl Machines {
         let _policy_lock = store::lock::exclusive(policy_lock)
             .context("Another agent access change is in progress")?;
         let mut machine = self.machine(id, Actor::Person)?;
+        if machine.agent_access == enabled { return Ok(()); }
+        if let Some(generation) = machine.agent_generation.checked_add(1) {
+            machine.agent_generation = generation;
+        } else if enabled {
+            bail!("Agent policy generation exhausted");
+        }
         machine.agent_access = enabled;
         store::json::write(&self.record(id)?, &machine)?;
         Ok(())
@@ -210,6 +216,7 @@ impl Machines {
             resources: request.resources,
             installer: request.installer,
             agent_access: request.agent_access,
+            agent_generation: 0,
         };
         let yaml = config::render(&machine)?;
         let _lock = self.lock(&machine.id)?;

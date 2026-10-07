@@ -31,6 +31,8 @@ pub struct Machine {
     #[serde(default)]
     pub agent_access: bool,
     #[serde(default)]
+    pub agent_generation: u64,
+    #[serde(default)]
     pub installer: Option<String>,
 }
 

@@ -16,6 +16,7 @@ pub struct Input {
   registry: Weak<Registry>,
   id: String,
   actor: Actor,
+  policy: Option<u64>,
   generation: Arc<std::sync::Mutex<u64>>,
   epoch: u64,
   active: Arc<AtomicBool>,
@@ -32,6 +33,9 @@ impl Drop for Input {
 }
 
 impl Input {
+  pub(super) fn completion(&self) -> channel::Receiver<Option<Result<(), String>>> {
+    self.ended.clone()
+  }
   pub fn is_active(&self) -> bool {
     self.active.load(Ordering::Acquire)
   }
@@ -62,7 +66,7 @@ impl Sessions {
       .try_lock_owned()
       .map_err(|_| anyhow::anyhow!("VM input is controlled by another connection"))?;
     let session = slot.session.lock().await;
-    self.inner.manager.machine(id, actor)?;
+    let machine = self.inner.manager.machine(id, actor)?;
     let client = &session.as_ref().context("VM is not running")?.client;
     ensure!(
       matches!(super::super::state(client), super::super::State::Running),
@@ -84,6 +88,7 @@ impl Sessions {
       registry: Arc::downgrade(&self.inner),
       id: id.into(),
       actor,
+      policy: (actor == Actor::Agent).then_some(machine.agent_generation),
       generation: slot.generation.clone(),
       epoch,
       active,

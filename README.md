@@ -25,7 +25,8 @@ quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and 
   clones and accelerated graphics remain unfinished. Linux and macOS still use Lima.
 - **Agent access** — enabled for new VMs, revocable per VM. The MCP server creates
   and lists native Windows VMs and captures their display through the running app.
-  Windows input, commands, files, snapshots and clones remain unavailable. The
+  Windows US key chords and pointer actions share input ownership with the viewer.
+  Composed text, commands, files, snapshots and clones remain unavailable. The
   Linux/macOS prototypes expose guest operations; macOS input requires Accessibility
   permission inside the guest. Prototype snapshots and clones require a stopped VM;
   clones inherit agent access.
@@ -156,9 +157,13 @@ Native Windows agent screenshots use the running Hopper app's owned registry. Ru
 `hoppermcp` as the same macOS user, with the same `HOPPER_DIR` if overridden, then call
 `vm.list` and `vm.screenshot` with the native VM ID. The viewer can be closed; the VM
 must still be running and agent access must remain enabled. The private local service
-only accepts status and capture, rechecks persisted access, and never launches another
-worker. Remote Windows input, commands, files, lifecycle, snapshots and clones are not
-available yet. Inside-guest agent connections remain pending.
+accepts status, capture and connection-owned input, rechecks persisted access, and never
+launches another worker. `vm.input` supports US key chords such as `ctrl+alt+delete`
+and normalized pointer actions; use `shift+=` for a plus sign. Another input owner
+returns a busy error. Revocation, disconnect and inactivity release held keys/buttons
+before ownership can change. Toggling access off and back on invalidates old agent
+connections. Composed text, commands, files, lifecycle, snapshots and clones remain
+unavailable remotely. Inside-guest agent connections remain pending.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into

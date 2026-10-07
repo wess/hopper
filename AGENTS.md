@@ -11,18 +11,19 @@ preserved for migration and are not started through the native path. macOS and W
 guests are experimental. Release hosts remain
 Apple silicon macOS 26+.
 Each VM has a dedicated viewer. Agent access defaults on for new VMs and clones
-inherit it. Native Windows guest tools and remote input delivery are still pending. Core input
-ownership and the viewer path use exclusive leases tied to a worker generation. MCP lists and creates
+inherit it. Native Windows key chords and pointer actions use connection-scoped input leases shared
+with the viewer. Guest tools and composed text input remain pending. Leases are tied
+to both the worker generation and a persisted agent-policy generation. MCP lists and creates
 Windows through the native facade. Screenshots connect to the app-owned native registry;
 other Windows tools return an explicit unavailable error after authorization, preventing
 fallback to the previous runtime. The app hosts a same-user private Unix socket under
-`machines/agents/native.sock`; HPA1 accepts only status and capture. Headers are limited to
+`machines/agents/native.sock`; HPA1 accepts status, capture and leased control. Headers are limited to
 4 KiB, frames to 64 MiB, connections to 16 and buffered captures to one. Policy is rechecked
 before dispatch, after completion and during pixel delivery. Peer credentials and private
 socket/directory ownership are checked on both sides. The service does not retain the VM
-registry while idle, cannot accept boot paths or input, and is removed on host teardown.
+registry while idle, cannot accept boot paths, and is removed on host teardown.
 Disconnected requests cancel while the worker protocol drains. Inside-guest connections,
-remote lifecycle, input and guest-tool transport remain pending.
+remote lifecycle and guest-tool transport remain pending.
 Native input cannot bypass its lease through the public request API. An owner is invalidated
 on cancellation, policy revocation, pause/stop/restart or five seconds of inactivity. Its
 exclusive gate remains held through asynchronous held-key/button release; cleanup never
@@ -30,8 +31,10 @@ crosses worker generations. Competing claims check the gate before waiting for t
 session. Release failure blocks reuse in that generation until the worker is replaced.
 Idle input leases retain only weak registry references. Viewer focus loss/drop and queue
 overflow close the lease; reconnect waits for prior cleanup and cannot release another
-owner's keys. The private agent socket still accepts status/capture only; control delivery
-must hold a connection-scoped lease when implemented.
+owner's keys. Remote control accepts at most 64 input events per packet, refuses pipelining
+and closes ownership on malformed frames, disconnect or cancellation. Actual policy
+changes increment a persisted counter; off/on toggles invalidate existing agent leases
+and operations. Exhaustion still permits revocation and prevents re-enabling access.
 Prototype MCP operations recheck the persisted access setting, use per-VM
 cross-process locks, and expose only guest files/input. Snapshots require a
 stopped VM and use APFS copies, with a rollback snapshot on restore.
@@ -106,7 +109,7 @@ those leases with bare file handles. The download writer retains its inode lock 
 pending asynchronous writes and has a different ownership lifetime.
 Dropping the final client stops the worker.
 Started means allocated hardware, and Deployed means deployment completed; neither
-proves a usable desktop. Direct VZ integration, native agent transport, guest tools and
+proves a usable desktop. Direct VZ integration, inside-guest transport, guest tools and
 running-memory snapshots remain pending.
 
 ## What this is

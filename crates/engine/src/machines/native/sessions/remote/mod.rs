@@ -1,5 +1,6 @@
 //! Same-user agent transport to the registry that owns native workers.
 
+pub mod control;
 mod path;
 mod server;
 mod wire;
@@ -25,11 +26,15 @@ struct Request {
 enum Operation {
   Status,
   Capture,
+  Control,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 enum Reply {
+  Owned {},
+  Accepted {},
+  Released {},
   State {
     state: Option<Status>,
   },
@@ -63,26 +68,9 @@ async fn exchange(
   id: &str,
   operation: Operation,
 ) -> anyhow::Result<(Reply, Vec<u8>)> {
-  manager.machine(id, Actor::Agent)?;
+  let policy = manager.machine(id, Actor::Agent)?.agent_generation;
   let response = tokio::time::timeout(Duration::from_secs(165), async {
-    let endpoint = path::endpoint(manager)?;
-    path::socket(&endpoint)?;
-    let mut stream = UnixStream::connect(endpoint)
-      .await
-      .context("Connect to Hopper's native VM service")?;
-    ensure!(
-      stream.peer_cred()?.uid() == path::uid(),
-      "Native VM service belongs to another user"
-    );
-    wire::write(
-      &mut stream,
-      &Request {
-        vm_id: id.into(),
-        operation,
-      },
-      &[],
-    )
-    .await?;
+    let mut stream = connect(manager, id, operation).await?;
     let reply: Reply = wire::read(&mut stream).await?;
     let size = match &reply {
       Reply::Frame { width, height, .. } => wire::frame_size(*width, *height)?,
@@ -96,8 +84,34 @@ async fn exchange(
   })
   .await
   .context("Native VM service timed out")??;
-  manager.machine(id, Actor::Agent)?;
+  ensure!(
+    manager.machine(id, Actor::Agent)?.agent_generation == policy,
+    "VM agent policy has changed"
+  );
   Ok(response)
+}
+
+async fn connect(manager: &Machines, id: &str, operation: Operation) -> anyhow::Result<UnixStream> {
+  manager.machine(id, Actor::Agent)?;
+  let endpoint = path::endpoint(manager)?;
+  path::socket(&endpoint)?;
+  let mut stream = UnixStream::connect(endpoint)
+    .await
+    .context("Connect to Hopper's native VM service")?;
+  ensure!(
+    stream.peer_cred()?.uid() == path::uid(),
+    "Native VM service belongs to another user"
+  );
+  wire::write(
+    &mut stream,
+    &Request {
+      vm_id: id.into(),
+      operation,
+    },
+    &[],
+  )
+  .await?;
+  Ok(stream)
 }
 
 pub async fn status(manager: &Machines, id: &str) -> anyhow::Result<Option<Status>> {

@@ -45,7 +45,7 @@ impl Sessions {
     let client = &active.client;
     let state = client.state.clone();
     let input = matches!(command, Command::Input { .. });
-    let policy = self.check(id, actor);
+    let policy = self.check(id, actor)?;
     let check: super::super::Check = Arc::new(move || {
       policy()?;
       if let Some(owner) = &owner {
@@ -72,7 +72,7 @@ impl Sessions {
     let slot = self.slot(id).await?;
     let session = slot.session.lock().await;
     let _operation = self.inner.manager.lock(id)?;
-    let check = self.check(id, actor);
+    let check = self.check(id, actor)?;
     check()?;
     let active = session.as_ref().context("VM is not running")?;
     let client = &active.client;
@@ -83,7 +83,7 @@ impl Sessions {
     let slot = self.slot(id).await?;
     let mut session = slot.session.lock().await;
     let _operation = self.inner.manager.lock(id)?;
-    let check = self.check(id, actor);
+    let check = self.check(id, actor)?;
     check()?;
     let active = session.as_ref().context("VM is not running")?;
     let client = &active.client;
@@ -104,12 +104,17 @@ impl Sessions {
     Ok(())
   }
 
-  fn check(&self, id: &str, actor: Actor) -> super::super::Check {
+  fn check(&self, id: &str, actor: Actor) -> anyhow::Result<super::super::Check> {
+    let policy = self.inner.manager.machine(id, actor)?.agent_generation;
     let manager = self.inner.manager.clone();
     let id = id.to_owned();
-    Arc::new(move || {
-      manager.machine(&id, actor)?;
+    Ok(Arc::new(move || {
+      let machine = manager.machine(&id, actor)?;
+      ensure!(
+        actor != Actor::Agent || machine.agent_generation == policy,
+        "VM agent policy has changed"
+      );
       Ok(())
-    })
+    }))
   }
 }

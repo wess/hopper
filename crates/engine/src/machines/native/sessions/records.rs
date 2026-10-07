@@ -35,6 +35,7 @@ impl Sessions {
       resources: request.resources,
       installer: request.installer,
       agent_access: request.agent_access,
+      agent_generation: 0,
     };
     config::validate(&machine)?;
     config::paths(&self.inner.manager.root, &machine.id)?;

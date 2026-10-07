@@ -9,6 +9,7 @@ fn machine() -> Machine {
         profile: "ubuntu".into(),
         resources: EngineResources::default(),
         agent_access: false,
+        agent_generation: 0,
         installer: None,
     }
 }
@@ -38,6 +39,7 @@ fn new_requests_enable_agent_access_by_default_but_old_records_do_not() {
     value.as_object_mut().unwrap().remove("agentAccess");
     let old: Machine = serde_json::from_value(value).unwrap();
     assert!(!old.agent_access);
+    assert_eq!(old.agent_generation, 0);
 }
 
 #[test]
@@ -193,4 +195,18 @@ fn access_can_be_revoked_while_a_vm_operation_holds_its_lock() {
     lock.lock_exclusive().unwrap();
     manager.set_agent_access(&machine.id, false).unwrap();
     assert!(manager.machine(&machine.id, Actor::Agent).is_err());
+}
+
+#[test]
+fn exhausted_policy_generations_still_allow_revocation_and_prevent_reenable() {
+    let root = tempfile::tempdir().unwrap();
+    let manager = engine::machines::Machines { root: root.path().into() };
+    let mut record = machine();
+    record.agent_access = true;
+    record.agent_generation = u64::MAX;
+    store::json::write(&root.path().join("records").join(format!("{}.json", record.id)), &record).unwrap();
+    manager.set_agent_access(&record.id, false).unwrap();
+    assert!(manager.machine(&record.id, engine::machines::Actor::Agent).is_err());
+    assert!(manager.set_agent_access(&record.id, true).is_err());
+    assert!(!manager.machine(&record.id, engine::machines::Actor::Person).unwrap().agent_access);
 }

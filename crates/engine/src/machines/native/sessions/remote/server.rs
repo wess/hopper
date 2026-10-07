@@ -53,7 +53,7 @@ pub(super) fn start(registry: &Arc<Registry>) -> anyhow::Result<Server> {
           let registry = registry.clone();
           let captures = captures.clone();
           connections.spawn(async move {
-            let _ = tokio::time::timeout(Duration::from_secs(165), connection(stream, registry, captures)).await;
+            let _ = connection(stream, registry, captures).await;
           });
         }
       }
@@ -78,6 +78,23 @@ async fn connection(
   let request: Request = tokio::time::timeout(Duration::from_secs(5), wire::read(&mut stream))
     .await
     .context("Native agent request timed out")??;
+  if matches!(request.operation, Operation::Control) {
+    return super::control::serve(stream, registry, request.vm_id).await;
+  }
+  tokio::time::timeout(
+    Duration::from_secs(165),
+    single(stream, registry, request, captures),
+  )
+  .await
+  .context("Native agent request timed out")?
+}
+
+async fn single(
+  mut stream: UnixStream,
+  registry: Weak<Registry>,
+  request: Request,
+  captures: Arc<Semaphore>,
+) -> anyhow::Result<()> {
   let registry = registry
     .upgrade()
     .context("Hopper native VM registry is closed")?;
@@ -85,13 +102,16 @@ async fn connection(
     inner: registry.clone(),
   };
   let mut capture_lease = None;
+  let mut policy = None;
   let operation = async {
     let machine = registry.manager.machine(&request.vm_id, Actor::Agent)?;
     ensure!(
       machine.guest == model::GuestOs::Windows,
       "Native agent operation requires a Windows VM"
     );
+    policy = Some(machine.agent_generation);
     match request.operation {
+      Operation::Control => unreachable!("control was dispatched before registry retention"),
       Operation::Status => {
         let state = sessions
           .state(&request.vm_id, Actor::Agent)
@@ -129,7 +149,15 @@ async fn connection(
   };
   let (reply, pixels) = match result {
     Ok(reply) => {
-      registry.manager.machine(&request.vm_id, Actor::Agent)?;
+      ensure!(
+        Some(
+          registry
+            .manager
+            .machine(&request.vm_id, Actor::Agent)?
+            .agent_generation
+        ) == policy,
+        "VM agent policy has changed"
+      );
       reply
     }
     Err(error) => {
@@ -139,7 +167,15 @@ async fn connection(
   };
   wire::write(&mut stream, &reply, &[]).await?;
   for chunk in pixels.chunks(64 * 1024) {
-    registry.manager.machine(&request.vm_id, Actor::Agent)?;
+    ensure!(
+      Some(
+        registry
+          .manager
+          .machine(&request.vm_id, Actor::Agent)?
+          .agent_generation
+      ) == policy,
+      "VM agent policy has changed"
+    );
     stream.write_all(chunk).await?;
   }
   Ok(())

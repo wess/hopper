@@ -50,6 +50,7 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
       },
       installer: None,
       agent_access: true,
+      agent_generation: 0,
     };
     std::fs::create_dir_all(manager.root.join("records")).unwrap();
     std::fs::write(
@@ -75,7 +76,6 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
     "vm.start",
     "vm.stop",
     "vm.exec",
-    "vm.input",
     "vm.read_file",
     "vm.write_file",
     "vm.clone",
@@ -86,7 +86,7 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
     let result = mcp::tools::call(&host, tool, &json!({"id":machine.id})).await;
     assert_eq!(result["isError"], true, "{tool}: {result}");
     assert!(
-      content(&result).contains("Native Windows remote operations"),
+      content(&result).contains("This native Windows operation"),
       "{tool}: {result}"
     );
     assert_eq!(std::fs::read(&disk).unwrap(), b"retained prior guest disk");
@@ -151,11 +151,31 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
     .unwrap();
   let mut input = client.stdin.take().unwrap();
   let mut output = tokio::io::BufReader::new(client.stdout.take().unwrap());
-  for (number, denied) in [(1, false), (2, true)] {
+  let requests = [
+    ("vm.screenshot", json!({"id":native.id}), false),
+    (
+      "vm.input",
+      json!({"id":native.id,"input":{"type":"key","keys":"ctrl+alt+delete"}}),
+      false,
+    ),
+    (
+      "vm.input",
+      json!({"id":native.id,"input":{"type":"pointer","x":32767,"y":0,"button":"left"}}),
+      false,
+    ),
+    ("vm.screenshot", json!({"id":native.id}), true),
+    (
+      "vm.input",
+      json!({"id":native.id,"input":{"type":"key","keys":"a"}}),
+      true,
+    ),
+  ];
+  for (index, (name, arguments, denied)) in requests.into_iter().enumerate() {
     if denied {
       manager.set_agent_access(&native.id, false).unwrap();
     }
-    let request = json!({"jsonrpc":"2.0", "id":number, "method":"tools/call", "params":{"name":"vm.screenshot", "arguments":{"id":native.id}}});
+    let number = index + 1;
+    let request = json!({"jsonrpc":"2.0", "id":number, "method":"tools/call", "params":{"name":name, "arguments":arguments}});
     input
       .write_all(format!("{request}\n").as_bytes())
       .await
@@ -173,7 +193,7 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
     assert_eq!(response["id"], number);
     if denied {
       assert_eq!(response["result"]["isError"], true);
-    } else {
+    } else if name == "vm.screenshot" {
       let bytes = base64::engine::general_purpose::STANDARD
         .decode(response["result"]["content"][0]["data"].as_str().unwrap())
         .unwrap();
@@ -184,8 +204,37 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
           .as_raw(),
         &[1, 2, 3, 255]
       );
+    } else {
+      assert_ne!(response["result"]["isError"], true, "{response}");
     }
   }
+  let inputs: Vec<Value> = std::fs::read_to_string(probe.join("inputs"))
+    .unwrap()
+    .lines()
+    .map(|line| serde_json::from_str(line).unwrap())
+    .collect();
+  assert_eq!(inputs.len(), 2);
+  assert_eq!(inputs[0]["device"], "keyboard");
+  assert_eq!(
+    inputs[0]["events"],
+    json!([
+      {"kind":1,"code":29,"value":1},{"kind":1,"code":56,"value":1},{"kind":1,"code":111,"value":1},
+      {"kind":0,"code":0,"value":0},
+      {"kind":1,"code":111,"value":0},{"kind":1,"code":56,"value":0},{"kind":1,"code":29,"value":0},
+      {"kind":0,"code":0,"value":0},
+    ])
+  );
+  assert_eq!(inputs[1]["device"], "tablet");
+  assert_eq!(inputs[1]["events"][0]["value"], 65535);
+  assert_eq!(inputs[1]["events"][1]["value"], 0);
+  assert_eq!(
+    inputs[1]["events"][2],
+    json!({"kind":1,"code":272,"value":1})
+  );
+  assert_eq!(
+    inputs[1]["events"][4],
+    json!({"kind":1,"code":272,"value":0})
+  );
   drop(input);
   assert!(
     tokio::time::timeout(std::time::Duration::from_secs(5), client.wait())
@@ -208,6 +257,6 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
   assert!(rows.is_empty());
   let result = mcp::tools::call(&host, "vm.start", &json!({"id":machine.id})).await;
   assert_eq!(result["isError"], true);
-  assert!(!content(&result).contains("Native Windows remote operations"));
+  assert!(!content(&result).contains("This native Windows operation"));
   assert!(manager.machine(&machine.id, MachineActor::Agent).is_err());
 }

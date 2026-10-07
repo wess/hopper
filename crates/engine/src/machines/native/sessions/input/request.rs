@@ -39,6 +39,9 @@ impl Input {
     let active = self.active.clone();
     let generation = self.generation.clone();
     let epoch = self.epoch;
+    let policy = self.policy;
+    let manager = sessions.inner.manager.clone();
+    let id = self.id.clone();
     let owner: super::super::super::Check = Arc::new(move || {
       ensure!(
         active.load(Ordering::Acquire),
@@ -48,6 +51,15 @@ impl Input {
         *generation.lock().unwrap_or_else(|error| error.into_inner()) == epoch,
         "Guest input belongs to a previous worker"
       );
+      if let Some(policy) = policy {
+        ensure!(
+          manager
+            .machine(&id, crate::machines::Actor::Agent)?
+            .agent_generation
+            == policy,
+          "Guest input agent policy has changed"
+        );
+      }
       Ok(())
     });
     let mut cancel = Cancel {

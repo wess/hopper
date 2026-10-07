@@ -73,6 +73,9 @@ while True:
         sys.exit(0)
     with (root / "trace").open("a") as trace:
         trace.write(kind + "\n")
+    if kind == "input":
+        with (root / "inputs").open("a") as inputs:
+            inputs.write(json.dumps(req["command"]) + "\n")
     if kind == "stop":
         if mode == "stopdelay":
             (root / "stopreceived").touch()

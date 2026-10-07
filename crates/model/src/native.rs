@@ -1,3 +1,5 @@
+pub mod keyboard;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]

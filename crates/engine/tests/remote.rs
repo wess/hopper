@@ -96,6 +96,22 @@ async fn policy_revocation_discards_a_frame_already_in_flight() {
 }
 
 #[tokio::test]
+async fn access_reenable_does_not_publish_a_capture_from_the_previous_policy() {
+  let f = Fixture::new();
+  f.start("cancel").await;
+  let _server = f.sessions.serve_agents().unwrap();
+  let manager = f.manager.clone();
+  let capture = tokio::spawn(async move { remote::capture(&manager, ID).await });
+  f.marker("partial").await;
+  f.manager.set_agent_access(ID, false).unwrap();
+  f.manager.set_agent_access(ID, true).unwrap();
+  f.signal("continue");
+  assert!(capture.await.unwrap().is_err());
+  assert!(remote::capture(&f.manager, ID).await.is_ok());
+  f.sessions.stop(ID, Actor::Person).await.unwrap();
+}
+
+#[tokio::test]
 async fn malformed_headers_and_boot_commands_cannot_reach_the_worker() {
   let f = Fixture::new();
   f.start("normal").await;

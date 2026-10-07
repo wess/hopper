@@ -30,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
       disk_gib: 64,
     },
     agent_access: true,
+    agent_generation: 0,
     installer: None,
   };
   store::json::write(

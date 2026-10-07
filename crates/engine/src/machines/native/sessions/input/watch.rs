@@ -17,6 +17,7 @@ pub(super) fn start(
   let registry = lease.registry.clone();
   let id = lease.id.clone();
   let actor = lease.actor;
+  let policy = lease.policy;
   let generation = lease.generation.clone();
   let epoch = lease.epoch;
   let active = lease.active.clone();
@@ -33,7 +34,7 @@ pub(super) fn start(
         changed = activity.changed() => { if changed.is_err() { break; } }
         _ = tokio::time::sleep_until(deadline) => { break; }
         _ = tick.tick() => {
-          let allowed = registry.upgrade().is_some_and(|registry| registry.manager.machine(&id, actor).is_ok());
+          let allowed = registry.upgrade().is_some_and(|registry| registry.manager.machine(&id, actor).is_ok_and(|machine| policy.is_none_or(|epoch| machine.agent_generation == epoch)));
           let current = *generation.lock().unwrap_or_else(|error| error.into_inner()) == epoch;
           if !allowed || !current || !matches!(*state.borrow(), State::Running) { break; }
         }
