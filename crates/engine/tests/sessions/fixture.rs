@@ -20,7 +20,8 @@ pub struct Fixture {
 
 impl Fixture {
   pub fn new() -> Self {
-    let root = tempfile::tempdir().unwrap();
+    // macOS temporary roots can exceed the Unix socket path limit.
+    let root = tempfile::tempdir_in("/tmp").unwrap();
     let manager = Machines {
       root: root.path().join("machines"),
     };

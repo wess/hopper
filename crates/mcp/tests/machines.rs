@@ -10,7 +10,7 @@ fn content(result: &Value) -> &str {
 
 #[tokio::test]
 async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_runtime() {
-  let root = tempfile::tempdir().unwrap();
+  let root = tempfile::tempdir_in("/tmp").unwrap();
   let previous = std::env::var_os("HOPPER_DIR");
   std::env::set_var("HOPPER_DIR", root.path());
   let host = Arc::new(host::Host::from_env());
@@ -76,7 +76,6 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
     "vm.stop",
     "vm.exec",
     "vm.input",
-    "vm.screenshot",
     "vm.read_file",
     "vm.write_file",
     "vm.clone",
@@ -92,6 +91,117 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
     );
     assert_eq!(std::fs::read(&disk).unwrap(), b"retained prior guest disk");
   }
+  let missing = mcp::tools::call(&host, "vm.screenshot", &json!({"id":machine.id})).await;
+  assert_eq!(missing["isError"], true);
+  let mut native = machine.clone();
+  native.id = model::new_uuid();
+  std::fs::write(
+    manager
+      .root
+      .join("records")
+      .join(format!("{}.json", native.id)),
+    serde_json::to_vec(&native).unwrap(),
+  )
+  .unwrap();
+  let probe = root.path().join("probe");
+  std::fs::create_dir(&probe).unwrap();
+  let worker = root.path().join("worker");
+  std::fs::write(&worker, include_str!("../../engine/tests/native/worker.py")).unwrap();
+  use std::os::unix::fs::PermissionsExt;
+  std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
+  host.serve_machine_agents().unwrap();
+  host
+    .native_machines()
+    .start(
+      &native.id,
+      &worker,
+      model::native::Boot {
+        firmware: String::new(),
+        variables: String::new(),
+        store: probe.to_string_lossy().into(),
+        boot_media: None,
+        installer: None,
+        disk: None,
+        disk_id: "normal".into(),
+        memory: 0x10000000,
+        cpus: 2,
+        timeout_ms: None,
+      },
+    )
+    .await
+    .unwrap();
+  let image = mcp::tools::call(&host, "vm.screenshot", &json!({"id":native.id})).await;
+  assert_ne!(image["isError"], true, "{image}");
+  use base64::Engine;
+  let bytes = base64::engine::general_purpose::STANDARD
+    .decode(image["content"][0]["data"].as_str().unwrap())
+    .unwrap();
+  assert!(bytes.starts_with(b"\x89PNG\r\n\x1a\n"));
+  let pixels = image::load_from_memory(&bytes).unwrap().into_rgba8();
+  assert_eq!(pixels.dimensions(), (1, 1));
+  assert_eq!(pixels.as_raw(), &[1, 2, 3, 255]);
+  use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+  let mut client = tokio::process::Command::new(env!("CARGO_BIN_EXE_hoppermcp"))
+    .env("HOPPER_DIR", root.path())
+    .stdin(std::process::Stdio::piped())
+    .stdout(std::process::Stdio::piped())
+    .stderr(std::process::Stdio::null())
+    .kill_on_drop(true)
+    .spawn()
+    .unwrap();
+  let mut input = client.stdin.take().unwrap();
+  let mut output = tokio::io::BufReader::new(client.stdout.take().unwrap());
+  for (number, denied) in [(1, false), (2, true)] {
+    if denied {
+      manager.set_agent_access(&native.id, false).unwrap();
+    }
+    let request = json!({"jsonrpc":"2.0", "id":number, "method":"tools/call", "params":{"name":"vm.screenshot", "arguments":{"id":native.id}}});
+    input
+      .write_all(format!("{request}\n").as_bytes())
+      .await
+      .unwrap();
+    input.flush().await.unwrap();
+    let mut line = String::new();
+    tokio::time::timeout(
+      std::time::Duration::from_secs(5),
+      output.read_line(&mut line),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let response: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(response["id"], number);
+    if denied {
+      assert_eq!(response["result"]["isError"], true);
+    } else {
+      let bytes = base64::engine::general_purpose::STANDARD
+        .decode(response["result"]["content"][0]["data"].as_str().unwrap())
+        .unwrap();
+      assert_eq!(
+        image::load_from_memory(&bytes)
+          .unwrap()
+          .into_rgba8()
+          .as_raw(),
+        &[1, 2, 3, 255]
+      );
+    }
+  }
+  drop(input);
+  assert!(
+    tokio::time::timeout(std::time::Duration::from_secs(5), client.wait())
+      .await
+      .unwrap()
+      .unwrap()
+      .success()
+  );
+  manager.set_agent_access(&native.id, false).unwrap();
+  let denied = mcp::tools::call(&host, "vm.screenshot", &json!({"id":native.id})).await;
+  assert_eq!(denied["isError"], true);
+  host
+    .native_machines()
+    .stop(&native.id, MachineActor::Person)
+    .await
+    .unwrap();
   manager.set_agent_access(&machine.id, false).unwrap();
   let listed = mcp::tools::call(&host, "vm.list", &json!({})).await;
   let rows: Vec<model::MachineStatus> = serde_json::from_str(content(&listed)).unwrap();

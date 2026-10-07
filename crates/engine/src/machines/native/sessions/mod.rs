@@ -12,6 +12,8 @@ mod install;
 mod owner;
 mod reboot;
 mod records;
+#[cfg(unix)]
+pub mod remote;
 use owner::{finished, Session};
 
 struct Slot {

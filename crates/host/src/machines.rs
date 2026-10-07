@@ -2,6 +2,23 @@ use crate::{Host, MachineActor};
 use model::{CreateMachine, Machine, MachineStatus};
 
 impl Host {
+  #[cfg(unix)]
+  pub fn serve_machine_agents(&self) -> anyhow::Result<()> {
+    let mut server = self
+      .machine_agents
+      .lock()
+      .map_err(|_| anyhow::anyhow!("Native agent service lock failed"))?;
+    if server.is_none() {
+      *server = Some(self.native_machines().serve_agents()?);
+    }
+    Ok(())
+  }
+
+  #[cfg(unix)]
+  pub async fn capture_native_machine(&self, id: &str) -> anyhow::Result<crate::MachineFrame> {
+    ::engine::machines::native::sessions::remote::capture(&self.machines(), id).await
+  }
+
   pub async fn list_machines(&self, actor: MachineActor) -> anyhow::Result<Vec<MachineStatus>> {
     let mut rows = self.native_machines().list_windows(actor).await?;
     rows.extend(self.machines().list_non_windows(actor).await?);

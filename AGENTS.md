@@ -11,9 +11,17 @@ preserved for migration and are not started through the native path. macOS and W
 guests are experimental. Release hosts remain
 Apple silicon macOS 26+.
 Each VM has a dedicated viewer. Agent access defaults on for new VMs and clones
-inherit it. Native Windows guest tools and agent transport are still pending. MCP lists and creates
-Windows through the native facade; other Windows tools return an explicit unavailable
-error after authorization, preventing fallback to the previous runtime.
+inherit it. Native Windows guest tools and input ownership are still pending. MCP lists and creates
+Windows through the native facade. Screenshots connect to the app-owned native registry;
+other Windows tools return an explicit unavailable error after authorization, preventing
+fallback to the previous runtime. The app hosts a same-user private Unix socket under
+`machines/agents/native.sock`; HPA1 accepts only status and capture. Headers are limited to
+4 KiB, frames to 64 MiB, connections to 16 and buffered captures to one. Policy is rechecked
+before dispatch, after completion and during pixel delivery. Peer credentials and private
+socket/directory ownership are checked on both sides. The service does not retain the VM
+registry while idle, cannot accept boot paths or input, and is removed on host teardown.
+Disconnected requests cancel while the worker protocol drains. Inside-guest connections,
+remote lifecycle, input and guest-tool transport remain pending.
 Prototype MCP operations recheck the persisted access setting, use per-VM
 cross-process locks, and expose only guest files/input. Snapshots require a
 stopped VM and use APFS copies, with a rollback snapshot on restore.

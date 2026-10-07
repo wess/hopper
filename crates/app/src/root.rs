@@ -43,6 +43,13 @@ pub struct Root {
 impl Root {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let host = Host::from_env();
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        {
+            let _runtime = bridge::runtime().enter();
+            if let Err(error) = host.serve_machine_agents() {
+                tracing::error!(%error, "could not start native VM agent service");
+            }
+        }
         let state = AppState::new(Arc::clone(&host), cx);
         provide(cx, state.clone());
         watch(cx, &state.route);

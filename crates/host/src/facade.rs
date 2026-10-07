@@ -43,6 +43,8 @@ pub struct Host {
     workspaces: RwLock<Vec<Workspace>>,
     machines: ::engine::machines::Machines,
     native_machines: ::engine::machines::native::sessions::Sessions,
+    #[cfg(unix)]
+    pub(crate) machine_agents: std::sync::Mutex<Option<::engine::machines::native::sessions::remote::Server>>,
 }
 
 impl Host {
@@ -55,6 +57,8 @@ impl Host {
         Arc::new(Self {
             native_machines: ::engine::machines::native::sessions::Sessions::new(machines.clone()),
             machines,
+            #[cfg(unix)]
+            machine_agents: std::sync::Mutex::new(None),
             engines: crate::engine::Engines::new(client.clone()),
             client,
             provider: RwLock::new("existing".into()),

@@ -15,6 +15,7 @@ model = { workspace = true }
 docker = { workspace = true }
 host = { workspace = true }
 base64 = { workspace = true }
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 tempfile = { workspace = true }
 
 tokio = { workspace = true, features = ["io-std"] }

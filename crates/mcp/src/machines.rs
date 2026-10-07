@@ -1,3 +1,4 @@
+mod capture;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use host::{Host, MachineActor};
 use model::{CreateMachine, EngineResources, MachineInput};
@@ -14,7 +15,7 @@ pub fn catalogue() -> Vec<Value> {
         ("vm.start", "Start a VM and open its dedicated display window. First boot downloads and prepares the guest and can take several minutes. Windows startup currently requires the Hopper app.",json!({"id":id}),vec!["id"]),
         ("vm.stop", "Gracefully stop a VM; its disk is retained.",json!({"id":id}),vec!["id"]),
         ("vm.exec", "Execute a command inside the guest, never on the host. argv is an array of command arguments, such as [\"uname\",\"-a\"]. Output is bounded and commands time out after 120 seconds.",json!({"id":id,"argv":{"type":"array","items":{"type":"string"},"minItems":1}}),vec!["id","argv"]),
-        ("vm.screenshot", "Capture the VM display as a PNG image. The VM must be running with its display visible.",json!({"id":id}),vec!["id"]),
+        ("vm.screenshot", "Capture the VM display as a PNG image. Native Windows captures connect to the running Hopper app and do not require a visible viewer.",json!({"id":id}),vec!["id"]),
         ("vm.input", "Send guest input. Linux uses xdotool key names. Native Windows remote input is not available yet. Pointer x/y are normalized 0–32767. macOS uses guest key names (super is Command) and requires guest Accessibility permission for osascript. Windows guest tools are pending.",json!({"id":id,"input":{"oneOf":[{"type":"object","properties":{"type":{"const":"key"},"keys":string},"required":["type","keys"]},{"type":"object","properties":{"type":{"const":"text"},"text":string},"required":["type","text"]},{"type":"object","properties":{"type":{"const":"pointer"},"x":{"type":"integer","minimum":0,"maximum":32767},"y":{"type":"integer","minimum":0,"maximum":32767},"button":{"enum":["left","right","middle"]}},"required":["type","x","y"]}]}}),vec!["id","input"]),
         ("vm.read_file", "Read a UTF-8 file from the guest (up to 1 MiB).",json!({"id":id,"path":string}),vec!["id","path"]),
         ("vm.write_file", "Write UTF-8 content into a guest file (up to 1 MiB). Overwrites the destination. No host folders are shared with these VMs.",json!({"id":id,"path":string,"content":string}),vec!["id","path","content"]),
@@ -88,6 +89,10 @@ async fn run(host: &Arc<Host>, name: &str, args: &Value) -> anyhow::Result<Value
     // Authorize before creating temporary files or revealing VM metadata.
     let machine = machines.machine(id, actor)?;
     if machine.guest == model::GuestOs::Windows {
+        #[cfg(unix)]
+        if name == "vm.screenshot" {
+            return capture::native(host, id).await;
+        }
         anyhow::bail!(
             "Native Windows remote operations are not available yet. Use the Hopper app; this operation will not start the previous runtime."
         );

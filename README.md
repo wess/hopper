@@ -16,18 +16,19 @@ quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and 
 
 ## Features
 
-- **Virtual machines** — Ubuntu Desktop, macOS, and Windows 11 ARM64 profiles,
-  dedicated viewer windows, disk snapshots, recovery, and independent clones.
-  OS images download on first start. Windows fetches Microsoft installation media
-  and prepares its bootable ARM64 installer automatically; a local English US ISO
-  is optional. macOS and Windows guest support is experimental. Windows has no accelerated 3D graphics.
-  Guest VMs live under `~/.hopper/machines`, share no host folders, and remain
-  running when Hopper quits.
-- **Agent access** — enabled for new VMs, revocable per VM. The MCP server
-  exposes guest commands, screenshots, files, input, cloning, and snapshots.
-  Linux supports text, keyboard, and mouse input. Windows supports QEMU keys
-  and mouse input; macOS input requires Accessibility permission inside the guest.
-  Snapshots and clones require a stopped VM. Clones inherit agent access.
+- **Virtual machines** — Ubuntu Desktop and macOS prototypes, plus Windows 11
+  ARM64 through Hopper's native runtime and dedicated viewer. Automatic image
+  acquisition and installation preparation are implemented; complete native Windows
+  installation and first boot remain unverified. A local installer is optional.
+  Guest VMs live under `~/.hopper/machines`. Closing the native viewer keeps Windows
+  running; quitting Hopper stops its owned Windows sessions. Windows snapshots,
+  clones and accelerated graphics remain unfinished. Linux and macOS still use Lima.
+- **Agent access** — enabled for new VMs, revocable per VM. The MCP server creates
+  and lists native Windows VMs and captures their display through the running app.
+  Windows input, commands, files, snapshots and clones remain unavailable. The
+  Linux/macOS prototypes expose guest operations; macOS input requires Accessibility
+  permission inside the guest. Prototype snapshots and clones require a stopped VM;
+  clones inherit agent access.
 
 - **Dashboard** — running/total containers, image/volume/network counts, disk
   usage with reclaimable meters, and one-click "Clean up" (system prune).
@@ -144,11 +145,20 @@ variables are useful for remote daemons and shell-driven workflows.
 
 ### Native VM development
 
-The replacement Windows runtime uses Hypervisor.framework directly. It is not
-connected to the app yet. Its firmware diagnostic boots ARM64 UEFI with a native
+The replacement Windows runtime uses Hypervisor.framework directly. Windows creation,
+listing, startup and dedicated viewing now use it in the app. Installation, first boot
+and the rendered desktop remain unverified. Its firmware diagnostic boots ARM64 UEFI with a native
 GIC, serial console, CFI flash, ACPI handoff, PCI configuration bus, and firmware
 service calls. This does not establish Windows installation or desktop support. The major release gates are in
 [PRODUCT.md](PRODUCT.md).
+
+Native Windows agent screenshots use the running Hopper app's owned registry. Run
+`hoppermcp` as the same macOS user, with the same `HOPPER_DIR` if overridden, then call
+`vm.list` and `vm.screenshot` with the native VM ID. The viewer can be closed; the VM
+must still be running and agent access must remain enabled. The private local service
+only accepts status and capture, rechecks persisted access, and never launches another
+worker. Remote Windows input, commands, files, lifecycle, snapshots and clones are not
+available yet. Inside-guest agent connections remain pending.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into
