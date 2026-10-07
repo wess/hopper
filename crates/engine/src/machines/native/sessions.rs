@@ -54,7 +54,7 @@ impl Sessions {
 
   /// internal startup only; never expose helper or boot paths through an agent endpoint.
   pub async fn start(&self, id: &str, helper: &Path, boot: Boot) -> anyhow::Result<()> {
-    self.start_using(id, helper, || Ok(boot)).await
+    self.start_using(id, helper, async move { Ok(boot) }).await
   }
 
   pub async fn start_configured(
@@ -63,9 +63,30 @@ impl Sessions {
     assets: &super::assets::Assets,
     stage: super::config::Stage,
   ) -> anyhow::Result<()> {
+    let manager = self.manager.clone();
+    let identity = id.to_owned();
+    let configuration = assets.clone();
     self
-      .start_using(id, &assets.worker, || {
-        super::config::prepare(&self.manager, id, assets, stage)
+      .start_using(id, &assets.worker, async move {
+        super::config::prepare(&manager, &identity, &configuration, stage)
+      })
+      .await
+  }
+
+  pub async fn deploy(
+    &self,
+    id: &str,
+    assets: &super::assets::Assets,
+    tools: &super::deployment::Tools,
+    progress: watch::Sender<super::deployment::Phase>,
+  ) -> anyhow::Result<()> {
+    let manager = self.manager.clone();
+    let identity = id.to_owned();
+    let configuration = assets.clone();
+    let tools = tools.clone();
+    self
+      .start_using(id, &assets.worker, async move {
+        super::deployment::prepare(&manager, &identity, &configuration, &tools, &progress).await
       })
       .await
   }
@@ -74,7 +95,7 @@ impl Sessions {
     &self,
     id: &str,
     helper: &Path,
-    prepare: impl FnOnce() -> anyhow::Result<Boot>,
+    prepare: impl std::future::Future<Output = anyhow::Result<Boot>> + Send + 'static,
   ) -> anyhow::Result<()> {
     let slot = self.slot(id).await?;
     let mut session = slot.lock().await;
@@ -100,13 +121,21 @@ impl Sessions {
       session.take();
     }
     let lease = self.manager.guard(id, ".runtime")?;
-    let boot = prepare()?;
     let helper = helper.to_owned();
     let (result, started) = tokio::sync::oneshot::channel();
     // cancellation drops the result, while startup still cleans up under both locks.
     tokio::spawn(async move {
       let _operation = _operation;
-      let startup = match super::launch(&helper, boot).await {
+      let prepared = async {
+        let boot = prepare.await?;
+        ensure!(
+          !result.is_closed(),
+          "Native startup caller was cancelled; prepared data retained"
+        );
+        super::launch(&helper, boot).await
+      }
+      .await;
+      let startup = match prepared {
         Ok(client) => {
           let mut ended = client.ended.clone();
           let (release, released) = watch::channel(false);

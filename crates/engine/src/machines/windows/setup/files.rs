@@ -112,3 +112,40 @@ pub(super) fn write(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
   file.sync_all()?;
   Ok(())
 }
+
+pub(crate) async fn digest(path: &Path, limit: u64) -> anyhow::Result<String> {
+  let path = path.to_owned();
+  tokio::task::spawn_blocking(move || {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::OpenOptionsExt;
+      options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let mut file = options.open(path)?.take(limit + 1);
+    let info = file.get_ref().metadata()?;
+    ensure!(
+      info.is_file() && (1..=limit).contains(&info.len()),
+      "Invalid installer checksum input"
+    );
+    let mut hash = Sha256::new();
+    let mut buffer = vec![0; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+      let read = file.read(&mut buffer)?;
+      if read == 0 {
+        break;
+      }
+      total += read as u64;
+      ensure!(total <= limit, "Installer exceeds its checksum bound");
+      hash.update(&buffer[..read]);
+    }
+    ensure!(
+      total == info.len(),
+      "Installer size changed during checksum"
+    );
+    Ok(format!("{:x}", hash.finalize()))
+  })
+  .await?
+}

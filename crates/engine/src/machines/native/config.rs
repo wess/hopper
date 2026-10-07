@@ -79,27 +79,9 @@ pub fn prepare(
   let paths = paths(&manager.root, id)?;
   private_directory(&manager.root.join("native"))?;
   private_directory(&paths.root)?;
-  let disk = assets::regular(&paths.disk, 2048 * 1024 * 1024 * 1024)?;
-  private_file(&disk)?;
-  disk
-    .try_lock_exclusive()
-    .context("Native disk is already in use")?;
-  ensure!(
-    disk.metadata()?.len() == u64::from(machine.resources.disk_gib) * 1024 * 1024 * 1024,
-    "Native disk capacity does not match the VM record"
-  );
+  let disk = target(&paths, &machine, matches!(stage, Stage::Deployment))?;
   let (boot_media, installer) = match stage {
     Stage::Deployment => {
-      #[cfg(unix)]
-      {
-        use std::os::unix::fs::MetadataExt;
-        ensure!(
-          disk.metadata()?.blocks() == 0,
-          "Deployment target already contains allocated data; preserve it for recovery"
-        );
-      }
-      #[cfg(not(unix))]
-      anyhow::bail!("Native deployment requires a Unix host");
       private_directory(&paths.root.join("setup"))?;
       verify_setup(&paths.setup, id)?;
       let installer = machine
@@ -197,7 +179,7 @@ fn text(path: &Path) -> anyhow::Result<String> {
   )
 }
 
-fn verify_setup(path: &Path, id: &str) -> anyhow::Result<()> {
+pub(super) fn verify_setup(path: &Path, id: &str) -> anyhow::Result<()> {
   #[derive(serde::Deserialize)]
   #[serde(rename_all = "camelCase")]
   struct Manifest {
@@ -248,4 +230,33 @@ fn verify_setup(path: &Path, id: &str) -> anyhow::Result<()> {
     "Setup image checksum mismatch"
   );
   Ok(())
+}
+
+pub(super) fn target(
+  paths: &Paths,
+  machine: &model::Machine,
+  unwritten: bool,
+) -> anyhow::Result<std::fs::File> {
+  let disk = assets::regular(&paths.disk, 2048 * 1024 * 1024 * 1024)?;
+  private_file(&disk)?;
+  disk
+    .try_lock_exclusive()
+    .context("Native disk is already in use")?;
+  ensure!(
+    disk.metadata()?.len() == u64::from(machine.resources.disk_gib) * 1024 * 1024 * 1024,
+    "Native disk capacity does not match the VM record"
+  );
+  if unwritten {
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::MetadataExt;
+      ensure!(
+        disk.metadata()?.blocks() == 0,
+        "Deployment target already contains allocated data; preserve it for recovery"
+      );
+    }
+    #[cfg(not(unix))]
+    anyhow::bail!("Native deployment requires a Unix host");
+  }
+  Ok(disk)
 }

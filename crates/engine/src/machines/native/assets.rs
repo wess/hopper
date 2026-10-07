@@ -9,6 +9,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
+#[derive(Clone)]
 pub struct Assets {
   pub(super) worker: PathBuf,
   pub(super) firmware: PathBuf,

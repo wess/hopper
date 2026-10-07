@@ -134,3 +134,17 @@ fn archive_catalogue_uses_types_even_when_directories_have_no_trailing_slash() {
   assert_eq!(members.len(), 2);
   assert!(archive::catalogue(names, "- truncated").is_err());
 }
+
+#[tokio::test]
+async fn installer_changed_during_construction_is_not_published() {
+  let f = Fixture::new("normal");
+  let input = f.input();
+  let result = engine::machines::windows::setup::build(&input, &f.tools, |phase| {
+    if matches!(phase, engine::machines::windows::setup::Phase::Building) {
+      std::fs::write(input.installer, b"changed installation image").unwrap();
+    }
+  })
+  .await;
+  assert!(result.is_err());
+  assert!(!f.output.exists() && !f.output.with_extension("json").exists());
+}

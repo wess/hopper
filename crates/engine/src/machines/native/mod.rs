@@ -4,6 +4,7 @@
 mod actor;
 pub mod assets;
 pub mod config;
+pub mod deployment;
 pub mod sessions;
 mod wire;
 

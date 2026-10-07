@@ -23,12 +23,25 @@ if name == "archive":
     else:
         sys.stdout.buffer.write(b"synthetic boot media")
 elif name == "wim":
-    commands = sys.stdin.read()
-    assert '/hopper' in commands and '/Windows/System32/winpeshl.ini' in commands
-    assert sys.argv[1] == "update" and sys.argv[3] == "2"
-    (root / "updated").touch()
-    if mode == "fail":
-        sys.exit(3)
+    if sys.argv[1] == "info":
+        if mode == "gate":
+            (root / "waiting").touch()
+            while not (root / "continue").exists():
+                time.sleep(0.005)
+        print('<WIM><IMAGE INDEX="3"><WINDOWS><ARCH>12</ARCH><EDITIONID>Professional</EDITIONID></WINDOWS></IMAGE></WIM>')
+    elif sys.argv[1] == "dir":
+        if "--detailed" in sys.argv:
+            size = 1200000000 if mode == "large" else 553361061
+            print(f"Uncompressed size = {size} bytes")
+        else:
+            print("/Windows/System32/Recovery/Winre.wim")
+    else:
+        commands = sys.stdin.read()
+        assert '/hopper' in commands and '/Windows/System32/winpeshl.ini' in commands
+        assert sys.argv[1] == "update" and sys.argv[3] == "2"
+        (root / "updated").touch()
+        if mode == "fail":
+            sys.exit(3)
 elif name == "image":
     image = Path(sys.argv[sys.argv.index("-o") + 1])
     assert (root / "updated").exists()

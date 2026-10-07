@@ -2,7 +2,7 @@ use anyhow::{ensure, Context};
 use std::{path::Path, process::Stdio, time::Duration};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-pub(super) async fn run(
+pub(crate) async fn run(
   program: &Path,
   args: &[String],
   input: Option<&[u8]>,

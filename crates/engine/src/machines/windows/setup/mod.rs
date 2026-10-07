@@ -2,7 +2,7 @@
 
 pub mod archive;
 pub mod files;
-mod process;
+pub(crate) mod process;
 
 use super::{deploy::Plan, provision::Provision};
 use anyhow::{ensure, Context};
@@ -12,6 +12,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
+#[derive(Clone)]
 pub struct Tools {
   pub archive: PathBuf,
   pub wim: PathBuf,
@@ -30,6 +31,7 @@ pub struct Input<'a> {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Phase {
+  VerifyingSource,
   Extracting,
   Drivers,
   Updating,
@@ -93,6 +95,8 @@ pub async fn build(
   );
   let payload = root.join("payload");
   let media = root.join("media");
+  progress(Phase::VerifyingSource);
+  let installer_hash = files::digest(input.installer, 12 * 1024 * 1024 * 1024).await?;
   std::fs::create_dir(&payload)?;
   std::fs::create_dir(&media)?;
   for (name, content) in [
@@ -189,9 +193,15 @@ pub async fn build(
     std::fs::set_permissions(&image, std::fs::Permissions::from_mode(0o600))?;
   }
   file.sync_all()?;
+  progress(Phase::VerifyingSource);
+  ensure!(
+    files::digest(input.installer, 12 * 1024 * 1024 * 1024).await? == installer_hash,
+    "Installer changed during setup construction"
+  );
   let manifest = serde_json::to_vec(&serde_json::json!({
     "vmId": input.vm_id, "size": size, "sha256": format!("{:x}", digest.finalize()), "driverSha256": hashes,
     "containsGuestCredentials": true, "detachBeforeFirstBoot": true,
+    "installerSha256": installer_hash, "planSha256": plan_hash(input.plan),
   }))?;
   files::write(&publication.join("deployment.json"), &manifest)?;
   std::fs::File::open(&publication)?.sync_all()?;
@@ -199,6 +209,33 @@ pub async fn build(
   std::fs::rename(&publication, parent).context("Publish complete private setup bundle")?;
   std::fs::File::open(parent.parent().unwrap())?.sync_all()?;
   Ok(())
+}
+
+pub(crate) async fn verify_source(
+  output: &Path,
+  installer: &Path,
+  plan: &Plan,
+) -> anyhow::Result<()> {
+  let bytes = files::read(&output.with_extension("json"), 1024 * 1024)?;
+  let metadata: serde_json::Value = serde_json::from_slice(&bytes)?;
+  ensure!(
+    metadata["planSha256"].as_str() == Some(plan_hash(plan).as_str()),
+    "Existing setup bundle uses a different deployment layout; preserve it for recovery"
+  );
+  let hash = files::digest(installer, 12 * 1024 * 1024 * 1024).await?;
+  ensure!(
+    metadata["installerSha256"].as_str() == Some(hash.as_str()),
+    "Existing setup bundle uses different installation media; preserve it for recovery"
+  );
+  Ok(())
+}
+
+fn plan_hash(plan: &Plan) -> String {
+  let mut hash = Sha256::new();
+  hash.update((plan.partitions.len() as u64).to_le_bytes());
+  hash.update(&plan.partitions);
+  hash.update(&plan.commands);
+  format!("{:x}", hash.finalize())
 }
 
 fn path(path: &Path) -> anyhow::Result<String> {

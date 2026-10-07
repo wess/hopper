@@ -28,9 +28,14 @@ Configured startup verifies bundled firmware artifacts and derives private VM pa
 from the persisted record under the runtime locks. Deployment requires an unwritten
 sparse disk; system boot detaches setup media. The Rust setup-media builder publishes
 a private, checksummed per-VM bundle and preserves existing data on failure. Startup
-checks its VM identity and image checksum before deployment. Automatic preparation,
-production media-tool packaging and full installation remain pending. Existing
-prototype instances need migration before native startup.
+checks its VM identity and image checksum before deployment. `Sessions::deploy`
+inspects a supplied installer read-only, selects Professional and recovery capacity,
+preserves guest credentials, builds media and allocates a new sparse target before
+launch. Retry checks also match installer and deployment-plan hashes. Preparation
+retains ownership through cancellation; abandoned preparation does not launch hardware.
+Automatic downloads, production tool packaging, persisted install-phase handoff and
+app integration remain pending. Existing prototype instances need migration before
+native startup.
 Dropping the final client stops the worker.
 Started means allocated hardware, and Deployed means deployment completed; neither
 proves a usable desktop. App integration and running-memory snapshots remain pending.

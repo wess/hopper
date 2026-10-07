@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.15.40"
+version = "0.15.41"
 edition = "2021"
 license = "MIT"
 authors = ["Wess Cope <opensource@wess.io>"]
@@ -121,6 +121,9 @@ mcp = { path = "crates/mcp" }
 
 [profile.dev]
 debug = "limited"
+
+[profile.dev.package."sha2:0.10.9"]
+opt-level = 3
 
 [profile.release]
 lto = "thin"
