@@ -263,6 +263,13 @@ A separate run with `--check-guest-input` on this boot-only diagnostic media typ
 exported frame showed the command and its output at the WinPE prompt; 144 input
 events completed and 38 native MSI messages were delivered without device faults.
 Use this flag only with the driver diagnostic image, which opens a command prompt.
+`--check-guest-disk /tmp/newtarget.img` creates a separate 64 MB sparse target,
+refuses an existing path and types a DiskPart partition check into that prompt.
+A live 90-second run showed a new 62 MB primary partition; the retained backing
+file contained the corresponding partition table. The target completed 76 storage
+requests without a device fault. This verifies guest disk writes, not a formatted
+Windows installation or installation-media mounting. Input and disk checks are
+separate modes; allow `--seconds 90` for the disk check.
 The firmware probe reports PCI accesses after its exit callback, each device's
 command/BAR state, Virtio status and delivered native MSI messages. The Hypervisor
 probe verifies frame identification, rejected overlapping/misaligned regions,

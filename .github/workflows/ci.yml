@@ -54,6 +54,11 @@ jobs:
             iasl -we -p "$tables/roundtrip" -tc "$tables/dsdt.dsl"
             python3 scripts/check/acpi.py "$tables/dsdt.dat"
           done
+          tables="$RUNNER_TEMP/hopperacpimsi"
+          cargo run -p machine --example acpi --locked -- "$tables" 1 --msi
+          iasl -we -d "$tables/"*.dat
+          iasl -we -p "$tables/roundtrip" -tc "$tables/dsdt.dsl"
+          python3 scripts/check/acpi.py "$tables/dsdt.dat" --msi
 
       - name: Build pinned firmware
         run: |

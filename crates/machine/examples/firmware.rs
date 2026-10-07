@@ -10,6 +10,9 @@ mod fault;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "support/interrupt.rs"]
 mod interrupts;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "support/disk.rs"]
+mod target;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() -> anyhow::Result<()> {
@@ -29,6 +32,11 @@ fn main() -> anyhow::Result<()> {
   let boot_media = arguments.iter().any(|argument| argument == "--boot-media");
   let guest_input = arguments.iter().any(|argument| argument == "--check-guest-input");
   ensure!(!guest_input || boot_media, "Guest input check requires boot-only driver media");
+  let target_path = arguments.iter().position(|argument| argument == "--check-guest-disk")
+    .map(|index| arguments.get(index + 1).context("Provide a new disposable disk path"))
+    .transpose()?;
+  ensure!(target_path.is_none() || (boot_media && !guest_input),
+    "Guest disk check requires boot-only driver media and its own input check");
   let firmware = std::fs::read(path)?;
   ensure!(
     !firmware.is_empty() && firmware.len() <= 0x4000000,
@@ -93,7 +101,8 @@ fn main() -> anyhow::Result<()> {
   ensure!(!check_storage || disk.is_some(), "Storage check requires a disk image");
   let keyboard = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Keyboard))?) } else { None };
   let pointer = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Tablet))?) } else { None };
-  let mut devices = [disk, graphics, keyboard, pointer];
+  let target_disk = target_path.map(|path| target::create(std::path::Path::new(path))).transpose()?;
+  let mut devices = [disk, graphics, keyboard, pointer, target_disk];
   ensure!(!boot_media || devices[0].is_some(), "Media boot requires an installer image");
   ensure!(!boot_media || (!check_input && !check_storage), "Media boot and shell checks are separate modes");
   let mut media_key = None;
@@ -105,7 +114,7 @@ fn main() -> anyhow::Result<()> {
   let mut checked_storage = false;
   let mut pci_reads = 0usize;
   let mut handed_off = false;
-  let mut guest_pci = [[0usize; 2]; 4];
+  let mut guest_pci = [[0usize; 2]; 5];
   let mut guest_bus = [0usize; 2];
   let mut listed_acpi = false;
   let mut seen_acpi = [false; 5];
@@ -121,13 +130,17 @@ fn main() -> anyhow::Result<()> {
   let mut guest_sent = false;
   let boot = hv::paced(&mut cpu, std::time::Duration::from_secs(deadline), std::time::Duration::from_millis(20), |cpu| {
     for _ in 0..2000000 {
-      if guest_input && !guest_sent && handed_off && start.elapsed().as_secs() >= 35 {
+      if (guest_input || target_path.is_some()) && !guest_sent && handed_off && start.elapsed().as_secs() >= 35 {
         ensure!(vpci::read(devices[2].as_mut().context("Missing keyboard")?, 20, 1)? == 15,
           "Guest keyboard driver is not ready");
-        text_input.extend(b"echo hopper windows input verified\r");
+        if target_path.is_some() {
+          text_input.extend(b"diskpart\rselect disk 1\rclean\rcreate partition primary\rlist partition\r");
+        } else {
+          text_input.extend(b"echo hopper windows input verified\r");
+        }
         read_input = true;
         guest_sent = true;
-        eprintln!("Queued the Windows keyboard check command");
+        eprintln!("Queued the Windows guest check command");
       }
       if media_key.is_some_and(|time| time <= std::time::Instant::now()) {
         vpci::send_input(devices[2].as_mut().context("Missing keyboard")?, &mut ram, &keyboard::text(b"\r")?)?;
@@ -360,8 +373,11 @@ fn main() -> anyhow::Result<()> {
           device.pci.read(0x10, 4)?, vpci::read(device, 20, 1)?);
       }
     }
-    for device in devices[2..].iter().flatten() {
+    for device in devices[2..4].iter().flatten() {
       eprintln!("Installer completed {} input events; fault: {:?}", vpci::completed(device), vpci::fault(device));
+    }
+    if let Some(device) = &devices[4] {
+      eprintln!("Target completed {} storage requests; fault: {:?}", vpci::completed(device), vpci::fault(device));
     }
   }
   if let Some(graphics) = &mut devices[1] {
@@ -372,7 +388,7 @@ fn main() -> anyhow::Result<()> {
   boot?;
   if check_input {
     ensure!(read_input && checked_input, "Firmware did not execute the keyboard input check");
-    for device in devices[2..].iter().flatten() {
+    for device in devices[2..4].iter().flatten() {
       ensure!(vpci::fault(device).is_none() && vpci::completed(device) > 0,
         "Firmware input device failed: {:?}", vpci::fault(device));
       eprintln!("Firmware completed {} Virtio input events", vpci::completed(device));

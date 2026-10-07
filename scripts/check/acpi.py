@@ -3,7 +3,7 @@ import subprocess
 import sys
 
 
-def verify(path):
+def verify(path, msi=False):
   result = subprocess.run(
     ["acpiexec", "-b", "resources _SB.PCI0; resources _SB.RES0", path],
     capture_output=True, text=True, timeout=30, check=True,
@@ -34,13 +34,16 @@ def verify(path):
     for section, field, value in fields:
       if not re.search(rf"{field}\s*:\s*{value}\s*$", section, re.MULTILINE):
         raise ValueError(f"Missing decoded resource: {field} = {value}")
+    frames = re.findall(r"Address\s*:\s*30000000\s+Address Length\s*:\s*([0-9A-F]+)", reserved)
+    if frames != (["00001000"] if msi else []):
+      raise ValueError("MSI frame reservation does not match the selected topology")
     if "AcpiGetCurrentResources failed" in output or "AcpiGetIrqRoutingTable failed" in output:
       raise ValueError("ACPICA rejected the PCI resources")
   except (ValueError, IndexError):
     print(output, file=sys.stderr)
     raise
-  print("ACPICA verified PCI resources, ECAM reservation and 128 interrupt routes")
+  print("ACPICA verified PCI resources, ECAM/MSI reservations and 128 interrupt routes")
 
 
 if __name__ == "__main__":
-  verify(sys.argv[1])
+  verify(sys.argv[1], "--msi" in sys.argv[2:])
