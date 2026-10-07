@@ -52,6 +52,7 @@ setlocal
 set "ambiguous="
 set "driverfailed="
 if not exist "%~dp0partitions.txt" goto failed
+for %%F in (unattend.xml hopperspecialize.ps1 hopperfirstlogon.ps1) do if not exist "%~dp0%%F" goto failed
 for %%D in (viostor vioscsi vioinput) do if not exist "%~dp0%%D\%%D.inf" goto failed
 wpeinit
 if errorlevel 1 goto failed
@@ -81,6 +82,19 @@ if errorlevel 1 goto failed
 dism /Image:W:\ /Add-Driver /Driver:"%~dp0vioscsi\vioscsi.inf"
 if errorlevel 1 goto failed
 dism /Image:W:\ /Add-Driver /Driver:"%~dp0vioinput\vioinput.inf"
+if errorlevel 1 goto failed
+echo Hopper deployment: staging first-boot provisioning
+if not exist W:\Windows\Panther mkdir W:\Windows\Panther
+if errorlevel 1 goto failed
+copy /y "%~dp0unattend.xml" W:\Windows\Panther\unattend.xml
+if errorlevel 1 goto failed
+icacls W:\Windows\Panther\unattend.xml /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F"
+if errorlevel 1 goto failed
+if not exist W:\Windows\Setup\Scripts mkdir W:\Windows\Setup\Scripts
+if errorlevel 1 goto failed
+copy /y "%~dp0hopperspecialize.ps1" W:\Windows\Setup\Scripts\hopperspecialize.ps1
+if errorlevel 1 goto failed
+copy /y "%~dp0hopperfirstlogon.ps1" W:\Windows\Setup\Scripts\hopperfirstlogon.ps1
 if errorlevel 1 goto failed
 echo Hopper deployment: configuring recovery
 if not exist W:\Windows\System32\Recovery\winre.wim goto failed

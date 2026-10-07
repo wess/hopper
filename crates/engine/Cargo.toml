@@ -24,6 +24,7 @@ reqwest = { workspace = true }
 tempfile = { workspace = true }
 quick-xml = { version = "0.41", features = ["serialize"] }
 sha1_smol = "1"
+uuid = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Apple Containers, the macOS engine. It publishes no socket, so this is a CLI
