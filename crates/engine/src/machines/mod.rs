@@ -7,6 +7,7 @@ mod macos;
 pub mod media;
 mod qmp;
 mod snapshots;
+pub mod windows;
 
 use anyhow::{bail, Context};
 use fs2::FileExt;
