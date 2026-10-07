@@ -23,10 +23,11 @@ pub struct Queue {
   next_available: u16,
   next_used: u16,
   pending: BTreeSet<u16>,
+  initialized: bool,
 }
 
 pub fn create(
-  memory: &mut impl Memory,
+  memory: &impl Memory,
   size: u16,
   descriptor: u64,
   available: u64,
@@ -59,7 +60,6 @@ pub fn create(
       );
     }
   }
-  memory.write(used, &[0; 4])?;
   Ok(Queue {
     size,
     descriptor,
@@ -68,6 +68,7 @@ pub fn create(
     next_available: 0,
     next_used: 0,
     pending: BTreeSet::new(),
+    initialized: false,
   })
 }
 
@@ -77,7 +78,11 @@ fn word(memory: &impl Memory, address: u64) -> anyhow::Result<u16> {
   Ok(u16::from_le_bytes(bytes))
 }
 
-pub fn pop(queue: &mut Queue, memory: &impl Memory) -> anyhow::Result<Option<Chain>> {
+pub fn pop(queue: &mut Queue, memory: &mut impl Memory) -> anyhow::Result<Option<Chain>> {
+  if !queue.initialized {
+    memory.write(queue.used, &[0; 4])?;
+    queue.initialized = true;
+  }
   let available = word(memory, queue.available + 2)?;
   fence(Ordering::Acquire);
   let count = available.wrapping_sub(queue.next_available);

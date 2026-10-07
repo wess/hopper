@@ -44,6 +44,7 @@ pub fn readonly(disk: &Disk) -> bool {
 }
 
 pub fn writeback(disk: &mut Disk, enabled: bool) -> anyhow::Result<()> {
+  let enabled = enabled && !disk.readonly;
   if disk.writeback && !enabled {
     disk.file.sync_all()?;
   }

@@ -1,37 +1,11 @@
+#[path = "support/disk.rs"]
+mod disk;
 mod support;
+use disk::image;
 
 use machine::devices::virtio::{block, queue};
-use std::{
-  fs::{self, OpenOptions},
-  io::Write,
-  path::PathBuf,
-  sync::atomic::{AtomicU64, Ordering},
-};
+use std::fs::{self, OpenOptions};
 use support::{descriptor, Ram, BASE};
-
-struct Image(PathBuf);
-
-fn image(bytes: &[u8]) -> Image {
-  static NEXT: AtomicU64 = AtomicU64::new(0);
-  let path = std::env::temp_dir().join(format!(
-    "hopperblock-{}-{}",
-    std::process::id(),
-    NEXT.fetch_add(1, Ordering::Relaxed)
-  ));
-  let mut file = OpenOptions::new()
-    .write(true)
-    .create_new(true)
-    .open(&path)
-    .unwrap();
-  file.write_all(bytes).unwrap();
-  Image(path)
-}
-
-impl Drop for Image {
-  fn drop(&mut self) {
-    let _ = fs::remove_file(&self.0);
-  }
-}
 
 fn request(kind: u32, sector: u64, length: u32) -> (Ram, queue::Queue, queue::Chain) {
   let mut ram = Ram::default();
@@ -53,8 +27,8 @@ fn request(kind: u32, sector: u64, length: u32) -> (Ram, queue::Queue, queue::Ch
   descriptor(&mut ram, 3, BASE + 0x4000, 1, 2, 0);
   ram.0[0x4000] = 0xff;
   ram.0[0x102..0x104].copy_from_slice(&1u16.to_le_bytes());
-  let mut queue = queue::create(&mut ram, 8, BASE, BASE + 0x100, BASE + 0x200).unwrap();
-  let chain = queue::pop(&mut queue, &ram).unwrap().unwrap();
+  let mut queue = queue::create(&ram, 8, BASE, BASE + 0x100, BASE + 0x200).unwrap();
+  let chain = queue::pop(&mut queue, &mut ram).unwrap().unwrap();
   (ram, queue, chain)
 }
 
@@ -131,8 +105,8 @@ fn status_can_share_a_descriptor_with_data() {
   let mut disk = block::open(&image.0, true, [b'd'; 20]).unwrap();
   let (mut ram, _, _) = request(0, 0, 512);
   descriptor(&mut ram, 2, BASE + 0x2000, 513, 2, 0);
-  let mut queue = queue::create(&mut ram, 8, BASE, BASE + 0x100, BASE + 0x200).unwrap();
-  let chain = queue::pop(&mut queue, &ram).unwrap().unwrap();
+  let mut queue = queue::create(&ram, 8, BASE, BASE + 0x100, BASE + 0x200).unwrap();
+  let chain = queue::pop(&mut queue, &mut ram).unwrap().unwrap();
   let used = block::execute(&mut disk, &mut ram, &chain).unwrap();
   assert_eq!(used, 513);
   assert_eq!(&ram.0[0x2000..0x2200], &[b'a'; 512]);

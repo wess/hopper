@@ -185,6 +185,20 @@ impl Function {
   pub fn bus_master(&self) -> bool {
     self.config[4] & 4 != 0
   }
+
+  pub fn interrupt_pin(&mut self, pin: u8) -> anyhow::Result<()> {
+    ensure!(pin <= 4, "Invalid PCI interrupt pin");
+    self.config[0x3d] = pin;
+    Ok(())
+  }
+
+  pub fn interrupt_status(&mut self, pending: bool) {
+    self.config[6] = (self.config[6] & !8) | if pending { 8 } else { 0 };
+  }
+
+  pub fn interrupt_enabled(&self) -> bool {
+    self.config[5] & 4 == 0
+  }
 }
 
 fn access(offset: usize, width: usize) -> anyhow::Result<()> {

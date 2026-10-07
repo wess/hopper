@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
     hv::write(&mut ram, index * 16, &descriptor)?;
   }
   hv::write(&mut ram, 0x4000, &[0xff])?;
-  let mut queue = queue::create(&mut ram, 8, base, base + 0x100, base + 0x200)?;
+  let mut queue = queue::create(&ram, 8, base, base + 0x100, base + 0x200)?;
   // strh w0,[x1]; dmb ish; hvc #0; ldrb w2,[x3]; ldr x4,[x5]; hvc #0.
   let code: Vec<u8> = [
     0x79000020u32,
@@ -64,7 +64,8 @@ fn main() -> anyhow::Result<()> {
       arm::decode(syndrome) == arm::Trap::Hypercall(0),
       "Guest missed its queue notification"
     );
-    let chain = queue::pop(&mut queue, &ram)?.context("Guest did not make a buffer available")?;
+    let chain =
+      queue::pop(&mut queue, &mut ram)?.context("Guest did not make a buffer available")?;
     let written = block::execute(&mut disk, &mut ram, &chain)?;
     ensure!(
       written == 513,

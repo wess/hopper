@@ -176,8 +176,7 @@ The storage core handles split Virtio queues and file-backed sector reads, write
 flushes and disk identification. It checks DMA ranges, descriptor chains, ring
 wraparound and writable completion lengths. The separate native storage probe uses
 an ARM guest to submit a request and read its response from mapped RAM, then checks
-the interrupt signal. It opens its supplied test image read-only. The PCI transport
-is not connected yet, so this does not establish UEFI disk discovery or OS boot.
+the interrupt signal. It opens its supplied test image read-only.
 
 ```sh
 cargo build -p machine --example storage
@@ -185,9 +184,21 @@ codesign --force --sign - --entitlements assets/machine.entitlements target/debu
 target/debug/examples/storage /path/to/sector-aligned-test.img
 ```
 
+The modern PCI transport exposes both MMIO and configuration-window access, feature
+negotiation, queue setup, reset, and legacy interrupt acknowledgement. The firmware
+diagnostic can discover a read-only disk and verify a file through UEFI's FAT driver:
+
+```sh
+python3 scripts/check/storage.py /tmp/hopperstorage.img
+target/debug/examples/firmware native/build/firmware/windows.fd /tmp/hopper.dtb native/build/firmware/variables.fd /tmp/hopperstorage.img --check-storage
+```
+
+The fixture builder creates a new image and refuses to overwrite an existing file.
+This verifies UEFI storage access, not Windows installation or desktop support.
+
 `cargo run -p machine --example acpi -- /tmp/hopperacpi` exports the handoff and
-individual tables for ACPICA inspection. PCI device transport, graphics, and TPM
-are still missing. Storage has not been integrated into the firmware or app.
+individual tables for ACPICA inspection. Graphics and TPM are still missing.
+The native runtime and storage have not been integrated into the app.
 
 ## Build a release
 

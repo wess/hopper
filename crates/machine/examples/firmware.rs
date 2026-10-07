@@ -3,7 +3,7 @@ fn main() -> anyhow::Result<()> {
   use anyhow::{bail, ensure, Context};
   use machine::{
     arm,
-    devices::{flash as nor, pci, serial},
+    devices::{flash as nor, pci, serial, virtio::{block, pci as vpci}},
     acpi, hypervisor as hv, platform, psci, smccc,
   };
   use std::collections::VecDeque;
@@ -60,12 +60,19 @@ fn main() -> anyhow::Result<()> {
   let mut input = VecDeque::new();
   let mut updates = 0usize;
   let mut bus = pci::Bus::default();
+  let mut disk = std::env::args().nth(4).map(|path| {
+    vpci::create(block::open(std::path::Path::new(&path), true, [0; 20])?)
+  }).transpose()?;
+  let check_storage = std::env::args().nth(5).as_deref() == Some("--check-storage");
+  ensure!(!check_storage || disk.is_some(), "Storage check requires a disk image");
+  let mut read_storage = false;
+  let mut checked_storage = false;
   let mut pci_reads = 0usize;
   let mut listed_acpi = false;
   let mut seen_acpi = [false; 5];
   let mut checked_acpi = [false; 2];
   let start = std::time::Instant::now();
-  hv::bounded(&mut cpu, std::time::Duration::from_secs(30), |cpu| {
+  let boot = hv::bounded(&mut cpu, std::time::Duration::from_secs(30), |cpu| {
     for _ in 0..1000000 {
       ensure!(
         start.elapsed().as_secs() < 30,
@@ -90,6 +97,7 @@ fn main() -> anyhow::Result<()> {
                 checked_acpi[0] |= output.ends_with(b"\t0 Error(s)");
                 checked_acpi[1] |= output.ends_with(b"\t0 Warning(s)");
               }
+              if read_storage { checked_storage |= output.ends_with(b"Hopper native storage verified"); }
               if output.ends_with(b"Shell> ") {
                 ensure!(updates > 0, "Firmware did not update its variable flash");
                 ensure!(input.is_empty(), "Firmware left diagnostic input queued");
@@ -97,18 +105,34 @@ fn main() -> anyhow::Result<()> {
                   ensure!(seen_acpi.iter().all(|seen| *seen), "UEFI did not expose all ACPI tables");
                   ensure!(checked_acpi.iter().all(|seen| *seen), "UEFI found ACPI errors or warnings");
                   ensure!(pci_reads > 0, "Firmware did not enumerate PCI configuration space");
-                  eprintln!("\nFirmware verified ACPI tables, {pci_reads} PCI reads and {updates} variable flash updates");
-                  return Ok(());
+                  if let Some(disk) = &disk {
+                    ensure!(vpci::fault(disk).is_none(), "Virtio storage fault: {:?}", vpci::fault(disk));
+                    ensure!(vpci::completed(disk) > 0, "UEFI did not read the disk");
+                    if check_storage && !read_storage {
+                      input.extend(b"type fs0:\\hopper.txt\r");
+                      read_storage = true;
+                    } else {
+                      ensure!(!check_storage || checked_storage, "UEFI did not read the storage check file");
+                      eprintln!("\nFirmware completed {} Virtio disk requests", vpci::completed(disk));
+                      eprintln!("Firmware verified ACPI tables, {pci_reads} PCI reads and {updates} variable flash updates");
+                      return Ok(());
+                    }
+                  } else {
+                    eprintln!("\nFirmware verified ACPI tables, {pci_reads} PCI reads and {updates} variable flash updates");
+                    return Ok(());
+                  }
+                } else {
+                  input.extend(b"acpiview\r");
+                  listed_acpi = true;
                 }
-                input.extend(b"acpiview\r");
-                listed_acpi = true;
               }
               if !opened_menu && output.ends_with(b"Boot Manager Menu.") {
                 input.push_back(b'\r');
                 opened_menu = true;
               }
               if opened_menu && !selected_shell && output.ends_with(b"ESC to exit") {
-                input.extend(b"\x1b[B\r");
+                if disk.is_some() { input.extend(b"\x1b[B\x1b[B\r"); }
+                else { input.extend(b"\x1b[B\r"); }
                 selected_shell = true;
               }
             }
@@ -128,12 +152,31 @@ fn main() -> anyhow::Result<()> {
           let offset = physical_address - platform::ECAM;
           if access.write {
             let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
-            bus.write(offset, access.bytes.into(), value as u32)?;
+            if let Some(disk) = disk.as_mut().filter(|_| offset < 4096) {
+              vpci::config_write(disk, &mut ram, offset as usize, access.bytes.into(), value as u32)?;
+            } else { bus.write(offset, access.bytes.into(), value as u32)?; }
           } else {
-            let value = bus.read(offset, access.bytes.into())?;
+            let value = if let Some(disk) = disk.as_mut().filter(|_| offset < 4096) {
+              vpci::config_read(disk, offset as usize, access.bytes.into())?
+            } else { bus.read(offset, access.bytes.into())? };
             pci_reads += 1;
             if access.register != 31 { hv::set(cpu, access.register.into(), value as u64)?; }
           }
+          if let Some(disk) = &disk { hv::gic::signal(&gic, pci::interrupt(0, 1)?, vpci::interrupt(disk))?; }
+          let pc = hv::get(cpu, 31)?;
+          hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
+        }
+        arm::Trap::DataAbort(Some(access)) if disk.as_ref().is_some_and(|disk| disk.pci.memory(physical_address).is_some()) => {
+          let disk = disk.as_mut().context("Missing Virtio disk")?;
+          let (_, offset) = disk.pci.memory(physical_address).context("Unmapped Virtio BAR")?;
+          if access.write {
+            let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
+            vpci::write(disk, &mut ram, offset, access.bytes.into(), value as u32)?;
+          } else {
+            let value = vpci::read(disk, offset, access.bytes.into())?;
+            if access.register != 31 { hv::set(cpu, access.register.into(), value as u64)?; }
+          }
+          hv::gic::signal(&gic, pci::interrupt(0, 1)?, vpci::interrupt(disk))?;
           let pc = hv::get(cpu, 31)?;
           hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
@@ -185,6 +228,10 @@ fn main() -> anyhow::Result<()> {
     }
     }
     bail!("Firmware diagnostic exhausted its exit budget")
+  });
+  boot.with_context(|| {
+    disk.as_ref().map(|disk| format!("Storage completed {} requests; fault: {:?}", vpci::completed(disk), vpci::fault(disk)))
+      .unwrap_or_else(|| "Boot native firmware".into())
   })?;
   let mut retained = vec![0; acpi::SIZE];
   hv::read(&ram, (acpi::BASE - platform::RAM) as usize, &mut retained)?;
