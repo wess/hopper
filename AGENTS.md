@@ -11,7 +11,9 @@ preserved for migration and are not started through the native path. macOS and W
 guests are experimental. Release hosts remain
 Apple silicon macOS 26+.
 Each VM has a dedicated viewer. Agent access defaults on for new VMs and clones
-inherit it. Native Windows guest tools and agent transport are still pending.
+inherit it. Native Windows guest tools and agent transport are still pending. MCP lists and creates
+Windows through the native facade; other Windows tools return an explicit unavailable
+error after authorization, preventing fallback to the previous runtime.
 Prototype MCP operations recheck the persisted access setting, use per-VM
 cross-process locks, and expose only guest files/input. Snapshots require a
 stopped VM and use APFS copies, with a rollback snapshot on restore.

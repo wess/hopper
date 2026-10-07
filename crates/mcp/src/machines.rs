@@ -10,12 +10,12 @@ pub fn catalogue() -> Vec<Value> {
     [
         ("vm.profiles", "List downloadable guest OS profiles and their requirements.", json!({}), vec![]),
         ("vm.list", "List VMs that permit agent access. VMs with access disabled are excluded.", json!({}), vec![]),
-        ("vm.create", "Create a Linux, macOS, or Windows VM. Images download on vm.start and are verified by the VM helper. New VMs enable agent access by default; set agentAccess=false to disable it.",json!({"name":string,"profile":string,"cpus":{"type":"integer","minimum":1,"maximum":64},"memoryGiB":{"type":"integer","minimum":1,"maximum":256},"diskGiB":{"type":"integer","minimum":10,"maximum":2048},"agentAccess":{"type":"boolean"}}),vec!["name","profile"]),
-        ("vm.start", "Start a VM and open its dedicated display window. First boot downloads and prepares the guest and can take several minutes. Windows setup may need to finish in the viewer before guest commands and files become available.",json!({"id":id}),vec!["id"]),
+        ("vm.create", "Create a Linux, macOS, or Windows VM. Windows uses the native runtime; its remote lifecycle and guest tools are not available yet. Linux and macOS images download on vm.start. New VMs enable agent access by default; set agentAccess=false to disable it.",json!({"name":string,"profile":string,"cpus":{"type":"integer","minimum":1,"maximum":64},"memoryGiB":{"type":"integer","minimum":1,"maximum":256},"diskGiB":{"type":"integer","minimum":10,"maximum":2048},"agentAccess":{"type":"boolean"}}),vec!["name","profile"]),
+        ("vm.start", "Start a VM and open its dedicated display window. First boot downloads and prepares the guest and can take several minutes. Windows startup currently requires the Hopper app.",json!({"id":id}),vec!["id"]),
         ("vm.stop", "Gracefully stop a VM; its disk is retained.",json!({"id":id}),vec!["id"]),
         ("vm.exec", "Execute a command inside the guest, never on the host. argv is an array of command arguments, such as [\"uname\",\"-a\"]. Output is bounded and commands time out after 120 seconds.",json!({"id":id,"argv":{"type":"array","items":{"type":"string"},"minItems":1}}),vec!["id","argv"]),
         ("vm.screenshot", "Capture the VM display as a PNG image. The VM must be running with its display visible.",json!({"id":id}),vec!["id"]),
-        ("vm.input", "Send guest input. Linux uses xdotool key names, Windows uses QEMU qcodes. Pointer x/y are normalized 0–32767. macOS uses guest key names (super is Command) and requires guest Accessibility permission for osascript. Windows supports keys and pointer, not text.",json!({"id":id,"input":{"oneOf":[{"type":"object","properties":{"type":{"const":"key"},"keys":string},"required":["type","keys"]},{"type":"object","properties":{"type":{"const":"text"},"text":string},"required":["type","text"]},{"type":"object","properties":{"type":{"const":"pointer"},"x":{"type":"integer","minimum":0,"maximum":32767},"y":{"type":"integer","minimum":0,"maximum":32767},"button":{"enum":["left","right","middle"]}},"required":["type","x","y"]}]}}),vec!["id","input"]),
+        ("vm.input", "Send guest input. Linux uses xdotool key names. Native Windows remote input is not available yet. Pointer x/y are normalized 0–32767. macOS uses guest key names (super is Command) and requires guest Accessibility permission for osascript. Windows guest tools are pending.",json!({"id":id,"input":{"oneOf":[{"type":"object","properties":{"type":{"const":"key"},"keys":string},"required":["type","keys"]},{"type":"object","properties":{"type":{"const":"text"},"text":string},"required":["type","text"]},{"type":"object","properties":{"type":{"const":"pointer"},"x":{"type":"integer","minimum":0,"maximum":32767},"y":{"type":"integer","minimum":0,"maximum":32767},"button":{"enum":["left","right","middle"]}},"required":["type","x","y"]}]}}),vec!["id","input"]),
         ("vm.read_file", "Read a UTF-8 file from the guest (up to 1 MiB).",json!({"id":id,"path":string}),vec!["id","path"]),
         ("vm.write_file", "Write UTF-8 content into a guest file (up to 1 MiB). Overwrites the destination. No host folders are shared with these VMs.",json!({"id":id,"path":string,"content":string}),vec!["id","path","content"]),
         ("vm.clone", "Clone a stopped VM. The clone inherits the source's agent setting.",json!({"id":id,"name":string}),vec!["id","name"]),
@@ -57,16 +57,19 @@ async fn run(host: &Arc<Host>, name: &str, args: &Value) -> anyhow::Result<Value
         return Ok(text(serde_json::to_string(&machines.profiles())?));
     }
     if name == "vm.list" {
-        return Ok(text(serde_json::to_string(&machines.list(actor).await?)?));
+        return Ok(text(serde_json::to_string(&host.list_machines(actor).await?)?));
     }
     if name == "vm.create" {
         let profile = arg(args, "profile")?;
-        let machine = machines
-            .create(CreateMachine {
+        let windows = machines.profiles().iter().any(|entry| {
+            entry.id == profile && entry.guest == model::GuestOs::Windows
+        });
+        let machine = host
+            .create_machine(CreateMachine {
                 name: arg(args, "name")?.into(),
                 profile: profile.into(),
                 resources: EngineResources {
-                    cpus: resource(args, "cpus", 4)?,
+                    cpus: resource(args, "cpus", if windows { 2 } else { 4 })?,
                     memory_gib: resource(args, "memoryGiB", 4)?,
                     disk_gib: resource(args, "diskGiB", 64)?,
                 },
@@ -83,7 +86,12 @@ async fn run(host: &Arc<Host>, name: &str, args: &Value) -> anyhow::Result<Value
     }
     let id = arg(args, "id")?;
     // Authorize before creating temporary files or revealing VM metadata.
-    machines.machine(id, actor)?;
+    let machine = machines.machine(id, actor)?;
+    if machine.guest == model::GuestOs::Windows {
+        anyhow::bail!(
+            "Native Windows remote operations are not available yet. Use the Hopper app; this operation will not start the previous runtime."
+        );
+    }
     match name {
         "vm.start" => machines.start(id, actor).await?,
         "vm.stop" => machines.stop(id, actor).await?,
