@@ -17,8 +17,8 @@ quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and 
 ## Features
 
 - **Virtual machines** — new Ubuntu Desktop and Windows 11 ARM64 records use
-  Hopper's native runtimes and dedicated viewers. macOS creation retains its prototype. Automatic image
-  acquisition and installation preparation are implemented; complete native Windows
+  Hopper's native runtimes and dedicated viewers. New macOS records use native VZ setup with local restore media.
+  Automatic image acquisition and installation preparation are implemented for Ubuntu and Windows; complete native Windows
   installation and first boot remain unverified. A local installer is optional.
   Guest VMs live under `~/.hopper/machines`. Closing the native viewer keeps Windows
   running; quitting Hopper stops its owned Windows sessions. Windows snapshots,
@@ -178,7 +178,7 @@ and authorized lifecycle operations. Already-admitted VMs use a dedicated native
 complete viewer verification remains unfinished. New Ubuntu creation and first startup
 use the native path. New macOS records now explicitly select the native runtime through the
 same validated record creator, preserving default agent access and optional local restore
-media. Listing reports Setup required until native macOS installation is integrated. Existing
+media. Listing reports Setup required before macOS installation. Existing
 guest data remains on its recovery or migration path. A signed diagnostic
 verifies real VZ hardware transitions with a temporary blank disk:
 
@@ -221,8 +221,13 @@ successful completion. Interrupted installation or written disks without a recei
 recovery, preserving guest data. System preparation validates the saved receipt, identity,
 capacity, hardware and requirements, then admits installed hardware without restore media.
 Listing distinguishes setup, recovery and installed readiness; it does not claim a verified
-desktop. Automatic IPSW acquisition, library integration, valid-media installation and
-installed macOS boot remain pending.
+desktop. Library Start now inspects local restore media, prepares Mac hardware, opens its
+dedicated viewer, streams bounded installation progress and starts the installed system after
+authorized successful completion. Cancel setup invalidates the original stop intent without
+waiting for its retained operation lock. Installed records reopen through saved platform
+preparation without restore media. Direct installation wakes the queue owner. Automatic IPSW
+acquisition, valid-media installation, installed macOS boot and actual viewer rendering/input
+remain pending.
 
 The `vzmac` example discovers Apple's supported restore-image metadata and configures
 a macOS platform with its CPU/RAM requirements, independent identity and matching
@@ -231,8 +236,8 @@ and refuses to replace existing data. A signed live check validates configuratio
 rejects insufficient resources and model mismatches. Local restore inspection uses the
 framework to read media, checks the returned file URL, and rejects symlinks and
 invalid files without changing their contents. It downloads no IPSW and performs
-no successful installation or macOS first boot; manager/viewer integration remains
-unfinished. The native installer controller holds exclusive main-queue VM access, reports
+no successful installation or macOS first boot; live viewer verification remains unfinished.
+The native installer controller holds exclusive main-queue VM access, reports
 progress and completion, and requests cancellation on handle drop. A callback retains
 hardware through asynchronous completion, and lifecycle commands remain blocked while
 installation is active. The signed probe checks malformed-media installation failure;
@@ -292,8 +297,8 @@ a saved deployment result selects installed-system boot on the next Start. Full 
 actual accounts, desktop readiness and guest tools remain unverified. A local Ubuntu Desktop ARM64 ISO is available as a fallback. Prepared,
 unowned records show Ready to start only when operation/runtime locks are free; this does
 not assert an installed or usable desktop. Previous untagged records retain their recovery
-path, and mismatched guest/runtime choices are rejected. macOS creation still uses the
-prototype. MCP routing, full guest display/input checks and signed app integration remain
+path, and mismatched guest/runtime choices are rejected. New macOS creation and library
+setup use the native path. MCP routing, full guest display/input checks and signed app integration remain
 unfinished.
 
 Native Linux admission attaches a virtio network device using Apple's NAT. Its locally

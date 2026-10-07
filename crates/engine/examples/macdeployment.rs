@@ -90,6 +90,10 @@ fn main() -> anyhow::Result<()> {
     owner.active() && owner.can_retire(&machine.id).is_err(),
     "Installer lost runtime ownership"
   );
+  let wake = owner.wake();
+  runtime
+    .block_on(async { tokio::time::timeout(Duration::from_millis(100), wake.notified()).await })
+    .context("Direct installation did not wake the owned runtime")?;
   let deadline = Instant::now() + Duration::from_secs(30);
   while owner.active() {
     owner.tick();
@@ -146,7 +150,7 @@ fn main() -> anyhow::Result<()> {
       && std::fs::read(path)? == b"owned malformed media",
     "Recovery checks changed owned state or source media"
   );
-  println!("Signed SDK malformed installation retained durable platform-bound recovery intent, never committed success and rejected reinstallation/system admission while preserving media; no valid IPSW, successful installation, installed system boot or macOS desktop was verified");
+  println!("Signed SDK direct installation woke the runtime, retained durable platform-bound recovery intent, never committed success and rejected reinstallation/system admission while preserving media; no valid IPSW, successful installation, installed system boot or macOS desktop was verified");
   Ok(())
 }
 

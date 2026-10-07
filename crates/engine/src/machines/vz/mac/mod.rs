@@ -1,4 +1,6 @@
 mod admit;
+mod launch;
+pub use launch::{Admission, Launch, Phase};
 pub mod deployment;
 pub mod media;
 pub mod platform;
@@ -132,6 +134,11 @@ impl Service {
   }
 
   pub async fn inspect_mac(&self, id: &str, actor: Actor) -> anyhow::Result<Restore> {
+    let (machine, check) = self.mac_scope(id, actor)?;
+    self.inspect_restore(machine, check).await
+  }
+
+  fn mac_scope(&self, id: &str, actor: Actor) -> anyhow::Result<(model::Machine, Check)> {
     let (machine, original) = self.scope(id, actor)?;
     ensure!(
       machine.guest == GuestOs::Macos
@@ -152,6 +159,14 @@ impl Service {
     });
     let control = intent::read(&self.manager, id)?;
     let check = intent::checked(self.manager.clone(), id.into(), control, check);
+    Ok((machine, check))
+  }
+
+  async fn inspect_restore(
+    &self,
+    machine: model::Machine,
+    check: Check,
+  ) -> anyhow::Result<Restore> {
     let path = Path::new(
       machine
         .installer

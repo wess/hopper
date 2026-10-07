@@ -7,6 +7,7 @@ pub struct Status {
   pub busy: bool,
   pub generation: u64,
   pub installer: bool,
+  pub mac_ready: bool,
   pub started: bool,
   pub stop_requested: bool,
 }
@@ -21,6 +22,7 @@ impl Owner {
         || vm.installing.get(),
       generation: vm.generation.get(),
       installer: vm.installer,
+      mac_ready: vm.mac_ready.get(),
       started: vm.started.get(),
       stop_requested: vm.stop_requested.get(),
     })

@@ -5,6 +5,8 @@ mod start;
 mod preparation;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod lifecycle;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod macos;
 use gpui::prelude::*;
 use gpui::{div, px, Context, Entity, PathPromptOptions, SharedString, Window};
 use guise::prelude::*;
@@ -219,11 +221,13 @@ impl Machines {
         let manager = self.state.host.machines();
         let running = row.state == "Running" || row.state == "Paused";
         let windows = machine.guest == model::GuestOs::Windows;
+        let macos = machine.guest == model::GuestOs::Macos;
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         let virtual_owned = crate::machines::owns(&id, cx);
         #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
         let virtual_owned = false;
         let row_native = machine.runtime == Some(model::MachineRuntime::Virtualization);
+        let native_macos = macos && row_native && cfg!(all(target_os = "macos", target_arch = "aarch64"));
         let start_name = machine.name.clone();
         let stopped = row.state == "Stopped";
         let uncreated = row.state == "Not created";
@@ -235,7 +239,7 @@ impl Machines {
         let mut progress = row.progress.clone();
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         if let Some(message) = crate::machines::message(&id, cx) { progress = Some(message); }
-        if automatic { progress = Some("Starting Ubuntu automatically…".into()); }
+        if automatic && !macos { progress = Some("Starting Ubuntu automatically…".into()); }
         let toggle_id = id.clone();
         let start_id = id.clone();
         let clone_id = id.clone();
@@ -264,7 +268,7 @@ impl Machines {
                 .size(Size::Sm)
                 .variant(Variant::Light)
                 .color(ColorName::Blue)
-                .disabled(busy || (!running && !stopped && !uncreated && row.state != "Ready to start"))
+                .disabled(busy || (!running && !stopped && !uncreated && row.state != "Ready to start" && !(native_macos && row.state == "Setup required")))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let manager = manager.clone();
                     let id = start_id.clone();
@@ -274,7 +278,11 @@ impl Machines {
                     }
                     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                     if virtual_owned || row_native {
-                        this.start_virtual(id, start_name.clone(), running, virtual_owned, cx);
+                        if macos {
+                            this.start_macos(id, start_name.clone(), running, virtual_owned, cx);
+                        } else {
+                            this.start_virtual(id, start_name.clone(), running, virtual_owned, cx);
+                        }
                         return;
                     }
                     let operation_id = id.clone();
@@ -347,6 +355,16 @@ impl Machines {
                         this.show_snapshots(history_id.clone(), cx)
                     })),
             );
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        if macos && automatic {
+            let cancel_id = id.clone();
+            controls = controls.child(
+                Button::new(SharedString::from(format!("cancel-{id}")), "Cancel setup")
+                    .size(Size::Sm)
+                    .variant(Variant::Subtle)
+                    .on_click(cx.listener(move |this, _, _, cx| this.cancel_macos(cancel_id.clone(), cx))),
+            );
+        }
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         if running && (virtual_owned
             || windows && machine.runtime == Some(model::MachineRuntime::Hypervisor))

@@ -1,4 +1,5 @@
 mod automatic;
+pub mod macos;
 mod viewer;
 pub use automatic::watch;
 
@@ -15,6 +16,7 @@ struct Runtime {
   viewers: BTreeMap<String, viewer::Viewer>,
   watching: BTreeMap<String, u64>,
   pending: BTreeSet<String>,
+  cancelling: BTreeSet<String>,
   messages: BTreeMap<String, String>,
 }
 impl Global for Runtime {}
@@ -48,6 +50,7 @@ pub fn install(host: &Host, cx: &mut App) -> anyhow::Result<()> {
     viewers: BTreeMap::new(),
     watching: BTreeMap::new(),
     pending: BTreeSet::new(),
+    cancelling: BTreeSet::new(),
     messages: BTreeMap::new(),
   });
   Ok(())

@@ -40,6 +40,10 @@ impl Installation {
     self.cancelled.store(true, Ordering::Release);
   }
 
+  pub fn progress(&self) -> watch::Receiver<f64> {
+    self.progress.clone()
+  }
+
   pub fn fraction(&self) -> f64 {
     *self.progress.borrow()
   }
@@ -189,6 +193,7 @@ impl Owner {
             error: None,
           },
         );
+        self.wake.notify_one();
       }
       Err(error) => {
         let _ = request.send.send(Err(error));

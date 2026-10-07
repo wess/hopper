@@ -6,18 +6,22 @@ Repository guidance for agent sessions.
 
 User VMs are managed by `engine::machines`, separate from the managed Docker VM.
 The app routes Windows ARM64 and new Ubuntu VMs through owned native runtimes.
-New macOS creation persists native VZ records and reports Setup required; native installation
-and viewer integration remain pending. Local restore inspection stages private APFS media,
+New macOS creation persists native VZ records. Library Start inspects optional local restore
+media, prepares hardware, opens its dedicated viewer and installs through the owned queue.
+Local restore inspection stages private APFS media,
 retains original policy/stop intent and keeps staging/operation ownership through SDK callbacks.
 Inspected restore results prepare private native platform state and admit stopped hardware on
 the main thread. Identity, requirements and auxiliary firmware remain bound to the selected
 restore build. Normal Start is blocked until successful native installation; automatic download
-and library installation/viewer integration remain pending. Inspected preparation can start
+remains pending. Inspected preparation can start
 owned queue installation with bounded progress, caller cancellation and original-policy
 checks through SDK acknowledgement. Installed readiness is persisted only through authorized successful SDK completion and is
 bound to the saved platform. Interrupted or written untracked disks require recovery. System
-preparation validates the receipt and admits installed hardware without installer media;
-valid IPSW installation and system boot remain unverified. Previous untagged Linux/macOS records keep the
+preparation validates the receipt and admits installed hardware without installer media.
+Library setup reports bounded phase/progress updates and exposes cancellation without waiting
+for the retained operation lock. Original policy and stop intent remain frozen through installed
+startup. Direct installation wakes the sleeping queue owner. Valid IPSW installation, system
+boot and actual viewer rendering/input remain unverified. Previous untagged Linux/macOS records keep the
 Lima/VZ recovery path. Previous QEMU/swtpm Windows instances remain
 preserved for migration and are not started through the native path. All desktop guest families are experimental. Release hosts remain
 Apple silicon macOS 26+.
@@ -72,7 +76,7 @@ start through automatic media acquisition, preparation, main-thread admission an
 dedicated viewer. First start now stages an EFI installer with unattended boot flags and
 private provisioning media. Complete installation, transition to the installed system
 and guest tools remain unverified. Previous untagged records keep their recovery
-path, and macOS creation still uses the prototype. macOS has SDK restore-image discovery
+path; new macOS creation and library setup use the native path. macOS has SDK restore-image discovery
 and platform configuration with image-specific CPU/RAM minimums, independent
 Mac identity, boot loader and graphics. Its auxiliary directory publishes firmware state
 and hardware-model binding together with exclusive rename; opening it checks private
@@ -83,7 +87,7 @@ The installer controller borrows the VM exclusively and stays on its queue. Drop
 handle requests cancellation; callback ownership retains the installer and hardware until
 completion, and the VM rejects lifecycle changes while installation remains active.
 The signed probe verifies invalid-media failure. IPSW download, successful installation,
-valid-media cancellation, first boot and viewer integration remain pending.
+valid-media cancellation, first boot and live viewer verification remain pending.
 The VZ queue bridge accepts at most 16 queued lifecycle requests and processes at most
 16 per tick. The main-queue owner retains each VM across viewer lifetime, rejects
 concurrent transitions and retires only stopped hardware with no pending operation.

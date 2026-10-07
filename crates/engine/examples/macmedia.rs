@@ -31,11 +31,18 @@ fn main() -> anyhow::Result<()> {
     .enable_all()
     .worker_threads(1)
     .build()?;
-  for _ in 0..2 {
-    let error = runtime
-      .block_on(service.inspect_mac(&machine.id, Actor::Person))
-      .err()
-      .ok_or_else(|| anyhow::anyhow!("Malformed restore image was accepted"))?;
+  for attempt in 0..2 {
+    let error = if attempt == 0 {
+      let (progress, _) = tokio::sync::watch::channel(vz::mac::Phase::Inspecting);
+      runtime
+        .block_on(service.prepare_mac(&machine.id, Actor::Person, progress))
+        .err()
+    } else {
+      runtime
+        .block_on(service.inspect_mac(&machine.id, Actor::Person))
+        .err()
+    }
+    .ok_or_else(|| anyhow::anyhow!("Malformed restore image was accepted"))?;
     ensure!(
       error
         .to_string()
@@ -67,7 +74,7 @@ fn main() -> anyhow::Result<()> {
     std::fs::read_dir(manager.root.join("vz"))?.count() == 0,
     "Revoked inspection staged media"
   );
-  println!("Signed native SDK inspection rejected malformed media twice, preserved the source, released staging state and rejected revoked-agent access; no valid IPSW, installation or macOS boot was verified");
+  println!("Signed native macOS launch and SDK inspection rejected malformed media, preserved the source, released staging state and rejected revoked-agent access; no valid IPSW, installation or macOS boot was verified");
   Ok(())
 }
 

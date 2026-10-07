@@ -1,3 +1,6 @@
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod mac;
+
 use crate::{Host, MachineActor};
 use model::{CreateMachine, Machine, MachineStatus};
 
