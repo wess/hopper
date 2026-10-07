@@ -1,10 +1,11 @@
+pub mod download;
+
 use anyhow::{bail, Context};
 use fs2::FileExt;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -144,45 +145,7 @@ pub async fn prepare(root: &Path, progress: &Path) -> anyhow::Result<PathBuf> {
     )
     .await?;
     let media = catalogue(std::str::from_utf8(&xml.stdout)?)?;
-    let esd = cache.join(format!("{}.esd", media.sha1));
-    if !esd.is_file() {
-        // Microsoft's authenticated media catalogue supplies the delivery URL and file hash.
-        let mut response = client
-            .get(&media.file_path)
-            .send()
-            .await?
-            .error_for_status()?;
-        if response.content_length().is_some_and(|s| s != media.size) {
-            bail!("Windows installer size does not match Microsoft's catalogue");
-        }
-        let temporary = tempfile::NamedTempFile::new_in(&cache)?;
-        let mut file = tokio::fs::File::create(temporary.path()).await?;
-        let mut digest = sha1_smol::Sha1::new();
-        let mut written = 0;
-        let mut percent = 101;
-        while let Some(bytes) = response.chunk().await? {
-            written += bytes.len() as u64;
-            if written > media.size {
-                bail!("Windows installer exceeds its expected size");
-            }
-            digest.update(&bytes);
-            file.write_all(&bytes).await?;
-            let next = written * 100 / media.size;
-            if next != percent {
-                percent = next;
-                std::fs::write(
-                    progress,
-                    format!("Downloading Windows installer… {percent}%"),
-                )?;
-            }
-        }
-        file.sync_all().await?;
-        drop(file);
-        if written != media.size || digest.digest().to_string() != media.sha1.to_lowercase() {
-            bail!("Windows installer failed Microsoft's checksum verification");
-        }
-        temporary.persist(&esd)?;
-    }
+    let esd = download::fetch(&client, &media, &cache, progress).await?;
     std::fs::write(progress, "Preparing bootable Windows installer…")?;
     let files = stage.path().join("files");
     std::fs::create_dir(&files)?;
