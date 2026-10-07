@@ -29,3 +29,11 @@ fn diagnostic_digits_press_and_release_standard_keyboard_codes() {
     assert_eq!(key[3], machine::devices::virtio::input::SYN);
   }
 }
+
+#[test]
+fn diagnostic_command_switches_use_standard_keyboard_codes() {
+  let events = keyboard::text(b"/-").unwrap();
+  assert_eq!((events[0].code, events[4].code), (53, 12));
+  assert_eq!((events[2].code, events[6].code), (53, 12));
+  assert_eq!((events[2].value, events[6].value), (0, 0));
+}

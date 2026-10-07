@@ -19,7 +19,7 @@ fn main() -> anyhow::Result<()> {
   use anyhow::{bail, ensure, Context};
   use machine::{
     arm,
-    devices::{flash as nor, pci, serial, virtio::{block, gpu, input as vinput, pci as vpci}},
+    devices::{flash as nor, pci, serial, virtio::{block, gpu, input as vinput, pci as vpci, scsi}},
     acpi, hypervisor as hv, platform, psci, smccc,
   };
   use std::collections::VecDeque;
@@ -37,6 +37,16 @@ fn main() -> anyhow::Result<()> {
     .transpose()?;
   ensure!(target_path.is_none() || (boot_media && !guest_input),
     "Guest disk check requires boot-only driver media and its own input check");
+  let optical_path = arguments.iter().position(|argument| argument == "--optical")
+    .map(|index| arguments.get(index + 1).context("Provide an optical media image"))
+    .transpose()?;
+  ensure!(optical_path.is_none() || boot_media, "Optical media requires guest boot mode");
+  let optical_check = arguments.iter().any(|argument| argument == "--check-optical");
+  ensure!(!optical_check || (optical_path.is_some() && !guest_input && target_path.is_none()),
+    "Optical check requires optical media and its own input check");
+  let driver_check = arguments.iter().any(|argument| argument == "--check-driver");
+  ensure!(!driver_check || (optical_path.is_some() && !guest_input && !optical_check && target_path.is_none()),
+    "Driver check requires optical media and its own input check");
   let firmware = std::fs::read(path)?;
   ensure!(
     !firmware.is_empty() && firmware.len() <= 0x4000000,
@@ -102,7 +112,8 @@ fn main() -> anyhow::Result<()> {
   let keyboard = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Keyboard))?) } else { None };
   let pointer = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Tablet))?) } else { None };
   let target_disk = target_path.map(|path| target::create(std::path::Path::new(path))).transpose()?;
-  let mut devices = [disk, graphics, keyboard, pointer, target_disk];
+  let optical = optical_path.map(|path| vpci::optical(scsi::open(std::path::Path::new(path))?)).transpose()?;
+  let mut devices = [disk, graphics, keyboard, pointer, target_disk, optical];
   ensure!(!boot_media || devices[0].is_some(), "Media boot requires an installer image");
   ensure!(!boot_media || (!check_input && !check_storage), "Media boot and shell checks are separate modes");
   let mut media_key = None;
@@ -114,7 +125,7 @@ fn main() -> anyhow::Result<()> {
   let mut checked_storage = false;
   let mut pci_reads = 0usize;
   let mut handed_off = false;
-  let mut guest_pci = [[0usize; 2]; 5];
+  let mut guest_pci = [[0usize; 2]; 6];
   let mut guest_bus = [0usize; 2];
   let mut listed_acpi = false;
   let mut seen_acpi = [false; 5];
@@ -130,10 +141,14 @@ fn main() -> anyhow::Result<()> {
   let mut guest_sent = false;
   let boot = hv::paced(&mut cpu, std::time::Duration::from_secs(deadline), std::time::Duration::from_millis(20), |cpu| {
     for _ in 0..2000000 {
-      if (guest_input || target_path.is_some()) && !guest_sent && handed_off && start.elapsed().as_secs() >= 35 {
+      if (guest_input || target_path.is_some() || optical_check || driver_check) && !guest_sent && handed_off && start.elapsed().as_secs() >= 35 {
         ensure!(vpci::read(devices[2].as_mut().context("Missing keyboard")?, 20, 1)? == 15,
           "Guest keyboard driver is not ready");
-        if target_path.is_some() {
+        if driver_check {
+          text_input.extend(b"pnputil /enum-devices /class scsiadapter\r");
+        } else if optical_check {
+          text_input.extend(b"diskpart\rrescan\rlist volume\r");
+        } else if target_path.is_some() {
           text_input.extend(b"diskpart\rselect disk 1\rclean\rcreate partition primary\rlist partition\r");
         } else {
           text_input.extend(b"echo hopper windows input verified\r");
@@ -378,6 +393,10 @@ fn main() -> anyhow::Result<()> {
     }
     if let Some(device) = &devices[4] {
       eprintln!("Target completed {} storage requests; fault: {:?}", vpci::completed(device), vpci::fault(device));
+    }
+    if let Some(device) = &devices[5] {
+      eprintln!("Optical completed {} SCSI requests; fault: {:?}", vpci::completed(device), vpci::fault(device));
+      eprintln!("Optical command counts and check conditions: {:?}", vpci::optical_stats(device));
     }
   }
   if let Some(graphics) = &mut devices[1] {

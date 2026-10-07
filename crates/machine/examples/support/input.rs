@@ -13,6 +13,8 @@ pub fn text(text: &[u8]) -> anyhow::Result<Vec<Event>> {
       b'0' => Some(11),
       b'1'..=b'9' => Some((byte - b'1') as u16 + 2),
       b' ' => Some(57),
+      b'/' => Some(53),
+      b'-' => Some(12),
       b'\r' => Some(28),
       _ => None,
     }

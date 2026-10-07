@@ -1,4 +1,4 @@
-"""Build a boot-only Windows PE image for native storage/input driver diagnostics."""
+"""Build boot-only Windows PE media for native disk, optical and input driver diagnostics."""
 
 import argparse
 import hashlib
@@ -12,6 +12,7 @@ import subprocess
 FILES = {
   "viostor": ["viostor.inf", "viostor.cat", "viostor.sys"],
   "vioinput": ["vioinput.inf", "vioinput.cat", "vioinput.sys", "viohidkmdf.sys"],
+  "vioscsi": ["vioscsi.inf", "vioscsi.cat", "vioscsi.sys"],
 }
 
 
@@ -40,6 +41,9 @@ def bootstrap():
     "echo Loading signed ARM64 storage driver...\r\n"
     "drvload X:\\hopper\\viostor\\viostor.inf\r\n"
     "echo Storage driver exit code: %errorlevel%\r\n"
+    "echo Loading signed ARM64 optical transport driver...\r\n"
+    "drvload X:\\hopper\\vioscsi\\vioscsi.inf\r\n"
+    "echo Optical driver exit code: %errorlevel%\r\n"
     "echo Loading signed ARM64 input driver...\r\n"
     "drvload X:\\hopper\\vioinput\\vioinput.inf\r\n"
     "echo Input driver exit code: %errorlevel%\r\n"

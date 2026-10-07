@@ -5,7 +5,7 @@ pub mod msix;
 mod registers;
 pub use memory::{memory_read, memory_write, read, write};
 
-use super::{block, gpu, input, queue};
+use super::{block, gpu, input, queue, scsi};
 use crate::{devices::pci::Function, dma::Memory};
 use backend::Backend;
 
@@ -63,6 +63,17 @@ pub fn graphics(display: gpu::Display) -> anyhow::Result<Device> {
   build(Backend::Gpu(display))
 }
 
+pub fn optical(media: scsi::Optical) -> anyhow::Result<Device> {
+  build(Backend::Optical(media))
+}
+
+pub fn optical_stats(device: &Device) -> Option<scsi::Stats> {
+  match &device.backend {
+    Backend::Optical(media) => Some(scsi::stats(media)),
+    _ => None,
+  }
+}
+
 pub fn controller(input: input::Input) -> anyhow::Result<Device> {
   build(Backend::Input(input))
 }
@@ -107,6 +118,7 @@ fn build(backend: Backend) -> anyhow::Result<Device> {
     Backend::Disk(_) => (0x1042, 0x010000, 1, 64),
     Backend::Gpu(_) => (0x1050, 0x038000, 2, 16),
     Backend::Input(_) => (0x1052, 0x098000, 2, 136),
+    Backend::Optical(_) => (0x1048, 0x010000, 3, 36),
   };
   let mut pci = Function::new(0x1af4, id, class, 1)?;
   pci.add_bar(0, 0x4000, true)?;

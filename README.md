@@ -270,6 +270,20 @@ file contained the corresponding partition table. The target completed 76 storag
 requests without a device fault. This verifies guest disk writes, not a formatted
 Windows installation or installation-media mounting. Input and disk checks are
 separate modes; allow `--seconds 90` for the disk check.
+The native device path also has a read-only optical transport over Virtio SCSI.
+It exposes 2048-byte sectors, inquiry/capacity/TOC/configuration responses, bounded
+reads, write protection and checked control/request queues. Sense/CDB sizes reset
+to their defaults; unnegotiated bidirectional requests and bad targets return
+transport errors. The event queue remains inactive because hotplug is not offered.
+The diagnostic builder includes the signed ARM64 `vioscsi` package. Live probes
+load it successfully, and Windows PnP reports its controller as Started. Firmware
+reads the optical image, but Windows still exposes no CD volume, including after
+an explicit DiskPart rescan. This path is not ready for installation.
+Use `--optical /path/to/installer.iso --check-optical` to repeat the volume check
+with the boot-only diagnostic image, or `--check-driver` for the controller's
+Windows PnP status. Optical statistics report per-queue counts, command types,
+check conditions and rejected LUN/transfer metadata without exporting guest buffers.
+
 The firmware probe reports PCI accesses after its exit callback, each device's
 command/BAR state, Virtio status and delivered native MSI messages. The Hypervisor
 probe verifies frame identification, rejected overlapping/misaligned regions,
