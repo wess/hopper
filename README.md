@@ -196,9 +196,15 @@ target/debug/examples/firmware native/build/firmware/windows.fd /tmp/hopper.dtb 
 The fixture builder creates a new image and refuses to overwrite an existing file.
 This verifies UEFI storage access, not Windows installation or desktop support.
 
+The 2D GPU command core creates bounded rendering resources, attaches validated
+guest-memory buffers, transfers rectangular pixel updates, and publishes RGBA
+scanouts. Tests cover fragmented DMA, format conversion, cropped displays, fence
+responses, invalid requests, and allocation limits. GPU PCI transport, cursor
+commands, live firmware graphics, and 3D acceleration remain under development.
+
 `cargo run -p machine --example acpi -- /tmp/hopperacpi` exports the handoff and
-individual tables for ACPICA inspection. Graphics and TPM are still missing.
-The native runtime and storage have not been integrated into the app.
+individual tables for ACPICA inspection. TPM is still missing. The native runtime,
+storage, and graphics have not been integrated into the app.
 
 ## Build a release
 
