@@ -1,9 +1,12 @@
-use super::{files, Client, Owner};
+use super::{
+  files,
+  identity::{validate, Identity},
+  Client, Owner,
+};
 use crate::machines::{native::assets, Machines};
 use anyhow::{ensure, Context};
 use machine::vz::{self, queue::Check, MainThreadMarker};
 use model::Machine;
-use serde::{Deserialize, Serialize};
 use std::{
   fs::File,
   io::{Read, Seek, SeekFrom, Write},
@@ -12,8 +15,9 @@ use std::{
   sync::Arc,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
+  Launch,
   Installer,
   Unattended,
   System,
@@ -39,16 +43,6 @@ pub struct Admission {
   client: Client,
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Identity {
-  id: String,
-  version: u32,
-  guest: model::GuestOs,
-  disk_gib: u32,
-  identity: Vec<u8>,
-}
-
 pub(super) fn prepare(
   manager: Machines,
   machine: Machine,
@@ -62,6 +56,10 @@ pub(super) fn prepare(
   ensure!(
     uuid::Uuid::parse_str(&machine.id)?.to_string() == machine.id,
     "VZ identity must be canonical"
+  );
+  ensure!(
+    stage != Stage::Launch,
+    "Resolve Linux launch stage before preparation"
   );
   let installer = match stage {
     Stage::Installer | Stage::Unattended => {
@@ -83,6 +81,7 @@ pub(super) fn prepare(
       Some(path)
     }
     Stage::System => None,
+    Stage::Launch => unreachable!(),
   };
   let runtime = Arc::new(manager.guard(&machine.id, ".runtime")?);
   let parent = manager.root.join("vz");
@@ -150,6 +149,16 @@ pub(super) fn prepare(
 }
 
 impl Prepared {
+  pub fn stage(&self) -> Stage {
+    if self.installer.is_none() {
+      Stage::System
+    } else if self.unattended {
+      Stage::Unattended
+    } else {
+      Stage::Installer
+    }
+  }
+
   pub(super) fn unattended(
     mut self,
     manager: &Machines,
@@ -227,6 +236,10 @@ impl Prepared {
       files::publish(temporary, &self.target)?;
     }
     let identity = validate(&self.target, &self.machine)?;
+    if self.installer.is_none() {
+      (self.check)()?;
+      crate::machines::linux::progress::system(&self.target)?;
+    }
     let observation = self
       .attempt
       .as_deref()
@@ -234,6 +247,7 @@ impl Prepared {
         crate::machines::linux::observe::start_owned(&self.target, attempt, self.runtime.clone())
       })
       .transpose()?;
+    let installer = self.installer.is_some();
     let boot = vz::Linux {
       cpus: self.machine.resources.cpus as usize,
       memory: u64::from(self.machine.resources.memory_gib) << 30,
@@ -256,7 +270,7 @@ impl Prepared {
         .transpose()?,
     };
     let mut vm = vz::create(main, &boot)?;
-    if self.unattended {
+    if installer {
       vz::restrict_installer_restart(&mut vm)?;
     }
     vz::retain(
@@ -280,31 +294,4 @@ impl Admission {
       .transition_checked(&self.id, vz::Action::Start, self.check)
       .await
   }
-}
-
-fn validate(target: &std::path::Path, machine: &Machine) -> anyhow::Result<Identity> {
-  files::directory(target)?;
-  let identity: Identity =
-    serde_json::from_reader(files::read(&target.join("identity"), 65536)?.take(65537))?;
-  ensure!(
-    identity.id == machine.id
-      && identity.version == 1
-      && identity.guest == model::GuestOs::Linux
-      && identity.disk_gib == machine.resources.disk_gib
-      && identity.identity.len() <= 4096,
-    "VZ identity or disk capacity does not match the VM record"
-  );
-  let mut disk = files::read(&target.join("disk"), 2048 << 30)?;
-  ensure!(
-    disk.metadata()?.len() == u64::from(machine.resources.disk_gib) << 30,
-    "VZ disk capacity changed; preserve it for recovery"
-  );
-  let mut magic = [0; 4];
-  disk.read_exact(&mut magic)?;
-  ensure!(
-    &magic != b"QFI\xfb",
-    "Previous disk format requires migration"
-  );
-  files::read(&target.join("variables"), 16 << 20)?;
-  Ok(identity)
 }

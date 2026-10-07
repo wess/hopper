@@ -115,7 +115,7 @@ impl Machines {
       if running {
         "Stopping…"
       } else if !owned {
-        "Preparing Linux installer…"
+        "Preparing Linux…"
       } else {
         "Starting…"
       }
@@ -125,6 +125,23 @@ impl Machines {
     let host = self.state.host.clone();
     let identity = id.clone();
     let weak = cx.entity().downgrade();
+    let mut owned = owned;
+    if !running && owned && crate::machines::installer(&id, cx) {
+      let result = host
+        .virtual_linux_installation(&id, MachineActor::Person)
+        .and_then(|phase| {
+          anyhow::ensure!(
+            phase == Some(host::VirtualLinuxPhase::Deployed),
+            "Ubuntu installation requires recovery; its disk and installer are preserved"
+          );
+          crate::machines::retire_installer(&id, cx)
+        });
+      if let Err(error) = result {
+        self.finish_virtual(&id, &name, true, Err(error), cx);
+        return;
+      }
+      owned = false;
+    }
     if !running && !owned {
       bridge::run(
         cx,
@@ -133,7 +150,7 @@ impl Machines {
             .prepare_virtual_linux(
               &identity,
               MachineActor::Person,
-              host::VirtualLinuxStage::Unattended,
+              host::VirtualLinuxStage::Launch,
             )
             .await
         },

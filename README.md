@@ -23,8 +23,9 @@ quit stops the engine. Releases bundle the VM helpers, Docker CLI, Compose, and 
   Guest VMs live under `~/.hopper/machines`. Closing the native viewer keeps Windows
   running; quitting Hopper stops its owned Windows sessions. Windows snapshots,
   clones and accelerated graphics remain unfinished. Ubuntu first start prepares unattended
-  installation; completed installation, system-boot transition and guest tools remain unverified. Previous untagged Linux
-  records retain their recovery path.
+  installation and supports manually starting the installed system after a saved deployment
+  result. Full installation, desktop readiness and guest tools remain unverified. Previous
+  untagged Linux records retain their recovery path.
 - **Agent access** — enabled for new VMs, revocable per VM. The MCP server creates
   and lists native Windows/Ubuntu records and captures Windows displays through the running app.
   Windows US key chords and pointer actions share input ownership with the viewer.
@@ -251,8 +252,8 @@ hardware, not real rendering, keyboard/mouse or window close/reopen. New Ubuntu 
 persist an explicit runtime choice. Their first start acquires media,
 prepares the VM, admits it on the main thread and opens the dedicated viewer after hardware
 starts. First start now stages unattended EFI installation and guest account configuration;
-completed installation, actual accounts, system-boot transition and guest tools remain
-unverified. A local Ubuntu Desktop ARM64 ISO is available as a fallback. Prepared,
+a saved deployment result selects installed-system boot on the next Start. Full installation,
+actual accounts, desktop readiness and guest tools remain unverified. A local Ubuntu Desktop ARM64 ISO is available as a fallback. Prepared,
 unowned records show Ready to start only when operation/runtime locks are free; this does
 not assert an installed or usable desktop. Previous untagged records retain their recovery
 path, and mismatched guest/runtime choices are rejected. macOS creation still uses the
@@ -291,8 +292,9 @@ passes the unattended boot flag through a privately staged EFI installer. Stagin
 the ARM64 kernel and desktop installation sources, clones the ISO on APFS, then changes only
 the existing GRUB configuration. Copy fallback requires enough space. The downloaded cache
 stays unchanged. Existing written disks reject unattended preparation, and admitted installer
-hardware cannot start a second time. Completion detection and transition to the installed
-system remain unfinished. Seed delivery, schema checks and staged boot flags do not prove
+hardware cannot start a second time. Attempt-scoped completion markers and a private
+journal support manually starting the installed system; automatic shutdown handoff remains
+unfinished. Seed delivery, schema checks and staged boot flags do not prove
 installed users, successful Ubuntu installation, guest tools or a usable desktop.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
@@ -476,5 +478,12 @@ the configured `CODESIGN_IDENTITY` credentials.
 Unattended Ubuntu setup now emits attempt-scoped serial phases for installation,
 deployment completion and failure. The runtime drains console noise without saving guest
 logs, and persists a private bounded journal that status checks can read after restart.
-Deployment completion does not establish desktop readiness; the installed-system handoff
-and full Ubuntu installation remain unfinished.
+Deployment completion does not establish desktop readiness; full Ubuntu installation
+remains unverified.
+
+Launch now selects system boot from a saved deployment result and preserves that intent
+across a failed handoff or app restart. Pressing Start on a completed, stopped installer
+retires its hardware and reuses the dedicated window for the replacement VM. The installed
+system omits installation and seed media, while retaining its disk, platform identity and
+EFI variables. Incomplete installations remain on the recovery path. Automatic handoff
+after guest shutdown, full Ubuntu installation and desktop readiness remain unfinished.

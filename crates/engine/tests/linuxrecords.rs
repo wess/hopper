@@ -2,7 +2,7 @@
 
 use engine::machines::{linux::records, Actor, Machines};
 use model::{CreateMachine, EngineResources, MachineRuntime};
-use std::fs::OpenOptions;
+use std::{fs::OpenOptions, os::unix::fs::PermissionsExt};
 
 fn fixture() -> (tempfile::TempDir, Machines, CreateMachine) {
   let root = tempfile::tempdir().unwrap();
@@ -58,6 +58,7 @@ async fn listing_distinguishes_ready_preparation_and_foreign_ownership_without_p
   let machine = records::create(&manager, request).unwrap();
   let target = manager.root.join("vz").join(&machine.id);
   std::fs::create_dir_all(&target).unwrap();
+  std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).unwrap();
   let operation = OpenOptions::new()
     .read(true)
     .write(true)
@@ -116,4 +117,27 @@ async fn explicit_runtime_does_not_override_previous_guest_data_or_invalid_platf
   assert!(manager.machine(&machine.id, Actor::Person).is_err());
   assert!(manager.list_non_windows(Actor::Person).await.is_err());
   assert_eq!(std::fs::read(disk).unwrap(), b"previous guest data");
+}
+
+#[tokio::test]
+async fn listing_rejects_readable_native_state_without_changing_its_files() {
+  let (_root, manager, request) = fixture();
+  let machine = records::create(&manager, request).unwrap();
+  let target = manager.root.join("vz").join(&machine.id);
+  std::fs::create_dir_all(&target).unwrap();
+  std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755)).unwrap();
+  let preserved = target.join("disk");
+  std::fs::write(&preserved, b"preserved VM data").unwrap();
+  assert!(manager
+    .list_non_windows(Actor::Person)
+    .await
+    .unwrap_err()
+    .to_string()
+    .contains("private and owned"));
+  assert_eq!(std::fs::read(&preserved).unwrap(), b"preserved VM data");
+  std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o700)).unwrap();
+  assert_eq!(
+    manager.list_non_windows(Actor::Person).await.unwrap()[0].state,
+    "Ready to start"
+  );
 }

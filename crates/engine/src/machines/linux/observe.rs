@@ -59,7 +59,11 @@ fn start_inner(
     .spawn(move || {
       let _ownership = ownership;
       let mut bytes = [0; 8192];
-      while !flag.load(Ordering::Acquire) {
+      let mut drained = 0;
+      loop {
+        if flag.load(Ordering::Acquire) && drained >= 1 << 20 {
+          break;
+        }
         let mut descriptor = libc::pollfd {
           fd: input.as_raw_fd(),
           events: libc::POLLIN,
@@ -73,15 +77,18 @@ fn start_inner(
           break;
         }
         if ready == 0 {
+          if flag.load(Ordering::Acquire) {
+            break;
+          }
           continue;
         }
         match input.read(&mut bytes) {
           Ok(0) => break,
           Ok(count) => {
+            if flag.load(Ordering::Acquire) {
+              drained += count;
+            }
             for phase in decoder.feed(&bytes[..count]) {
-              if flag.load(Ordering::Acquire) {
-                break;
-              }
               if let Err(error) = progress::save(&directory, &attempt, phase) {
                 tracing::error!(%error, "Cannot persist Ubuntu installation progress");
               }

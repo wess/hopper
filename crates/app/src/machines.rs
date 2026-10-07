@@ -49,6 +49,11 @@ pub fn open(id: &str, title: &str, cx: &mut App) -> anyhow::Result<()> {
     let viewer = viewer::Viewer::new(display, title)?;
     runtime.viewers.insert(id.into(), viewer);
   }
+  if let Some(viewer) = runtime.viewers.get_mut(id) {
+    if !viewer.attached() {
+      viewer.attach(runtime.owner.display(id)?)?;
+    }
+  }
   runtime
     .viewers
     .get(id)
@@ -68,4 +73,18 @@ pub fn admit(
   let main = host::VirtualMachineThread::new()
     .ok_or_else(|| anyhow::anyhow!("VM admission requires the main thread"))?;
   prepared.admit(main, &mut cx.global_mut::<Runtime>().owner)
+}
+
+pub fn installer(id: &str, cx: &App) -> bool {
+  cx.has_global::<Runtime>() && cx.global::<Runtime>().owner.installer(id).unwrap_or(false)
+}
+
+pub fn retire_installer(id: &str, cx: &mut App) -> anyhow::Result<()> {
+  let runtime = cx.global_mut::<Runtime>();
+  anyhow::ensure!(runtime.owner.installer(id)?, "This VM is not an installer");
+  runtime.owner.can_replace(id)?;
+  if let Some(viewer) = runtime.viewers.get_mut(id) {
+    viewer.detach();
+  }
+  runtime.owner.retire(id)
 }

@@ -155,16 +155,22 @@ impl Owner {
     super::display::create(vm)
   }
 
-  pub fn retire(&mut self, id: &str) -> anyhow::Result<()> {
+  pub fn installer(&self, id: &str) -> anyhow::Result<bool> {
+    Ok(
+      self
+        .machines
+        .get(id)
+        .context("VZ machine is not owned")?
+        .installer,
+    )
+  }
+
+  pub fn can_replace(&self, id: &str) -> anyhow::Result<()> {
     ensure!(
       !self.pending.contains_key(id),
       "VZ operation is still active"
     );
     let vm = self.machines.get(id).context("VZ machine is not owned")?;
-    ensure!(
-      !vm.displaying.get(),
-      "Close the VM display before retiring ownership"
-    );
     ensure!(
       !vm.installing.get(),
       "macOS installation still owns this VM"
@@ -173,6 +179,21 @@ impl Owner {
       super::state(vm) == objc2_virtualization::VZVirtualMachineState::Stopped,
       "Stop the VZ machine before retiring ownership"
     );
+    Ok(())
+  }
+
+  pub fn can_retire(&self, id: &str) -> anyhow::Result<()> {
+    self.can_replace(id)?;
+    let vm = self.machines.get(id).context("VZ machine is not owned")?;
+    ensure!(
+      !vm.displaying.get(),
+      "Close the VM display before retiring ownership"
+    );
+    Ok(())
+  }
+
+  pub fn retire(&mut self, id: &str) -> anyhow::Result<()> {
+    self.can_retire(id)?;
     self.machines.remove(id);
     Ok(())
   }

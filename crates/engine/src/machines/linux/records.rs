@@ -83,6 +83,7 @@ pub(crate) fn status(
         (
           match phase {
             Some(super::progress::Phase::Deployed) => "Deployment finished",
+            Some(super::progress::Phase::SystemBoot) => "Ready to start",
             Some(_) => "Installation recovery required",
             None if prepared => "Ready to start",
             None => "Not created",

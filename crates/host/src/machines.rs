@@ -140,6 +140,20 @@ impl Host {
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 impl Host {
+  pub fn virtual_linux_installation(
+    &self,
+    id: &str,
+    actor: MachineActor,
+  ) -> anyhow::Result<Option<::engine::machines::linux::progress::Phase>> {
+    self
+      .virtual_machines
+      .lock()
+      .map_err(|_| anyhow::anyhow!("VZ service lock failed"))?
+      .as_ref()
+      .ok_or_else(|| anyhow::anyhow!("VZ ownership is not connected"))?
+      .installation(id, actor)
+  }
+
   pub async fn prepare_virtual_linux(
     &self,
     id: &str,

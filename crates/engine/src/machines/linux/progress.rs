@@ -9,6 +9,7 @@ pub enum Phase {
   Prepared,
   Installing,
   Deployed,
+  SystemBoot,
   Failed,
 }
 
@@ -18,6 +19,7 @@ impl Phase {
       Self::Prepared => "Waiting for the Ubuntu installer",
       Self::Installing => "Installing Ubuntu",
       Self::Deployed => "Ubuntu deployment finished; system boot is pending",
+      Self::SystemBoot => "Ubuntu system boot; desktop readiness is unverified",
       Self::Failed => "Ubuntu installation failed; its disk is preserved for recovery",
     }
   }
@@ -118,7 +120,7 @@ pub(super) fn save(directory: &Path, attempt: &str, phase: Phase) -> anyhow::Res
   Ok(())
 }
 
-pub fn read(directory: &Path) -> anyhow::Result<Option<Phase>> {
+fn record(directory: &Path) -> anyhow::Result<Option<Record>> {
   super::super::vz::files::directory(directory)?;
   let path = directory.join("installation");
   match std::fs::symlink_metadata(&path) {
@@ -130,5 +132,20 @@ pub fn read(directory: &Path) -> anyhow::Result<Option<Phase>> {
   let record: Record = serde_json::from_reader(file)?;
   ensure!(record.version == 1, "Unknown installation journal version");
   Decoder::new(&record.attempt)?;
-  Ok(Some(record.phase))
+  Ok(Some(record))
+}
+
+pub fn read(directory: &Path) -> anyhow::Result<Option<Phase>> {
+  Ok(record(directory)?.map(|record| record.phase))
+}
+
+pub(crate) fn system(directory: &Path) -> anyhow::Result<()> {
+  if let Some(record) = record(directory)? {
+    ensure!(
+      matches!(record.phase, Phase::Deployed | Phase::SystemBoot),
+      "Ubuntu installation requires recovery; its disk is preserved"
+    );
+    save(directory, &record.attempt, Phase::SystemBoot)?;
+  }
+  Ok(())
 }

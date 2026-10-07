@@ -1,4 +1,5 @@
 pub(crate) mod files;
+mod identity;
 mod prepare;
 
 use super::{Actor, Machines};
@@ -66,6 +67,26 @@ impl Service {
       "Linux admission requires a Linux VM"
     );
     crate::machines::config::validate_resources(&machine)?;
+    let launch = stage == Stage::Launch;
+    let stage = if launch {
+      ensure!(
+        machine.profile == "ubuntu"
+          && machine.runtime == Some(model::MachineRuntime::Virtualization),
+        "Automatic launch requires native Ubuntu"
+      );
+      match self.installation(id, actor)? {
+        Some(
+          super::linux::progress::Phase::Deployed | super::linux::progress::Phase::SystemBoot,
+        ) => Stage::System,
+        Some(_) => anyhow::bail!(
+          "Ubuntu installation requires recovery; its disk and installer are preserved"
+        ),
+        None => Stage::Unattended,
+      }
+    } else {
+      stage
+    };
+    check()?;
     if matches!(stage, Stage::Installer | Stage::Unattended) && machine.installer.is_none() {
       ensure!(
         machine.profile == "ubuntu",
@@ -82,7 +103,31 @@ impl Service {
     let manager = self.manager.clone();
     let client = self.client.clone();
     tokio::task::spawn_blocking(move || {
-      let prepared = prepare::prepare(manager.clone(), machine, check, client, stage)?;
+      let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+      let prepared = loop {
+        match prepare::prepare(
+          manager.clone(),
+          machine.clone(),
+          check.clone(),
+          client.clone(),
+          stage,
+        ) {
+          Ok(prepared) => break prepared,
+          Err(error)
+            if launch
+              && stage == Stage::System
+              && std::time::Instant::now() < deadline
+              && error
+                .chain()
+                .filter_map(|error| error.downcast_ref::<std::io::Error>())
+                .any(|error| error.kind() == std::io::ErrorKind::WouldBlock) =>
+          {
+            check()?;
+            std::thread::sleep(std::time::Duration::from_millis(10));
+          }
+          Err(error) => return Err(error),
+        }
+      };
       if matches!(stage, Stage::Unattended) {
         prepared.unattended(&manager, actor)
       } else {

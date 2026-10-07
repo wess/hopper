@@ -5,60 +5,24 @@ use flate2::{write::GzEncoder, Compression};
 use machine::vz::queue::Check;
 use std::{
   io::{Cursor, Write},
-  process::Command,
   sync::Arc,
 };
 
 #[path = "support/credentials.rs"]
 mod backend;
 
+#[path = "support/linux.rs"]
+mod fixture;
+use fixture::image;
+
 fn check() -> Check {
   Arc::new(|| Ok(()))
-}
-
-fn image() -> Vec<u8> {
-  let mut bytes = vec![0; 4096];
-  bytes[56..60].copy_from_slice(b"ARM\x64");
-  bytes
-}
-
-fn fixture(root: &std::path::Path) -> std::path::PathBuf {
-  let source = root.join("source");
-  std::fs::create_dir_all(source.join("casper")).unwrap();
-  std::fs::create_dir_all(source.join("boot/grub")).unwrap();
-  std::fs::write(source.join("casper/vmlinuz"), image()).unwrap();
-  std::fs::write(source.join("casper/initrd"), [0; 128]).unwrap();
-  std::fs::write(
-    source.join("casper/install-sources.yaml"),
-    "- id: ubuntu-desktop\n",
-  )
-  .unwrap();
-  std::fs::write(
-    source.join("boot/grub/grub.cfg"),
-    format!(
-      "linux /casper/vmlinuz\ninitrd /casper/initrd\n#{}\n",
-      " ".repeat(1024)
-    ),
-  )
-  .unwrap();
-  let media = root.join("installer.iso");
-  let status = Command::new("/usr/bin/bsdtar")
-    .arg("--format=iso9660")
-    .arg("-cf")
-    .arg(&media)
-    .arg("-C")
-    .arg(&source)
-    .args(["casper", "boot"])
-    .status()
-    .unwrap();
-  assert!(status.success());
-  media
 }
 
 #[test]
 fn private_efi_staging_changes_only_owned_grub_configuration() {
   let root = tempfile::tempdir().unwrap();
-  let media = fixture(root.path());
+  let media = fixture::media(root.path());
   let original = std::fs::read(&media).unwrap();
   let mut file = std::fs::File::open(&media).unwrap();
   assert!(iso::read(&mut file, "casper/vmlinuz", 4096, &check()).unwrap() == image());
@@ -105,7 +69,7 @@ fn decoding_checks_arm64_architecture_compression_and_payload_bounds() {
 #[test]
 fn corrupt_iso_extents_and_revocation_preserve_source() {
   let root = tempfile::tempdir().unwrap();
-  let media = fixture(root.path());
+  let media = fixture::media(root.path());
   let original = std::fs::read(&media).unwrap();
   let denied: Check = Arc::new(|| anyhow::bail!("revoked"));
   assert!(boot::stage(&media, root.path(), &denied).is_err());
@@ -128,7 +92,7 @@ async fn unattended_preparation_cleans_staging_and_preserves_written_disks() {
     backend::State::default(),
   ))));
   let root = tempfile::tempdir().unwrap();
-  let media = fixture(root.path());
+  let media = fixture::media(root.path());
   let original = std::fs::read(&media).unwrap();
   let manager = Machines {
     root: root.path().join("machines"),

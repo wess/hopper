@@ -149,3 +149,32 @@ fn installation_status_rechecks_agent_access_and_preserves_corrupt_journals() {
   assert!(service.installation(&record.id, Actor::Person).is_err());
   assert_eq!(std::fs::read(&path).unwrap(), b"{broken}");
 }
+
+#[test]
+fn reader_teardown_drains_a_final_failure_without_retaining_console_logs() {
+  let root = tempfile::tempdir().unwrap();
+  std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+  let (mut output, observation) = observe::start(root.path(), ATTEMPT).unwrap();
+  output
+    .write_all(
+      format!(
+        "{}{}{}",
+        marker("installing"),
+        marker("deployed"),
+        marker("failed")
+      )
+      .as_bytes(),
+    )
+    .unwrap();
+  drop(output);
+  drop(observation);
+  let deadline = Instant::now() + Duration::from_secs(5);
+  while progress::read(root.path()).unwrap() != Some(Phase::Failed) {
+    assert!(
+      Instant::now() < deadline,
+      "Teardown lost a buffered failure marker"
+    );
+    std::thread::sleep(Duration::from_millis(10));
+  }
+  assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
+}

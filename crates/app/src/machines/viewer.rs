@@ -5,7 +5,7 @@ use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 
 pub(super) struct Viewer {
   window: Retained<NSWindow>,
-  display: VirtualMachineDisplay,
+  display: Option<VirtualMachineDisplay>,
 }
 
 impl Viewer {
@@ -31,12 +31,35 @@ impl Viewer {
     window.setContentView(Some(display.view()));
     window.setContentMinSize(NSSize::new(640.0, 480.0));
     window.center();
-    Ok(Self { window, display })
+    Ok(Self {
+      window,
+      display: Some(display),
+    })
+  }
+
+  pub fn attached(&self) -> bool {
+    self.display.is_some()
+  }
+
+  pub fn detach(&mut self) {
+    self.window.orderOut(None);
+    self.window.makeFirstResponder(None);
+    self.window.setContentView(None);
+    self.display.take();
+  }
+
+  pub fn attach(&mut self, display: VirtualMachineDisplay) -> anyhow::Result<()> {
+    anyhow::ensure!(self.display.is_none(), "VM viewer is already attached");
+    self.window.setContentView(Some(display.view()));
+    self.display = Some(display);
+    Ok(())
   }
 
   pub fn show(&self) {
     self.window.makeKeyAndOrderFront(None);
-    self.window.makeFirstResponder(Some(self.display.view()));
+    if let Some(display) = &self.display {
+      self.window.makeFirstResponder(Some(display.view()));
+    }
   }
 }
 
