@@ -30,7 +30,11 @@ and freezes all grants before storage allocation; replacement directories reject
 Missing grants can be removed without opening their old paths. No MCP host-folder grant tool
 is exposed. UI selection, naming, mode persistence across reopen and removal are verified
 against an isolated synthetic profile. Signed Linux/Mac admission probes verify a real shared
-filesystem device and mutation exclusion; installed guest mounts and Windows sharing remain pending.
+filesystem device and mutation exclusion. New Ubuntu seeds install a root-owned conditional
+virtiofs mount service at /mnt/hopper with nosuid,nodev and a ~/Shared link. The signed
+diagnostic exercises the production helper, no-device skip, repeated mounting and ordinary
+UID access. Installed Ubuntu service activation, existing-guest updates, Mac guest access
+and Windows sharing remain pending.
 New macOS creation persists native VZ records. Library Start discovers and downloads supported
 official restore media when no local image is selected, then inspects it, prepares hardware, opens its dedicated viewer and installs through
 the owned queue. Creation offers a local restore picker and automatic acquisition; profile

@@ -79,7 +79,7 @@ def entry(fields, name, data):
   return result
 
 
-def main():
+def main(extra=()):
   if len(sys.argv) != 3:
     raise SystemExit("Provide verified Alpine initramfs and a new diagnostic output path")
   source, target = map(pathlib.Path, sys.argv[1:])
@@ -124,6 +124,11 @@ def main():
     raise ValueError("expected one init entry")
   fields = [0, 0o100755, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]
   output.extend(entry(fields, "dhcp", DHCP))
+  for name, data in extra:
+    path = pathlib.PurePosixPath(name)
+    if not name or path.is_absolute() or ".." in path.parts or len(name) > 4096 or len(data) > 1 << 20:
+      raise ValueError("invalid diagnostic payload")
+    output.extend(entry(fields, name, data))
   fields[1] = 0
   output.extend(entry(fields, "TRAILER!!!", b""))
   with target.open("xb") as file:

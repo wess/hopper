@@ -575,17 +575,29 @@ The core checks the selected directory's canonical path and filesystem identity 
 configuration and startup, retaining its handle through hardware, viewer and callbacks.
 Replacing the host path while running may make the share unavailable rather than redirect it.
 
-A disposable signed Linux diagnostic verifies named reads, writes, read-only enforcement,
-absolute and relative symlink containment, rejection of a replaced folder before startup,
-and no redirection to a replacement while running:
+New Ubuntu provisioning installs a root-owned mount helper and a boot service. The service
+mounts the `hopper` device at `/mnt/hopper` with `nosuid,nodev`, and skips mounting when no
+shared-folder device exists. A `Shared` link in the normal user's home points to that mount.
+The helper checks an existing mount before reuse and refuses a symbolic-link mount point.
+Existing guests do not receive these tools automatically.
+
+A disposable signed Linux diagnostic runs that exact helper and verifies no-device startup,
+repeated mounting, rejection of an unrelated existing mount, named reads and writes as root
+and an unprivileged user, read-only
+enforcement, absolute and relative symlink containment, rejection of a replaced folder
+before startup, and no redirection to a replacement while running:
 
 ```sh
-python3 scripts/check/sharing.py /path/to/initramfs-virt /path/to/sharing.gz
+clang --target=aarch64-linux-gnu -nostdlib -static -fno-stack-protector -fno-builtin -O2 \
+  --ld-path=/opt/homebrew/bin/ld.lld scripts/check/identity.c -o /tmp/hopperidentity
+python3 scripts/check/sharing.py /path/to/initramfs-virt /path/to/sharing.gz /tmp/hopperidentity
 cargo build -p machine --example vzsharing
 codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/vzsharing
 codesign --verify --strict target/debug/examples/vzsharing
 target/debug/examples/vzsharing /path/to/uncompressed/Image /path/to/sharing.gz
 ```
 
-This does not prove sharing inside an installed desktop or a macOS guest. Windows sharing,
-installed guest mount setup and end-to-end desktop sharing verification remain unfinished.
+The diagnostic identity helper is a Linux ARM64 fixture, not an installed guest tool.
+This does not prove service activation or sharing inside an installed Ubuntu desktop or a
+macOS guest. Existing-guest tool updates, Windows sharing and end-to-end desktop sharing
+verification remain unfinished.

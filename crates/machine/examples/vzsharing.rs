@@ -39,9 +39,9 @@ fn main() -> anyhow::Result<()> {
   ];
   let identity = vz::identity();
   let run_loop = NSRunLoop::currentRunLoop();
-  {
+  for present in [false, true] {
     let (mode, option, marker) = (Mode::Disconnected, "sharing", "HOPPER_SHARING_OK");
-    let output = root.path().join(option);
+    let output = root.path().join(format!("{option}-{present}"));
     let console = std::fs::OpenOptions::new()
       .create_new(true)
       .write(true)
@@ -52,11 +52,14 @@ fn main() -> anyhow::Result<()> {
       memory: 512 << 20,
       width: 1024,
       height: 768,
-      identity,
+      identity: identity.clone(),
       boot: Boot::Kernel {
         kernel: args[0].clone().into(),
         initramfs: Some(args[1].clone().into()),
-        command_line: "console=hvc0 rdinit=/init".into(),
+        command_line: format!(
+          "console=hvc0 rdinit=/init hopper.sharing={}",
+          if present { "present" } else { "absent" }
+        ),
       },
       disk: disk.clone(),
       installer: None,
@@ -65,17 +68,21 @@ fn main() -> anyhow::Result<()> {
       shares: shares.clone(),
       console: Some(console),
     };
-    boot.shares = vec![shares[0].clone(); 17];
-    ensure!(
-      vz::create(main, &boot).is_err(),
-      "Excessive shared folders were admitted"
-    );
-    boot.shares = vec![shares[0].clone(); 2];
-    ensure!(
-      vz::create(main, &boot).is_err(),
-      "Duplicate shared folder names were admitted"
-    );
-    boot.shares = shares.clone();
+    if present {
+      boot.shares = vec![shares[0].clone(); 17];
+      ensure!(
+        vz::create(main, &boot).is_err(),
+        "Excessive shared folders were admitted"
+      );
+      boot.shares = vec![shares[0].clone(); 2];
+      ensure!(
+        vz::create(main, &boot).is_err(),
+        "Duplicate shared folder names were admitted"
+      );
+      boot.shares = shares.clone();
+    } else {
+      boot.shares = Vec::new();
+    }
     let vm = vz::create(main, &boot)?;
     let wait = |pending: vz::Pending| -> anyhow::Result<()> {
       let deadline = Instant::now() + Duration::from_secs(30);
@@ -91,15 +98,17 @@ fn main() -> anyhow::Result<()> {
       }
     };
     let moved = root.path().join("moved");
-    std::fs::rename(&writable, &moved)?;
-    std::fs::create_dir(&writable)?;
-    std::fs::write(writable.join("sentinel"), "replacement-scope")?;
-    ensure!(
-      vz::transition(&vm, Action::Start).is_err(),
-      "Replaced share was admitted"
-    );
-    std::fs::remove_dir_all(&writable)?;
-    std::fs::rename(&moved, &writable)?;
+    if present {
+      std::fs::rename(&writable, &moved)?;
+      std::fs::create_dir(&writable)?;
+      std::fs::write(writable.join("sentinel"), "replacement-scope")?;
+      ensure!(
+        vz::transition(&vm, Action::Start).is_err(),
+        "Replaced share was admitted"
+      );
+      std::fs::remove_dir_all(&writable)?;
+      std::fs::rename(&moved, &writable)?;
+    }
     wait(vz::transition(&vm, Action::Start)?)?;
     let mut replaced = false;
     let result = (|| -> anyhow::Result<()> {
@@ -110,10 +119,12 @@ fn main() -> anyhow::Result<()> {
           "Serial output exceeds bounds"
         );
         let text = std::fs::read_to_string(&output)?;
-        if text.contains("HOPPER_REPLACEMENT_OK") {
+        if (!present && text.contains("HOPPER_SHARING_ABSENT_OK"))
+          || (text.contains("HOPPER_REPLACEMENT_OK") && text.contains("HOPPER_USER_SHARING_OK"))
+        {
           return Ok(());
         }
-        if text.contains(marker) && !replaced {
+        if present && text.contains(marker) && !replaced {
           std::fs::rename(&writable, &moved)?;
           std::fs::create_dir(&writable)?;
           std::fs::write(writable.join("sentinel"), "replacement-scope")?;
@@ -135,19 +146,29 @@ fn main() -> anyhow::Result<()> {
     let stopped = wait(vz::transition(&vm, Action::Stop)?);
     result?;
     stopped?;
+    if !present {
+      println!(
+        "No shared-folder device: guest startup condition skipped without creating a mount point"
+      );
+      continue;
+    }
     ensure!(
       std::fs::read_to_string(moved.join("created"))? == "guest-write",
       "Guest write did not reach authorized directory"
     );
     ensure!(
-      !readonly.join("created").exists(),
+      std::fs::read_to_string(moved.join("usercreated"))? == "guest-user-write",
+      "Unprivileged guest write did not reach the authorized directory"
+    );
+    ensure!(
+      !readonly.join("created").exists() && !readonly.join("usercreated").exists(),
       "Read-only folder changed"
     );
     ensure!(
       !writable.join("created").exists() && !writable.join("after").exists(),
       "Guest wrote into replacement directory"
     );
-    println!("Named read-only/read-write shares, replacement-path isolation and guest symlink scope verified");
+    println!("Named shares, unprivileged guest reads/writes, read-only enforcement, replacement-path isolation and guest symlink scope verified");
   }
   println!("Native directory sharing probe completed; no OS installation was performed");
   Ok(())

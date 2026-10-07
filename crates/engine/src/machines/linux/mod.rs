@@ -9,6 +9,7 @@ pub mod progress;
 pub mod provision;
 pub mod records;
 pub mod seed;
+pub mod sharing;
 
 use anyhow::ensure;
 use machine::vz::queue::Check;

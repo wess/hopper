@@ -87,3 +87,71 @@ fn seed_rejects_invalid_or_oversized_configuration() {
     .is_err());
   }
 }
+
+#[test]
+fn native_guest_seed_installs_root_owned_mount_tools_without_changing_login_or_grants() {
+  let plan = provision::prepare(
+    "8197e0f0-0603-43e9-a817-eaf7ab0327af",
+    &provision::accounts(),
+  )
+  .unwrap();
+  let config: Value = serde_yaml::from_str(&plan.user_data).unwrap();
+  let guest = &config["autoinstall"]["user-data"];
+  let files = guest["write_files"].as_array().unwrap();
+  let file = |path: &str| files.iter().find(|file| file["path"] == path).unwrap();
+  for (path, permissions) in [
+    ("/usr/lib/hopper/shares", "0755"),
+    ("/etc/systemd/system/hopper-shares.service", "0644"),
+    ("/etc/modules-load.d/hopper.conf", "0644"),
+  ] {
+    assert_eq!(file(path)["owner"], "root:root");
+    assert_eq!(file(path)["permissions"], permissions);
+  }
+  let script = file("/usr/lib/hopper/shares")["content"].as_str().unwrap();
+  let unit = file("/etc/systemd/system/hopper-shares.service")["content"]
+    .as_str()
+    .unwrap();
+  assert_eq!(script, engine::machines::linux::sharing::SCRIPT);
+  assert!(unit.contains("ExecCondition=/usr/lib/hopper/shares check\n"));
+  assert!(unit.contains("ExecStart=/usr/lib/hopper/shares\n"));
+  assert!(unit.contains("TimeoutStartSec=10\n"));
+  assert_eq!(
+    guest["runcmd"],
+    serde_json::json!([
+      ["modprobe", "virtiofs"],
+      ["systemctl", "daemon-reload"],
+      ["systemctl", "enable", "--now", "hopper-shares.service"],
+      ["ln", "-sT", "/mnt/hopper", "/home/hopper/Shared"],
+    ])
+  );
+  assert!(file("/etc/gdm3/custom.conf")["content"]
+    .as_str()
+    .unwrap()
+    .contains("AutomaticLogin=hopper\n"));
+  assert_eq!(guest["users"][0]["sudo"], false);
+  assert!(!script.contains("chmod"));
+  assert!(!script.contains("chown"));
+  let image = seed::image(&plan).unwrap();
+  let root = tempfile::tempdir().unwrap();
+  let path = root.path().join("seed.iso");
+  std::fs::write(&path, image).unwrap();
+  let output = Command::new("/usr/bin/bsdtar")
+    .args(["-xOf"])
+    .arg(path)
+    .arg("user-data")
+    .output()
+    .unwrap();
+  assert!(output.status.success());
+  let decoded: Value = serde_yaml::from_slice(&output.stdout).unwrap();
+  assert_eq!(
+    decoded["autoinstall"]["user-data"]["write_files"],
+    guest["write_files"]
+  );
+  let mut process = Command::new("/bin/sh")
+    .arg("-n")
+    .stdin(std::process::Stdio::piped())
+    .spawn()
+    .unwrap();
+  std::io::Write::write_all(process.stdin.take().as_mut().unwrap(), script.as_bytes()).unwrap();
+  assert!(process.wait().unwrap().success());
+}

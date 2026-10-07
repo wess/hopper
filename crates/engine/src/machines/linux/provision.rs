@@ -69,7 +69,7 @@ pub fn prepare(id: &str, credentials: &Credentials) -> anyhow::Result<Plan> {
   let user = hash(&credentials.user_password)?;
   let administrator = hash(&credentials.administrator_password)?;
   let hostname = format!("hopper-{}", &id.simple().to_string()[..12]);
-  let configuration = json!({
+  let mut configuration = json!({
     "autoinstall": {
       "version": 1,
       "locale": "en_US.UTF-8",
@@ -106,6 +106,11 @@ pub fn prepare(id: &str, credentials: &Credentials) -> anyhow::Result<Plan> {
       }
     }
   });
+  let files = configuration["autoinstall"]["user-data"]["write_files"]
+    .as_array_mut()
+    .ok_or_else(|| anyhow::anyhow!("Invalid guest file configuration"))?;
+  files.extend(super::sharing::files());
+  configuration["autoinstall"]["user-data"]["runcmd"] = super::sharing::commands();
   Ok(Plan {
     user_data: format!("#cloud-config\n{}", serde_yaml::to_string(&configuration)?),
     meta_data: serde_yaml::to_string(&json!({

@@ -1,0 +1,13 @@
+[Unit]
+Description=Hopper shared folders
+After=systemd-modules-load.service local-fs.target
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/lib/hopper/shares check
+ExecStart=/usr/lib/hopper/shares
+TimeoutStartSec=10
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
