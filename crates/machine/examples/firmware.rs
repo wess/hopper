@@ -13,6 +13,9 @@ mod interrupts;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "support/disk.rs"]
 mod target;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "support/queue.rs"]
+mod queue;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() -> anyhow::Result<()> {
@@ -125,6 +128,7 @@ fn main() -> anyhow::Result<()> {
   let mut checked_storage = false;
   let mut pci_reads = 0usize;
   let mut handed_off = false;
+  let mut firmware_optical = None;
   let mut guest_pci = [[0usize; 2]; 6];
   let mut guest_bus = [0usize; 2];
   let mut listed_acpi = false;
@@ -147,7 +151,7 @@ fn main() -> anyhow::Result<()> {
         if driver_check {
           text_input.extend(b"pnputil /enum-devices /class scsiadapter\r");
         } else if optical_check {
-          text_input.extend(b"diskpart\rrescan\rlist volume\r");
+          text_input.extend(b"pnputil /scan-devices\rdiskpart\rrescan\rlist volume\r");
         } else if target_path.is_some() {
           text_input.extend(b"diskpart\rselect disk 1\rclean\rcreate partition primary\rlist partition\r");
         } else {
@@ -193,6 +197,7 @@ fn main() -> anyhow::Result<()> {
               if output.len() == 64 { output.remove(0); }
               output.push(byte);
               if boot_media && output.ends_with(b"VirtioInputExitBoot:") {
+                if !handed_off { firmware_optical = devices[5].as_ref().map(vpci::completed); }
                 handed_off = true;
               }
               if boot_media && output.ends_with(b"cdboot.efi") {
@@ -394,9 +399,11 @@ fn main() -> anyhow::Result<()> {
     if let Some(device) = &devices[4] {
       eprintln!("Target completed {} storage requests; fault: {:?}", vpci::completed(device), vpci::fault(device));
     }
-    if let Some(device) = &devices[5] {
+    if let Some(device) = &mut devices[5] {
       eprintln!("Optical completed {} SCSI requests; fault: {:?}", vpci::completed(device), vpci::fault(device));
+      eprintln!("Optical requests before firmware exit callback: {firmware_optical:?}");
       eprintln!("Optical command counts and check conditions: {:?}", vpci::optical_stats(device));
+      queue::inspect(device, &mut ram)?;
     }
   }
   if let Some(graphics) = &mut devices[1] {

@@ -125,6 +125,29 @@ fn capacity_inquiry_and_toc_describe_readonly_removable_media() {
 }
 
 #[test]
+fn inclusive_and_older_count_based_scans_both_discover_only_the_optical_lun() {
+  let image = disk::image(&[0; 4096]);
+  let mut media = scsi::open(&image.0).unwrap();
+  let hint = u32::from_le_bytes(scsi::config(&media)[32..36].try_into().unwrap());
+  for inclusive in [false, true] {
+    let mut found = Vec::new();
+    for lun in 0..hint + u32::from(inclusive) {
+      let (mut ram, _, chain) = request(&[0x12, 0, 0, 0, 36, 0], 36);
+      ram.0[0x1003] = lun as u8;
+      scsi::execute(&mut media, &mut ram, &chain, 2).unwrap();
+      if response(&ram)[11] == 0 {
+        assert_eq!(response(&ram)[10], 0);
+        assert_eq!(ram.0[0x3000], 5);
+        found.push(lun);
+      } else {
+        assert_eq!(response(&ram)[11], 3);
+      }
+    }
+    assert_eq!(found, [0]);
+  }
+}
+
+#[test]
 fn media_bounds_and_configuration_reset_are_checked() {
   let image = disk::image(&[0; 4096]);
   let mut media = scsi::open(&image.0).unwrap();
@@ -134,7 +157,7 @@ fn media_bounds_and_configuration_reset_are_checked() {
   assert_eq!(scsi::config(&media)[20..28], [18, 0, 0, 0, 16, 0, 0, 0]);
   scsi::reset(&mut media);
   assert_eq!(scsi::config(&media)[20..28], [96, 0, 0, 0, 32, 0, 0, 0]);
-  assert_eq!(scsi::config(&media)[28..36], [0, 0, 7, 0, 0, 0, 0, 0]);
+  assert_eq!(scsi::config(&media)[28..36], [0, 0, 7, 0, 1, 0, 0, 0]);
   for cdb in [
     vec![0x28, 0, 0xff, 0xff, 0xff, 0xff, 0, 0, 1, 0],
     vec![0xa8, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0xff],

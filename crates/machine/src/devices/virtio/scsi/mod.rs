@@ -92,6 +92,8 @@ pub fn config(media: &Optical) -> Vec<u8> {
     bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
   }
   bytes[30..32].copy_from_slice(&7u16.to_le_bytes());
+  // older windows drivers interpret this maximum index as a count; zero hides lun 0
+  bytes[32..36].copy_from_slice(&1u32.to_le_bytes());
   bytes
 }
 
