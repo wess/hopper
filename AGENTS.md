@@ -80,9 +80,14 @@ dedicated viewer integration remain pending; the bridge is not an agent endpoint
 Linux preparation captures the original policy before blocking work, retains operation
 ownership through admission/start and binds runtime ownership to the VM and outstanding
 SDK callbacks. Private state publishes with exclusive rename and retries preserve identity
-and EFI variables. Installer preparation currently requires a local ISO; its volume
-descriptor check does not prove architecture or official origin. System boot rejects
-unwritten disks but does not establish installation readiness. Records with native state
+and EFI variables. Ubuntu installer preparation downloads the pinned official ARM64
+Ubuntu 24.04.5 desktop ISO when no local installer is supplied. Its private content-addressed
+cache verifies exact size and SHA-256 before exclusive publication or reuse, resumes
+interrupted HTTP ranges and retains the original authorization through hashing/download.
+The production client uses HTTPS with redirects disabled. Low storage rejects downloading
+before VM state creation. Full official acquisition and installation remain unverified on
+this host. Local ISO fallback checks its volume descriptor, which does not prove
+architecture or official origin. System boot rejects unwritten disks but does not establish installation readiness. Records with native state
 never fall back to the previous helper. Host listing queries admitted VMs on their queue
 for actual state and lifecycle/install busy status, without acquiring operation/runtime
 locks. Status checks the original agent generation through dispatch and publication.

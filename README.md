@@ -224,9 +224,15 @@ codesign --force --sign - --entitlements assets/machine.entitlements target/debu
 target/debug/examples/admission /absolute/path/to/linux-arm64.iso
 ```
 
-This path requires local ISO media and checks only its volume descriptor. It does not
-automatically download or install Ubuntu, establish desktop readiness or provide guest
-tools. Native-state records cannot fall back to previous runtime operations. Listing
+Native Ubuntu preparation automatically acquires the official Ubuntu 24.04.5 ARM64
+desktop ISO when no local installer is supplied. The private cache resumes interrupted
+downloads and verifies the pinned size and SHA-256 before publication and reuse. The
+original agent policy applies throughout acquisition. Local ISO fallback checks only its
+volume descriptor. The live `linuxmedia` diagnostic verifies official checksum metadata,
+size, a bounded ISO HTTP range and insufficient-storage rejection. A complete official
+download and installation remain unverified on this host. This path does not establish
+desktop readiness or provide guest tools. Native-state records cannot fall back to previous
+runtime operations. Listing
 queries the app-owned queue for actual hardware state and pending-operation status,
 without acquiring lifecycle/runtime locks. Queries recheck the original agent policy
 generation; instances absent from the owner remain unavailable.

@@ -60,11 +60,25 @@ impl Service {
     actor: Actor,
     stage: Stage,
   ) -> anyhow::Result<Prepared> {
-    let (machine, check) = self.scope(id, actor)?;
+    let (mut machine, check) = self.scope(id, actor)?;
     ensure!(
       machine.guest == GuestOs::Linux,
       "Linux admission requires a Linux VM"
     );
+    crate::machines::config::validate_resources(&machine)?;
+    if matches!(stage, Stage::Installer) && machine.installer.is_none() {
+      ensure!(
+        machine.profile == "ubuntu",
+        "Automatic Linux media requires the Ubuntu profile"
+      );
+      let media = crate::machines::linux::prepare(&self.manager.root, check.clone()).await?;
+      machine.installer = Some(
+        media
+          .to_str()
+          .ok_or_else(|| anyhow::anyhow!("Linux media path must be UTF-8"))?
+          .into(),
+      );
+    }
     let manager = self.manager.clone();
     let client = self.client.clone();
     tokio::task::spawn_blocking(move || prepare::prepare(manager, machine, check, client, stage))
