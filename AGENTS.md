@@ -58,7 +58,9 @@ discovery and platform configuration with image-specific CPU/RAM minimums, indep
 Mac identity, boot loader and graphics. Its auxiliary directory publishes firmware state
 and hardware-model binding together with exclusive rename; opening it checks private
 ownership and exact model consistency before framework configuration. Existing state is
-never replaced. IPSW download, installation, first boot and viewer integration remain
+never replaced. Local restore inspection validates regular bounded files through the SDK
+and checks the returned URL against the requested file; invalid media is preserved.
+IPSW download, installation, first boot and viewer integration remain
 pending; the signed macOS check discovers metadata and validates configuration only.
 Neither diagnostic establishes a usable desktop. Keep the prototype records intact.
 The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware

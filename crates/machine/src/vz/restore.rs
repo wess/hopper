@@ -3,7 +3,7 @@ use block2::RcBlock;
 use objc2_foundation::NSError;
 use objc2_virtualization::VZMacOSRestoreImage;
 use serde::Serialize;
-use std::sync::mpsc;
+use std::{path::Path, sync::mpsc};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -22,14 +22,7 @@ pub fn latest() -> Discovery {
   let (send, receive) = mpsc::sync_channel(1);
   let completion = RcBlock::new(
     move |image: *mut VZMacOSRestoreImage, error: *mut NSError| {
-      let result = if !error.is_null() {
-        let message: String = unsafe { &*error }.to_string().chars().take(512).collect();
-        Err(anyhow::anyhow!("macOS restore discovery failed: {message}"))
-      } else {
-        unsafe { image.as_ref() }
-          .context("No supported macOS restore image returned")
-          .and_then(metadata)
-      };
+      let result = result(image, error, None);
       let _ = send.try_send(result);
     },
   );
@@ -37,6 +30,43 @@ pub fn latest() -> Discovery {
     VZMacOSRestoreImage::fetchLatestSupportedWithCompletionHandler(&completion);
   }
   Discovery(receive)
+}
+
+pub fn local(path: &Path) -> anyhow::Result<Discovery> {
+  let url = super::config::file(path)?;
+  let expected = url
+    .absoluteString()
+    .context("Restore file URL is missing")?
+    .to_string();
+  ensure!(expected.len() <= 4096, "Restore file URL exceeds bounds");
+  let size = std::fs::metadata(path)?.len();
+  ensure!(
+    (1..=64 << 30).contains(&size),
+    "Restore file size exceeds bounds"
+  );
+  let (send, receive) = mpsc::sync_channel(1);
+  let completion = RcBlock::new(
+    move |image: *mut VZMacOSRestoreImage, error: *mut NSError| {
+      let _ = send.try_send(result(image, error, Some(&expected)));
+    },
+  );
+  unsafe {
+    VZMacOSRestoreImage::loadFileURL_completionHandler(&url, &completion);
+  }
+  Ok(Discovery(receive))
+}
+
+fn result(
+  image: *mut VZMacOSRestoreImage,
+  error: *mut NSError,
+  local: Option<&str>,
+) -> anyhow::Result<Image> {
+  if !error.is_null() {
+    let message: String = unsafe { &*error }.to_string().chars().take(512).collect();
+    anyhow::bail!("macOS restore inspection failed: {message}");
+  }
+  let image = unsafe { image.as_ref() }.context("No supported macOS restore image returned")?;
+  metadata(image, local)
 }
 
 pub fn poll(discovery: &Discovery) -> anyhow::Result<Option<anyhow::Result<Image>>> {
@@ -47,7 +77,7 @@ pub fn poll(discovery: &Discovery) -> anyhow::Result<Option<anyhow::Result<Image
   }
 }
 
-fn metadata(image: &VZMacOSRestoreImage) -> anyhow::Result<Image> {
+fn metadata(image: &VZMacOSRestoreImage, local: Option<&str>) -> anyhow::Result<Image> {
   unsafe {
     let requirement = image
       .mostFeaturefulSupportedConfiguration()
@@ -62,19 +92,29 @@ fn metadata(image: &VZMacOSRestoreImage) -> anyhow::Result<Image> {
       url.user().is_none() && url.password().is_none(),
       "macOS restore URL cannot contain credentials"
     );
-    ensure!(
-      url
-        .scheme()
-        .is_some_and(|scheme| scheme.to_string() == "https"),
-      "macOS restore URL requires HTTPS"
-    );
-    ensure!(
-      url.host().is_some_and(|host| matches!(
-        host.to_string().as_str(),
-        "updates.cdn-apple.com" | "updates-http.cdn-apple.com"
-      )),
-      "macOS restore URL is outside the official delivery origins"
-    );
+    if let Some(expected) = local {
+      ensure!(
+        url.isFileURL()
+          && url
+            .absoluteString()
+            .is_some_and(|value| value.to_string() == expected),
+        "macOS restore inspection returned a different file"
+      );
+    } else {
+      ensure!(
+        url
+          .scheme()
+          .is_some_and(|scheme| scheme.to_string() == "https"),
+        "macOS restore URL requires HTTPS"
+      );
+      ensure!(
+        url.host().is_some_and(|host| matches!(
+          host.to_string().as_str(),
+          "updates.cdn-apple.com" | "updates-http.cdn-apple.com"
+        )),
+        "macOS restore URL is outside the official delivery origins"
+      );
+    }
     let version = image.operatingSystemVersion();
     let metadata = Image {
       url: url

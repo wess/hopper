@@ -38,6 +38,41 @@ fn main() -> anyhow::Result<()> {
   );
   let root = tempfile::tempdir()?;
   std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700))?;
+  let invalid = root.path().join("invalid.ipsw");
+  std::fs::write(&invalid, b"invalid restore image")?;
+  let inspection = restore::local(&invalid)?;
+  let deadline = Instant::now() + Duration::from_secs(30);
+  loop {
+    if let Some(result) = restore::poll(&inspection)? {
+      ensure!(
+        result.is_err(),
+        "Invalid local restore image must be rejected"
+      );
+      break;
+    }
+    ensure!(
+      Instant::now() < deadline,
+      "Local restore inspection timed out"
+    );
+    run_loop.runMode_beforeDate(
+      unsafe { NSDefaultRunLoopMode },
+      &NSDate::dateWithTimeIntervalSinceNow(0.01),
+    );
+  }
+  ensure!(
+    std::fs::read(&invalid)? == b"invalid restore image",
+    "Restore inspection changed media"
+  );
+  let link = root.path().join("linked.ipsw");
+  std::os::unix::fs::symlink(&invalid, &link)?;
+  ensure!(
+    restore::local(&link).is_err(),
+    "Restore symlinks must be rejected"
+  );
+  ensure!(
+    restore::local(root.path()).is_err(),
+    "Restore directories must be rejected"
+  );
   let auxiliary = root.path().join("auxiliary");
   mac::create_auxiliary(&auxiliary, &image.hardware)?;
   let original = std::fs::read(auxiliary.join("state"))?;
@@ -98,7 +133,7 @@ fn main() -> anyhow::Result<()> {
     std::fs::read(boot.auxiliary.join("state"))? == original,
     "Mismatched model changed auxiliary storage"
   );
-  println!("macOS restore discovery, configuration and auxiliary binding verified; no IPSW was downloaded or installed");
+  println!("macOS restore discovery, invalid local media rejection, configuration and auxiliary binding verified; no IPSW was downloaded or installed");
   Ok(())
 }
 

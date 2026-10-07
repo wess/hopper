@@ -194,7 +194,9 @@ The `vzmac` example discovers Apple's supported restore-image metadata and confi
 a macOS platform with its CPU/RAM requirements, independent identity and matching
 auxiliary firmware. Creation publishes private state and its hardware binding together
 and refuses to replace existing data. A signed live check validates configuration and
-rejects insufficient resources and model mismatches. It downloads no IPSW and performs
+rejects insufficient resources and model mismatches. Local restore inspection uses the
+framework to read media, checks the returned file URL, and rejects symlinks and
+invalid files without changing their contents. It downloads no IPSW and performs
 no installation or macOS first boot; manager/viewer integration remains unfinished.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
