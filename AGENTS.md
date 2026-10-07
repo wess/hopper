@@ -46,6 +46,15 @@ stopped VM and use APFS copies, with a rollback snapshot on restore.
 The major release replaces desktop VM lifecycle and viewers with owned runtimes:
 direct Virtualization.framework for Linux/macOS and Hypervisor.framework for Windows.
 Do not add QEMU to the replacement. `PRODUCT.md` contains the full release gates.
+The direct VZ foundation is in `machine::vz`: main-thread-bound ownership, generic
+identity, persistent EFI variables, raw disks, read-only installer media, desktop
+graphics/input and bounded asynchronous lifecycle completions. It supports EFI and
+direct uncompressed ARM64 kernel boot; prior image formats require migration. Optional
+serial output uses a duplicated descriptor owned by the framework; callers must bound
+its sink. Signed diagnostics verify real framework start/pause/resume/stop and a verified
+Alpine initramfs shell. The adapter is not routed through Host or app viewers yet, and
+macOS platform/restore support, Ubuntu provisioning and guest tools remain pending.
+Neither diagnostic establishes a usable desktop. Keep the prototype records intact.
 The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware
 and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in
 `model::native` and `machine::ipc`; host paths in Start are never an agent API.

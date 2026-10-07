@@ -168,6 +168,28 @@ stops hardware and waits for worker cleanup; it does not ask Windows to shut dow
 Composed text, commands, files, startup, snapshots and clones remain unavailable remotely.
 Inside-guest agent connections remain pending.
 
+The direct Linux VZ foundation lives in `machine::vz`. It owns framework configuration
+and asynchronous lifecycle on the main thread, with persistent identity/EFI variables,
+raw storage, installer media and desktop devices. It is not connected to Hopper's manager
+or viewers yet; Linux/macOS application VMs still use the prototype. A signed diagnostic
+verifies real VZ hardware transitions with a temporary blank disk:
+
+```sh
+cargo +1.99.0 build -p machine --example vz
+codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/vz
+target/debug/examples/vz
+```
+
+The `vzlinux` example additionally accepts an uncompressed ARM64 Image and initramfs.
+Its signed live check boots the initramfs shell and repeats those transitions with
+networking disconnected. The tested inputs came from the official
+[Alpine 3.24.2 ARM64 virtual ISO](https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/),
+verified against its SHA-256 `a57ba668b5f6b17a670fcf8e799d5d7fe43766ed086d6ce2927b0625bf43dbf6`.
+The compressed EFI kernel was unpacked into its raw ARM64 Image before direct boot;
+compressed kernels use the EFI path instead. See the
+[ARM64 boot format](https://docs.kernel.org/arch/arm64/booting.html). This verifies a
+diagnostic Linux kernel and userspace, not Ubuntu desktop installation or macOS support.
+
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into
 `native/build/firmware/windows.fd` and `variables.fd`, with a provenance manifest

@@ -23,3 +23,7 @@ tempfile = { workspace = true }
 
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 libc = "0.2"
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-virtualization = "0.3.2"
+block2 = "0.6"

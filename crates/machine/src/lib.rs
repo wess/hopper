@@ -15,3 +15,5 @@ pub mod smccc;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub mod hypervisor;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub mod vz;
