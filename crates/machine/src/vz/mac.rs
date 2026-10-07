@@ -14,6 +14,7 @@ pub struct Mac {
   pub identity: Vec<u8>,
   pub auxiliary: PathBuf,
   pub disk: PathBuf,
+  pub network: super::network::Mode,
 }
 
 pub(super) fn config(boot: &Mac) -> anyhow::Result<Retained<VZVirtualMachineConfiguration>> {
@@ -40,6 +41,7 @@ pub(super) fn config(boot: &Mac) -> anyhow::Result<Retained<VZVirtualMachineConf
     platform.setAuxiliaryStorage(Some(&auxiliary));
     config.setPlatform(&platform);
     config.setBootLoader(Some(&VZMacOSBootLoader::new()));
+    super::network::attach(&config, &boot.identity, boot.network)?;
     let disk = config::storage(&boot.disk, false)?;
     config.setStorageDevices(&NSArray::<VZStorageDeviceConfiguration>::from_slice(&[
       &disk,

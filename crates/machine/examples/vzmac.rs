@@ -100,7 +100,21 @@ fn main() -> anyhow::Result<()> {
     identity: mac::identity(),
     auxiliary,
     disk,
+    network: vz::network::Mode::Nat,
   };
+  for mode in [vz::network::Mode::Nat, vz::network::Mode::Disconnected] {
+    boot.network = mode;
+    let vm = vz::create_mac(main, &boot)?;
+    ensure!(
+      vz::network::attachments(&vm) == vec![mode == vz::network::Mode::Nat],
+      "macOS VZ network attachment does not match its configuration"
+    );
+    ensure!(
+      vz::state(&vm) == VZVirtualMachineState::Stopped,
+      "Network configuration started uninstalled macOS hardware"
+    );
+  }
+  boot.network = vz::network::Mode::Nat;
   let mut vm = vz::create_mac(main, &boot)?;
   ensure!(
     vz::state(&vm) == VZVirtualMachineState::Stopped,
@@ -173,7 +187,7 @@ fn main() -> anyhow::Result<()> {
     std::fs::read(boot.auxiliary.join("state"))? == original,
     "Mismatched model changed auxiliary storage"
   );
-  println!("macOS restore discovery, invalid local media/installation rejection, configuration and auxiliary binding verified; no IPSW was downloaded or installed");
+  println!("macOS restore discovery, NAT/disconnected network devices, invalid local media/installation rejection, configuration and auxiliary binding verified; no IPSW was downloaded or installed");
   Ok(())
 }
 

@@ -13,6 +13,16 @@ pub enum Mode {
   Disconnected,
 }
 
+pub fn attachments(vm: &super::Vm) -> Vec<bool> {
+  unsafe {
+    vm.machine
+      .networkDevices()
+      .iter()
+      .map(|device| device.attachment().is_some())
+      .collect()
+  }
+}
+
 pub fn address(identity: &[u8]) -> anyhow::Result<String> {
   ensure!(
     !identity.is_empty() && identity.len() <= 4096,

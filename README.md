@@ -36,6 +36,7 @@ Hopper's native Windows worker and firmware, and Windows installation tools.
   permission inside the guest. Prototype snapshots and clones require a stopped VM;
   clones inherit agent access.
 
+
 - **Dashboard** — running/total containers, image/volume/network counts, disk
   usage with reclaimable meters, and one-click "Clean up" (system prune).
 - **Containers** — live list with search, "only running" filter, and per-row
@@ -313,11 +314,16 @@ path, and mismatched guest/runtime choices are rejected. New macOS creation and 
 setup use the native path. MCP routing, full guest display/input checks and signed app integration remain
 unfinished.
 
-Native Linux admission attaches a virtio network device using Apple's NAT. Its locally
-administered MAC address derives from the saved VM identity, so repeated admission keeps
-the same address. A disconnected configuration is available in the core; app settings,
-live switching and localhost port forwarding remain unfinished. A signed diagnostic
-verifies guest DHCP, DNS, downloading public Alpine release metadata and a disconnected
+Native Linux and macOS admission configure a virtio network device with Apple's NAT.
+Its local unicast address derives from the persisted VM identity and stays stable across
+admission retries. The core also accepts a disconnected Mac configuration. A freshly signed
+SDK probe verifies both Mac attachment modes without starting uninstalled hardware; actual
+macOS guest networking, app disconnect controls and localhost forwarding remain unverified
+or unfinished. [Apple's NAT attachment](https://developer.apple.com/documentation/virtualization/vznatnetworkdeviceattachment)
+routes guest traffic through the host without requiring the bridged-network entitlement.
+
+For Linux, a signed diagnostic verifies guest DHCP, DNS, downloading public Alpine
+release metadata and a disconnected
 guest link. It uses a disposable initramfs derived from verified Alpine media:
 
 ```sh
