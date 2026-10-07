@@ -10,6 +10,8 @@ mod qmp;
 mod records;
 mod snapshots;
 pub mod windows;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub mod vz;
 
 use anyhow::{bail, Context};
 use model::{CreateMachine, Machine, MachineProfile, MachineStatus};

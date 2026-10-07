@@ -52,8 +52,9 @@ graphics/input and bounded asynchronous lifecycle completions. It supports EFI a
 direct uncompressed ARM64 kernel boot; prior image formats require migration. Optional
 serial output uses a duplicated descriptor owned by the framework; callers must bound
 its sink. Signed diagnostics verify real framework start/pause/resume/stop and a verified
-Alpine initramfs shell. The adapter is not routed through Host or app viewers yet, and
-Ubuntu provisioning and guest tools remain pending. macOS now has SDK restore-image
+Alpine initramfs shell. Host lifecycle authorization now connects to an app-owned main-queue
+registry. Native VM admission, creation/preparation, viewer routing, Ubuntu provisioning
+and guest tools remain pending; the Linux/macOS screens still use the prototype. macOS now has SDK restore-image
 discovery and platform configuration with image-specific CPU/RAM minimums, independent
 Mac identity, boot loader and graphics. Its auxiliary directory publishes firmware state
 and hardware-model binding together with exclusive rename; opening it checks private
@@ -69,8 +70,13 @@ The VZ queue bridge accepts at most 16 queued lifecycle requests and processes a
 16 per tick. The main-queue owner retains each VM across viewer lifetime, rejects
 concurrent transitions and retires only stopped hardware with no pending operation.
 Cancelled queued requests do not dispatch; started transitions retain native hardware
-through completion. Host routing and dispatch-time agent authorization remain pending;
-the low-level bridge is not an agent endpoint. Neither diagnostic establishes a usable desktop. Keep the prototype records intact.
+through completion. Host requests retain the original agent policy generation and a
+per-VM operation lease through queued dispatch and native completion. Policy checks run
+before dispatch and completion publication; off/on changes invalidate old requests.
+The app owner sleeps on queue notification while idle and pumps completions on its main
+queue while active. The main app now requires the virtualization entitlement. MCP routing,
+VM admission and dedicated viewer integration remain pending; the bridge is not an agent
+endpoint. Neither diagnostic establishes a usable desktop. Keep prototype records intact.
 The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware
 and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in
 `model::native` and `machine::ipc`; host paths in Start are never an agent API.

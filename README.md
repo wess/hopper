@@ -208,8 +208,12 @@ A bounded VZ lifecycle bridge lets Tokio callers request operations while the na
 owner stays on the VM queue. The signed `vz` diagnostic sends real start/pause/resume/stop
 requests from a separate service thread, rejects retirement of active hardware and
 checks that a cancelled queued start does not run. Native transitions retain the
-framework machine until completion. This internal bridge is not yet connected to Host,
-VM records, agent authorization or dedicated viewers.
+framework machine until completion. Host now authorizes lifecycle requests against the
+persisted VM record, keeps the original agent policy generation through dispatch and
+completion, and holds the operation lock until queued cancellation or native completion.
+The app installs the main-queue owner and wakes it on requests instead of polling while
+idle. Native VM admission, creation/preparation, MCP routing and dedicated VZ viewers
+remain unfinished; Linux/macOS creation and startup still follow the prototype.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into

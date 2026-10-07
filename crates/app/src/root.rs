@@ -45,6 +45,9 @@ impl Root {
         let host = Host::from_env();
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
+            if let Err(error) = crate::machines::install(&host, cx) {
+                tracing::error!(%error, "could not connect native VZ ownership");
+            }
             let _runtime = bridge::runtime().enter();
             if let Err(error) = host.serve_machine_agents() {
                 tracing::error!(%error, "could not start native VM agent service");

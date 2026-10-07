@@ -55,3 +55,35 @@ impl Host {
     }
   }
 }
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl Host {
+  pub fn virtual_machine_owner(&self) -> anyhow::Result<::engine::machines::vz::Owner> {
+    let mut service = self
+      .virtual_machines
+      .lock()
+      .map_err(|_| anyhow::anyhow!("VZ service lock failed"))?;
+    anyhow::ensure!(service.is_none(), "VZ ownership is already connected");
+    let (client, owner) = ::engine::machines::vz::channel();
+    *service = Some(::engine::machines::vz::Service::new(
+      self.machines(),
+      client,
+    ));
+    Ok(owner)
+  }
+
+  pub async fn virtual_machine_lifecycle(
+    &self,
+    id: &str,
+    actor: MachineActor,
+    action: ::engine::machines::vz::Action,
+  ) -> anyhow::Result<()> {
+    let service = self
+      .virtual_machines
+      .lock()
+      .map_err(|_| anyhow::anyhow!("VZ service lock failed"))?
+      .clone()
+      .ok_or_else(|| anyhow::anyhow!("VZ ownership is not connected"))?;
+    service.transition(id, actor, action).await
+  }
+}

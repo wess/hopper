@@ -1,10 +1,13 @@
 use super::{Action, Pending, Vm};
 use anyhow::{ensure, Context};
-use std::collections::BTreeMap;
-use tokio::sync::{mpsc, oneshot};
+use std::{collections::BTreeMap, sync::Arc};
+
+use tokio::sync::{mpsc, oneshot, Notify};
+
+pub type Check = Arc<dyn Fn() -> anyhow::Result<()> + Send + Sync>;
 
 #[derive(Clone)]
-pub struct Client(mpsc::Sender<Request>);
+pub struct Client(mpsc::Sender<Request>, Arc<Notify>);
 
 /// the owner must be driven on the VM queue, independent of viewer lifetime.
 ///
@@ -15,6 +18,7 @@ pub struct Client(mpsc::Sender<Request>);
 /// ```
 pub struct Owner {
   receive: mpsc::Receiver<Request>,
+  wake: Arc<Notify>,
   machines: BTreeMap<String, Vm>,
   pending: BTreeMap<String, Operation>,
 }
@@ -22,6 +26,7 @@ pub struct Owner {
 struct Request {
   id: String,
   action: Action,
+  check: Option<Check>,
   send: oneshot::Sender<anyhow::Result<()>>,
 }
 
@@ -32,10 +37,12 @@ struct Operation {
 
 pub fn channel() -> (Client, Owner) {
   let (send, receive) = mpsc::channel(16);
+  let wake = Arc::new(Notify::new());
   (
-    Client(send),
+    Client(send, wake.clone()),
     Owner {
       receive,
+      wake,
       machines: BTreeMap::new(),
       pending: BTreeMap::new(),
     },
@@ -44,24 +51,54 @@ pub fn channel() -> (Client, Owner) {
 
 impl Client {
   pub async fn transition(&self, id: &str, action: Action) -> anyhow::Result<()> {
+    self.scoped(id, action, None).await
+  }
+
+  pub async fn transition_checked(
+    &self,
+    id: &str,
+    action: Action,
+    check: Check,
+  ) -> anyhow::Result<()> {
+    self.scoped(id, action, Some(check)).await
+  }
+
+  async fn scoped(&self, id: &str, action: Action, check: Option<Check>) -> anyhow::Result<()> {
     validate(id)?;
+    if let Some(check) = &check {
+      check()?;
+    }
     let (send, receive) = oneshot::channel();
     self
       .0
       .send(Request {
         id: id.into(),
         action,
+        check: check.clone(),
         send,
       })
       .await
       .context("VZ owner is unavailable")?;
-    receive
+    self.1.notify_one();
+    let result = receive
       .await
-      .context("VZ operation ended without a result")?
+      .context("VZ operation ended without a result")?;
+    if let Some(check) = &check {
+      check()?;
+    }
+    result
   }
 }
 
 impl Owner {
+  pub fn wake(&self) -> Arc<Notify> {
+    self.wake.clone()
+  }
+
+  pub fn active(&self) -> bool {
+    !self.pending.is_empty()
+  }
+
   pub fn insert(&mut self, id: &str, vm: Vm) -> anyhow::Result<()> {
     validate(id)?;
     ensure!(
@@ -117,6 +154,9 @@ impl Owner {
         continue;
       }
       let result = (|| {
+        if let Some(check) = &request.check {
+          check()?;
+        }
         ensure!(
           !self.pending.contains_key(&request.id),
           "Another VZ operation is active"
@@ -125,7 +165,7 @@ impl Owner {
           .machines
           .get(&request.id)
           .context("VZ machine is not owned")?;
-        super::transition(vm, request.action)
+        super::scoped_transition(vm, request.action, request.check.clone())
       })();
       match result {
         Ok(pending) => {

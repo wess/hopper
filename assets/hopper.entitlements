@@ -2,7 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- The detached VM helper carries its own virtualization entitlement. -->
+	<key>com.apple.security.virtualization</key>
+	<true/>
 
 	<!-- Bind-mounted host directories, and the tars an import stages on disk. -->
 	<key>com.apple.security.files.user-selected.read-write</key>

@@ -97,12 +97,23 @@ pub fn state(vm: &Vm) -> VZVirtualMachineState {
 }
 
 pub fn transition(vm: &Vm, action: Action) -> anyhow::Result<Pending> {
+  scoped_transition(vm, action, None)
+}
+
+fn scoped_transition(
+  vm: &Vm,
+  action: Action,
+  check: Option<queue::Check>,
+) -> anyhow::Result<Pending> {
+  if let Some(check) = &check {
+    check()?;
+  }
   ensure!(
     !vm.installing.get(),
     "macOS installation owns the VM lifecycle"
   );
   let (send, receive) = mpsc::sync_channel(1);
-  let held = Rc::new(RefCell::new(Some(vm.machine.clone())));
+  let held = Rc::new(RefCell::new(Some((vm.machine.clone(), check))));
   let completion = RcBlock::new(move |error: *mut NSError| {
     let result = if error.is_null() {
       Ok(())
@@ -110,8 +121,13 @@ pub fn transition(vm: &Vm, action: Action) -> anyhow::Result<Pending> {
       let message: String = unsafe { &*error }.to_string().chars().take(512).collect();
       Err(anyhow::anyhow!("VZ transition failed: {message}"))
     };
+    let ownership = held.borrow_mut().take();
+    let result = if let Some((_, Some(check))) = &ownership {
+      check().and(result)
+    } else {
+      result
+    };
     let _ = send.try_send(result);
-    held.borrow_mut().take();
   });
   unsafe {
     let permitted = match action {
