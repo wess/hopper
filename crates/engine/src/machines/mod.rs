@@ -5,6 +5,7 @@ pub mod config;
 mod input;
 mod macos;
 pub mod media;
+pub mod native;
 mod qmp;
 mod snapshots;
 pub mod windows;

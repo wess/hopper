@@ -9,6 +9,7 @@ authors.workspace = true
 model = { workspace = true }
 store = { workspace = true }
 docker = { workspace = true }
+machine = { path = "../machine" }
 
 tokio = { workspace = true }
 async-trait = { workspace = true }
@@ -33,5 +34,4 @@ apple = { workspace = true }
 
 [dev-dependencies]
 keyring = { workspace = true }
-machine = { path = "../machine" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

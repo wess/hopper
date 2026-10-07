@@ -19,6 +19,9 @@ Do not add QEMU to the replacement. `PRODUCT.md` contains the full release gates
 The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware
 and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in
 `model::native` and `machine::ipc`; host paths in Start are never an agent API.
+`engine::machines::native` owns the asynchronous parent client. It serializes requests,
+drains replies after caller cancellation, and tracks worker state independently of viewers.
+The manager must retain a client while the VM runs; dropping the final client stops the worker.
 Started means allocated hardware, and Deployed means deployment completed; neither
 proves a usable desktop. App integration and running-memory snapshots remain pending.
 
