@@ -1,8 +1,11 @@
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() -> anyhow::Result<()> {
-  use anyhow::{ensure, Context};
+  use anyhow::ensure;
   use machine::{arm, hypervisor as hv};
-  use std::{sync::mpsc, time::Duration};
+  use std::{
+    sync::{mpsc, Arc, Barrier},
+    time::Duration,
+  };
 
   let vm = hv::create()?;
   let _gic = hv::gic::create(&vm, 0x08000000, 0x0a000000)?;
@@ -26,8 +29,10 @@ fn main() -> anyhow::Result<()> {
     let (ready, receiver) = mpsc::sync_channel(2);
     let mut workers = Vec::new();
     let mut starts = Vec::new();
+    let stopped = Arc::new(Barrier::new(2));
     for index in 0..2u64 {
       let ready = ready.clone();
+      let stopped = stopped.clone();
       let (start, receiver) = mpsc::sync_channel(1);
       starts.push(start);
       workers.push(scope.spawn(move || -> anyhow::Result<u64> {
@@ -53,10 +58,9 @@ fn main() -> anyhow::Result<()> {
             "CPU affinity does not match its identity"
           );
           Ok(affinity)
-        })?;
-        drop(cpu);
-        let _replacement = hv::create_cpu(factory).context("Recreate CPU on its owner thread")?;
-        Ok(affinity)
+        });
+        stopped.wait();
+        affinity
       }));
     }
     drop(ready);

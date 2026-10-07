@@ -80,8 +80,10 @@ fn main() -> anyhow::Result<()> {
         power::call(&mut *lock(&secondary)?, target, command, [0; 3]) == Reply::CpuOff,
         "Secondary did not request CPU_OFF"
       );
-      drop(cpu);
       power::stopped(&mut *lock(&secondary)?, target)?;
+      ready.send(())?;
+      // retain the parked vcpu until the primary has also stopped executing
+      receiver.recv()?;
       Ok(())
     });
     initialized.recv_timeout(Duration::from_secs(5))?;
@@ -107,6 +109,8 @@ fn main() -> anyhow::Result<()> {
       hv::get(&primary, 0)? == 0,
       "CPU_ON success was not returned to the guest"
     );
+    initialized.recv_timeout(Duration::from_secs(5))?;
+    start.send((1, 0, 0))?;
     worker
       .join()
       .map_err(|_| anyhow::anyhow!("Secondary CPU owner panicked"))??;
@@ -128,7 +132,7 @@ fn main() -> anyhow::Result<()> {
   );
   ensure!(
     power::call(&mut *lock(&controller)?, 0, 0xc4000004, [1, 0, 0]) == Reply::Value(1),
-    "CPU_OFF was not committed after owner teardown"
+    "CPU_OFF was not committed after parking"
   );
   println!("Native guest CPU_ON, entry context, secondary execution and CPU_OFF passed");
   Ok(())

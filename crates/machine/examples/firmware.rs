@@ -25,7 +25,9 @@ fn main() -> anyhow::Result<()> {
     devices::{flash as nor, pci, serial, virtio::{block, gpu, input as vinput, pci as vpci, scsi}},
     acpi, hypervisor as hv, platform, psci, smccc,
   };
+  use hv::{registers as regs, secondary};
   use std::collections::VecDeque;
+  use std::sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc, Mutex};
   use std::io::Write;
 
   let path = std::env::args()
@@ -50,6 +52,10 @@ fn main() -> anyhow::Result<()> {
   let driver_check = arguments.iter().any(|argument| argument == "--check-driver");
   ensure!(!driver_check || (optical_path.is_some() && !guest_input && !optical_check && target_path.is_none()),
     "Driver check requires optical media and its own input check");
+  let cpus = arguments.iter().position(|argument| argument == "--cpus")
+    .map(|index| -> anyhow::Result<u32> { Ok(arguments.get(index + 1).context("Provide a CPU count")?.parse()?) })
+    .transpose()?.unwrap_or(1);
+  ensure!((1..=2).contains(&cpus), "Firmware diagnostic supports one or two CPUs");
   let firmware = std::fs::read(path)?;
   ensure!(
     !firmware.is_empty() && firmware.len() <= 0x4000000,
@@ -60,7 +66,7 @@ fn main() -> anyhow::Result<()> {
     platform::MSI, 64, 32)?;
   let topology = platform::Topology {
     memory: if boot_media { 0x100000000 } else { 0x10000000 },
-    cpus: 1,
+    cpus,
     distributor_size: gic.distributor_size as u64,
     redistributor_size: gic.redistributor_size as u64,
     msi: gic.msi.as_ref().map(|msi| platform::Msi {
@@ -96,7 +102,7 @@ fn main() -> anyhow::Result<()> {
   hv::set(&mut cpu, 0, platform::RAM)?;
   hv::enter(&mut cpu, 0)?;
   let mut console = serial::Console::default();
-  let mut debug = machine::debug::State::default();
+  let mut debug: Vec<_> = (0..cpus).map(|_| machine::debug::State::default()).collect();
   let mut output = Vec::with_capacity(64);
   let mut opened_menu = false;
   let mut selected_shell = false;
@@ -143,11 +149,29 @@ fn main() -> anyhow::Result<()> {
   let mut pulses = 0;
   let mut messages = 0usize;
   let mut guest_sent = false;
-  let boot = hv::paced(&mut cpu, std::time::Duration::from_secs(deadline), std::time::Duration::from_millis(20), |cpu| {
+  let factory = hv::factory(&vm);
+  let power = Arc::new(Mutex::new(psci::power::create(&(0..cpus as u64).collect::<Vec<_>>(),
+    &[0..0x4000000, platform::RAM..platform::RAM + topology.memory])?));
+  let boot = std::thread::scope(|scope| -> anyhow::Result<()> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let _stopper = secondary::stopper(stop.clone());
+    let (launch, launches) = mpsc::sync_channel(1);
+    let (requests, pending) = mpsc::sync_channel(1);
+    let worker = if cpus == 2 {
+      let (ready, initialized) = mpsc::sync_channel(1);
+      let config = secondary::Config {
+        factory, index: 1, affinity: 1,
+        timeout: std::time::Duration::from_secs(deadline),
+        boot: launches, requests, ready, stop: stop.clone(), power: power.clone(),
+      };
+      let worker = scope.spawn(move || secondary::serve(config));
+      initialized.recv_timeout(std::time::Duration::from_secs(5))?;
+      Some(worker)
+    } else { None };
+    let boot = hv::paced(&mut cpu, std::time::Duration::from_secs(deadline), std::time::Duration::from_millis(20), |cpu| {
     for _ in 0..2000000 {
-      if (guest_input || target_path.is_some() || optical_check || driver_check) && !guest_sent && handed_off && start.elapsed().as_secs() >= 35 {
-        ensure!(vpci::read(devices[2].as_mut().context("Missing keyboard")?, 20, 1)? == 15,
-          "Guest keyboard driver is not ready");
+      if (guest_input || target_path.is_some() || optical_check || driver_check) && !guest_sent && handed_off && start.elapsed().as_secs() >= 35
+        && vpci::read(devices[2].as_mut().context("Missing keyboard")?, 20, 1)? == 15 {
         if driver_check {
           text_input.extend(b"pnputil /enum-devices /class scsiadapter\r");
         } else if optical_check {
@@ -177,20 +201,26 @@ fn main() -> anyhow::Result<()> {
         start.elapsed().as_secs() < deadline,
         "Firmware diagnostic reached its deadline"
       );
-      match hv::run(cpu)? {
-      hv::Exit::Canceled => {
+      let request = pending.try_recv().ok();
+      let caller = usize::from(request.is_some());
+      let exit = if let Some(request) = &request { request.exit } else { hv::run(cpu)? };
+      if matches!(exit, hv::Exit::Canceled) {
         pulses += 1;
         if boot_media && start.elapsed().as_secs() >= 3 {
           fault::inspect(cpu, &ram, topology.memory)?;
         }
         continue;
       }
+      let before = if let Some(request) = &request { request.registers.clone() } else { regs::capture(cpu)? };
+      let mut registers = before.clone();
+      let mut off = false;
+      match exit {
       hv::Exit::Exception { syndrome, physical_address, .. } => match arm::decode(syndrome) {
         arm::Trap::DataAbort(Some(access)) if (platform::UART..platform::UART + 0x1000).contains(&physical_address) => {
           let offset = physical_address - platform::UART;
           ensure!(access.bytes <= 4, "Unsupported serial access width");
           if access.write {
-            let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
+            let value = if access.register == 31 { 0 } else { regs::read(&registers, access.register.into())? };
             if let Some(byte) = serial::write(&mut console, offset, value as u32) {
               std::io::stdout().write_all(&[byte])?;
               std::io::stdout().flush()?;
@@ -265,11 +295,11 @@ fn main() -> anyhow::Result<()> {
             }
             let value = serial::read(&mut console, offset);
             if access.register != 31 {
-              hv::set(cpu, access.register.into(), value.into())?;
+              regs::write(&mut registers, access.register.into(), value.into())?;
             }
           }
-          let pc = hv::get(cpu, 31)?;
-          hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
+          let pc = regs::read(&registers, 31)?;
+          regs::write(&mut registers, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
         arm::Trap::DataAbort(Some(access)) if (platform::ECAM..platform::ECAM + pci::ECAM_SIZE).contains(&physical_address) => {
           let offset = physical_address - platform::ECAM;
@@ -283,7 +313,7 @@ fn main() -> anyhow::Result<()> {
           }
           let device = devices.get_mut(index).and_then(Option::as_mut).filter(|_| offset & 0x7000 == 0);
           if access.write {
-            let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
+            let value = if access.register == 31 { 0 } else { regs::read(&registers, access.register.into())? };
             if let Some(device) = device {
               vpci::config_write(device, &mut ram, (offset & 0xfff) as usize, access.bytes.into(), value as u32)?;
             } else { bus.write(offset, access.bytes.into(), value as u32)?; }
@@ -292,13 +322,13 @@ fn main() -> anyhow::Result<()> {
               vpci::config_read(device, (offset & 0xfff) as usize, access.bytes.into())?
             } else { bus.read(offset, access.bytes.into())? };
             pci_reads += 1;
-            if access.register != 31 { hv::set(cpu, access.register.into(), value as u64)?; }
+            if access.register != 31 { regs::write(&mut registers, access.register.into(), value as u64)?; }
           }
           for (index, device) in devices.iter_mut().enumerate() {
             if let Some(device) = device { messages += interrupts::deliver(&gic, index, device)?; }
           }
-          let pc = hv::get(cpu, 31)?;
-          hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
+          let pc = regs::read(&registers, 31)?;
+          regs::write(&mut registers, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
         arm::Trap::DataAbort(Some(access)) if devices.iter().flatten().any(|device| device.pci.memory(physical_address).is_some()) => {
           let (index, device) = devices.iter_mut().enumerate().find_map(|(index, device)| {
@@ -306,21 +336,21 @@ fn main() -> anyhow::Result<()> {
           }).context("Unmapped Virtio device")?;
           let (bar, offset) = device.pci.memory(physical_address).context("Unmapped Virtio BAR")?;
           if access.write {
-            let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
+            let value = if access.register == 31 { 0 } else { regs::read(&registers, access.register.into())? };
             vpci::memory_write(device, &mut ram, bar, offset, access.bytes.into(), value)?;
           } else {
             let value = vpci::memory_read(device, bar, offset, access.bytes.into())?;
-            if access.register != 31 { hv::set(cpu, access.register.into(), value as u64)?; }
+            if access.register != 31 { regs::write(&mut registers, access.register.into(), value as u64)?; }
           }
           messages += interrupts::deliver(&gic, index, device)?;
-          let pc = hv::get(cpu, 31)?;
-          hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
+          let pc = regs::read(&registers, 31)?;
+          regs::write(&mut registers, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
         arm::Trap::DataAbort(Some(access)) if (0x4000000..0x8000000).contains(&physical_address) => {
           let offset = (physical_address - 0x4000000) as usize;
           if access.write {
             ensure!(access.bytes == 4, "NOR command requires a 32-bit access");
-            let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
+            let value = if access.register == 31 { 0 } else { regs::read(&registers, access.register.into())? };
             if let Some(changed) = nor::write(&mut variables, offset, value as u32)? {
               hv::write(&mut nvram, changed.start, &nor::bytes(&variables)[changed])?;
               updates += 1;
@@ -328,23 +358,23 @@ fn main() -> anyhow::Result<()> {
             hv::protect(&nvram, if nor::array(&variables) { 1 } else { 0 })?;
           } else {
             let value = nor::read(&variables, offset, access.bytes)?;
-            if access.register != 31 { hv::set(cpu, access.register.into(), value)?; }
+            if access.register != 31 { regs::write(&mut registers, access.register.into(), value)?; }
           }
-          let pc = hv::get(cpu, 31)?;
-          hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
+          let pc = regs::read(&registers, 31)?;
+          regs::write(&mut registers, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
         arm::Trap::SystemRegister(access) => {
-          let value = if access.read || access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
-          let result = machine::debug::access(&mut debug, access, value)
+          let value = if access.read || access.register == 31 { 0 } else { regs::read(&registers, access.register.into())? };
+          let result = machine::debug::access(&mut debug[caller], access, value)
             .with_context(|| format!("Unsupported guest system register 0x{:x}", access.encoding))?;
-          if access.read && access.register != 31 { hv::set(cpu, access.register.into(), result)?; }
-          let pc = hv::get(cpu, 31)?;
-          hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
+          if access.read && access.register != 31 { regs::write(&mut registers, access.register.into(), result)?; }
+          let pc = regs::read(&registers, 31)?;
+          regs::write(&mut registers, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
         arm::Trap::Hypercall(0) => {
-          let command = hv::get(cpu, 0)? as u32;
-          let argument = hv::get(cpu, 1)?;
-          let level = hv::get(cpu, 2)? as u32;
+          let command = regs::read(&registers, 0)? as u32;
+          let argument = regs::read(&registers, 1)?;
+          let level = regs::read(&registers, 2)?;
           let mut entropy = |bytes: &mut [u8]| -> anyhow::Result<()> {
             if unsafe { libc::getentropy(bytes.as_mut_ptr().cast(), bytes.len()) } != 0 {
               return Err(std::io::Error::last_os_error()).context("Read system entropy");
@@ -353,25 +383,50 @@ fn main() -> anyhow::Result<()> {
           };
           if let Some(reply) = smccc::call(command, argument, &mut entropy) {
             for (register, value) in reply.into_iter().enumerate() {
-              hv::set(cpu, register as u32, value)?;
+              regs::write(&mut registers, register as u32, value)?;
             }
-            continue;
-          }
-          match psci::call(command, argument, level) {
-            psci::Reply::Value(value) => hv::set(cpu, 0, value as u64)?,
-            reply => bail!("Firmware requested {reply:?}"),
+          } else {
+            let context = regs::read(&registers, 3)?;
+            let mut power = power.lock().map_err(|_| anyhow::anyhow!("CPU power lock poisoned"))?;
+            let reply = if cpus == 1 { psci::call(command, argument, level as u32) }
+              else { psci::power::call(&mut power, caller, command, [argument, level, context]) };
+            match reply {
+              psci::Reply::Value(value) => regs::write(&mut registers, 0, value as u64)?,
+              psci::Reply::CpuOn { target, entry, context } => {
+                ensure!(target == 1, "Unknown secondary CPU owner");
+                debug[target] = machine::debug::State::default();
+                let result = launch.try_send(secondary::Boot { entry, context });
+                if result.is_err() { psci::power::failed(&mut power, target)?; }
+                regs::write(&mut registers, 0, if result.is_ok() { 0 } else { (-6i64) as u64 })?;
+                eprintln!("CPU_ON target {target}, entry 0x{entry:x}, accepted {}", result.is_ok());
+              }
+              psci::Reply::CpuOff if caller == 1 => off = true,
+              reply => bail!("Firmware CPU {caller} requested {reply:?}"),
+            }
           }
         }
-        trap => bail!("Firmware stopped at PC 0x{:x}, address 0x{physical_address:x}, syndrome 0x{syndrome:x}: {trap:?}", hv::get(cpu, 31)?),
+        trap => bail!("Firmware stopped at PC 0x{:x}, address 0x{physical_address:x}, syndrome 0x{syndrome:x}: {trap:?}", regs::read(&registers, 31)?),
       },
       exit => {
-        let pc = hv::get(cpu, 31)?;
+        let pc = regs::read(&registers, 31)?;
         eprintln!("Firmware exit {exit:?} at PC 0x{pc:x}");
         bail!("Unhandled firmware exit: {exit:?}");
       },
     }
+      if let Some(request) = request {
+        request.reply.send(secondary::Response { registers, off })?;
+      } else {
+        regs::apply(cpu, &before, &registers)?;
+      }
     }
     bail!("Firmware diagnostic exhausted its exit budget")
+    });
+    stop.store(true, Ordering::Release);
+    if let Some(worker) = worker {
+      let stats = worker.join().map_err(|_| anyhow::anyhow!("Secondary CPU owner panicked"))??;
+      eprintln!("Secondary CPU runtime: {stats:?}");
+    }
+    boot
   });
   let boot = boot.with_context(|| {
     devices[0].as_ref().map(|disk| format!("Storage completed {} requests; fault: {:?}", vpci::completed(disk), vpci::fault(disk)))

@@ -5,6 +5,8 @@ mod cpu;
 mod exception;
 mod ffi;
 pub mod gic;
+pub mod registers;
+pub mod secondary;
 mod watch;
 
 pub use cpu::{affinity, cpu, create_cpu, enter, factory, get, run, set, Cpu, CpuFactory};
