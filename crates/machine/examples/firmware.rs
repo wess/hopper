@@ -37,6 +37,8 @@ fn main() -> anyhow::Result<()> {
   let boot_media = arguments.iter().any(|argument| argument == "--boot-media");
   let optical_boot = arguments.iter().any(|argument| argument == "--optical-boot");
   let serial_check = arguments.iter().any(|argument| argument == "--check-serial");
+  let setup_check = arguments.iter().any(|argument| argument == "--check-setup");
+  ensure!(!setup_check || (boot_media && !serial_check), "Setup check requires its own guest boot mode");
   ensure!(!serial_check || boot_media, "Serial check requires guest boot mode");
   ensure!(!optical_boot || boot_media, "Optical boot requires guest boot mode");
   let guest_input = arguments.iter().any(|argument| argument == "--check-guest-input");
@@ -128,9 +130,11 @@ fn main() -> anyhow::Result<()> {
   let pointer = if check_input || boot_media { Some(vpci::controller(vinput::create(vinput::Kind::Tablet))?) } else { None };
   let target_disk = target_path.map(|path| target::create(std::path::Path::new(path))).transpose()?;
   let optical = optical_path.map(|path| vpci::optical(scsi::open(std::path::Path::new(path))?)).transpose()?;
-  let serial_port = if serial_check { Some(vpci::serial(channel::create("org.hopper.setup")?)?) } else { None };
+  let serial_port = if serial_check || setup_check { Some(vpci::serial(channel::create("org.hopper.setup")?)?) } else { None };
   let mut devices = [disk, graphics, keyboard, pointer, target_disk, optical, serial_port];
   let mut received_serial = Vec::new();
+  let mut setup = machine::setup::Decoder::default();
+  let mut setup_events = 0usize;
   ensure!(!boot_media || devices[0].is_some(), "Media boot requires an installer image");
   ensure!(!boot_media || (!check_input && !check_storage), "Media boot and shell checks are separate modes");
   let mut media_key = None;
@@ -180,6 +184,12 @@ fn main() -> anyhow::Result<()> {
     for _ in 0..2000000 {
       if let Some(device) = &mut devices[6] {
         let bytes = vpci::receive_serial(device, &mut ram)?;
+        if setup_check {
+          for event in machine::setup::feed(&mut setup, &bytes)? {
+            setup_events += 1;
+            eprintln!("Setup event: {event:?}");
+          }
+        }
         ensure!(received_serial.len() + bytes.len() <= 4096, "Serial diagnostic output exceeded its bound");
         received_serial.extend(bytes);
         messages += interrupts::deliver(&gic, 6, device)?;
@@ -455,6 +465,9 @@ fn main() -> anyhow::Result<()> {
   if serial_check {
     eprintln!("Received {} guest serial bytes; marker verified: {}", received_serial.len(),
       received_serial == b"hopper native setup channel\r\n");
+  }
+  if setup_check {
+    eprintln!("Setup decoded {setup_events} events; terminal result: {:?}", machine::setup::finish(&mut setup));
   }
   if boot_media && boot.is_err() {
     fault::report(&cpu)?;

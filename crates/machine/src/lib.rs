@@ -8,6 +8,7 @@ pub mod dma;
 pub mod platform;
 pub mod psci;
 pub mod smccc;
+pub mod setup;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub mod hypervisor;
