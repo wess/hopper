@@ -229,6 +229,13 @@ codesign --force --sign - --entitlements assets/machine.entitlements target/debu
 target/debug/examples/admission /absolute/path/to/linux-arm64.iso
 ```
 
+Native Ubuntu preparation now reports byte counts for download and cache verification,
+followed by disk, installer and account preparation. Updates use bounded latest-value
+channels through the native UI bridge. Interrupted downloads report the retained byte count;
+resumed downloads continue from it, and cached verification does not claim a new download.
+The stream carries the prepared VM to main-thread admission and preserves the automatic
+installation watch after startup. Full app rendering of these phases remains unverified.
+
 Native Ubuntu preparation automatically acquires the official Ubuntu 24.04.5 ARM64
 desktop ISO when no local installer is supplied. The private cache resumes interrupted
 downloads and verifies the pinned size and SHA-256 before publication and reuse. The

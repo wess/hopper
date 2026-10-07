@@ -168,4 +168,22 @@ impl Host {
       .ok_or_else(|| anyhow::anyhow!("VZ ownership is not connected"))?;
     service.prepare_linux(id, actor, stage).await
   }
+
+  pub async fn prepare_virtual_linux_tracked(
+    &self,
+    id: &str,
+    actor: MachineActor,
+    stage: ::engine::machines::vz::Stage,
+    progress: tokio::sync::watch::Sender<crate::VirtualLinuxPreparation>,
+  ) -> anyhow::Result<::engine::machines::vz::Prepared> {
+    let service = self
+      .virtual_machines
+      .lock()
+      .map_err(|_| anyhow::anyhow!("VZ service lock failed"))?
+      .clone()
+      .ok_or_else(|| anyhow::anyhow!("VZ ownership is not connected"))?;
+    service
+      .prepare_linux_tracked(id, actor, stage, progress)
+      .await
+  }
 }

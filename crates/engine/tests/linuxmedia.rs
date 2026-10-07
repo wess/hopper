@@ -1,6 +1,6 @@
 #![cfg(all(target_os = "macos", target_arch = "aarch64"))]
 
-use engine::machines::linux::download;
+use engine::machines::linux::{download, preparation::Phase};
 use sha2::{Digest, Sha256};
 use std::{
   os::unix::fs::PermissionsExt,
@@ -63,19 +63,28 @@ async fn interrupted_media_resumes_and_verified_cache_needs_no_network() {
   let checksum = digest(bytes);
   let partial = root.path().join(format!("{checksum}.part"));
   let client = reqwest::Client::new();
+  let (progress, status) = tokio::sync::watch::channel(Phase::Inspecting);
   let (url, task) = server("200 OK", "Content-Length: 10", &bytes[..4], None).await;
-  assert!(download::fetch(
+  assert!(download::tracked(
     &client,
     &url,
     10,
     &checksum,
     root.path(),
-    Arc::new(|| Ok(()))
+    Arc::new(|| Ok(())),
+    &progress
   )
   .await
   .is_err());
   task.await.unwrap();
   assert_eq!(std::fs::read(&partial).unwrap(), &bytes[..4]);
+  assert_eq!(
+    *status.borrow(),
+    Phase::Downloading {
+      bytes: 4,
+      total: 10
+    }
+  );
   let (url, task) = server(
     "206 Partial Content",
     "Content-Length: 6\r\nContent-Range: bytes 4-9/10",
@@ -83,13 +92,14 @@ async fn interrupted_media_resumes_and_verified_cache_needs_no_network() {
     None,
   )
   .await;
-  let complete = download::fetch(
+  let complete = download::tracked(
     &client,
     &url,
     10,
     &checksum,
     root.path(),
     Arc::new(|| Ok(())),
+    &progress,
   )
   .await
   .unwrap();
@@ -99,23 +109,38 @@ async fn interrupted_media_resumes_and_verified_cache_needs_no_network() {
     .to_lowercase()
     .contains("range: bytes=4-"));
   assert_eq!(std::fs::read(&complete).unwrap(), bytes);
+  assert_eq!(
+    *status.borrow(),
+    Phase::Downloading {
+      bytes: 10,
+      total: 10
+    }
+  );
   assert!(!partial.exists());
   assert_eq!(
     std::fs::metadata(&complete).unwrap().permissions().mode() & 0o777,
     0o600
   );
   assert_eq!(
-    download::fetch(
+    download::tracked(
       &client,
       &url,
       10,
       &checksum,
       root.path(),
-      Arc::new(|| Ok(()))
+      Arc::new(|| Ok(())),
+      &progress
     )
     .await
     .unwrap(),
     complete
+  );
+  assert_eq!(
+    *status.borrow(),
+    Phase::Verifying {
+      bytes: 10,
+      total: 10
+    }
   );
 }
 

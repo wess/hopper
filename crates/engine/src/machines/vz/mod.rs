@@ -93,6 +93,18 @@ impl Service {
     actor: Actor,
     stage: Stage,
   ) -> anyhow::Result<Prepared> {
+    let (progress, _) = tokio::sync::watch::channel(super::linux::preparation::Phase::Inspecting);
+    self.prepare_linux_tracked(id, actor, stage, progress).await
+  }
+
+  pub async fn prepare_linux_tracked(
+    &self,
+    id: &str,
+    actor: Actor,
+    stage: Stage,
+    progress: tokio::sync::watch::Sender<super::linux::preparation::Phase>,
+  ) -> anyhow::Result<Prepared> {
+    use super::linux::preparation::Phase;
     let (mut machine, check) = self.scope(id, actor)?;
     let control = intent::read(&self.manager, id)?;
     let check = intent::checked(self.manager.clone(), id.into(), control.clone(), check);
@@ -126,7 +138,12 @@ impl Service {
         machine.profile == "ubuntu",
         "Automatic Linux media requires the Ubuntu profile"
       );
-      let media = crate::machines::linux::prepare(&self.manager.root, check.clone()).await?;
+      let media = crate::machines::linux::prepare_tracked(
+        &self.manager.root,
+        check.clone(),
+        progress.clone(),
+      )
+      .await?;
       machine.installer = Some(
         media
           .to_str()
@@ -137,6 +154,8 @@ impl Service {
     let manager = self.manager.clone();
     let client = self.client.clone();
     tokio::task::spawn_blocking(move || {
+      check()?;
+      progress.send_replace(Phase::Disk);
       let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
       let prepared = loop {
         match prepare::prepare(
@@ -163,11 +182,15 @@ impl Service {
         }
       };
       let prepared = prepared.control(actor, control);
-      if matches!(stage, Stage::Unattended) {
-        prepared.unattended(&manager, actor)
+      let prepared = if matches!(stage, Stage::Unattended) {
+        check()?;
+        prepared.unattended_tracked(&manager, actor, &progress)?
       } else {
-        Ok(prepared)
-      }
+        prepared
+      };
+      check()?;
+      progress.send_replace(Phase::Ready);
+      Ok(prepared)
     })
     .await?
   }

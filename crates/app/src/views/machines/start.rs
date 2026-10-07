@@ -144,46 +144,7 @@ impl Machines {
       owned = false;
     }
     if !running && !owned {
-      bridge::run(
-        cx,
-        async move {
-          host
-            .prepare_virtual_linux(
-              &identity,
-              MachineActor::Person,
-              host::VirtualLinuxStage::Launch,
-            )
-            .await
-        },
-        move |result, cx| {
-          let Some(view) = weak.upgrade() else {
-            return;
-          };
-          let result = result.and_then(|prepared| crate::machines::admit(prepared, cx));
-          match result {
-            Err(error) => view.update(cx, |this, cx| {
-              this.finish_virtual(&id, &name, false, Err(error), cx)
-            }),
-            Ok(admission) => {
-              let installation = admission.installation();
-              view.update(cx, |this, cx| {
-                this.busy.insert(id.clone(), "Starting Linux…".into());
-                cx.notify();
-              });
-              bridge::run(cx, admission.start(), move |result, cx| {
-                if result.is_ok() {
-                  if let Some(installation) = installation {
-                    crate::machines::watch(installation, cx);
-                  }
-                }
-                let _ = weak.update(cx, |this, cx| {
-                  this.finish_virtual(&id, &name, false, result, cx)
-                });
-              });
-            }
-          }
-        },
-      );
+      self.prepare_virtual(id, name, cx);
       cx.notify();
       return;
     }
@@ -214,7 +175,7 @@ impl Machines {
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 impl Machines {
-  fn finish_virtual(
+  pub(super) fn finish_virtual(
     &mut self,
     id: &str,
     name: &str,

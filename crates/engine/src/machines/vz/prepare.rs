@@ -168,12 +168,15 @@ impl Prepared {
     }
   }
 
-  pub(super) fn unattended(
+  pub(super) fn unattended_tracked(
     mut self,
     manager: &Machines,
     actor: crate::machines::Actor,
+    progress: &tokio::sync::watch::Sender<crate::machines::linux::preparation::Phase>,
   ) -> anyhow::Result<Self> {
+    use crate::machines::linux::preparation::Phase;
     (self.check)()?;
+    progress.send_replace(Phase::Media);
     let installer = self
       .installer
       .as_deref()
@@ -184,6 +187,7 @@ impl Prepared {
       &self.check,
     )?;
     (self.check)()?;
+    progress.send_replace(Phase::Accounts);
     let credentials =
       crate::machines::linux::provision::persisted(manager, &self.machine.id, actor)?;
     (self.check)()?;

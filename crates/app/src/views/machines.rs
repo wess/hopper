@@ -1,6 +1,8 @@
 mod viewer;
 mod native;
 mod start;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod preparation;
 use gpui::prelude::*;
 use gpui::{div, px, Context, Entity, PathPromptOptions, SharedString, Window};
 use guise::prelude::*;

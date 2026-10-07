@@ -1,4 +1,4 @@
-use super::files;
+use super::{files, preparation::Phase};
 use anyhow::{ensure, Context};
 use fs2::FileExt;
 use machine::vz::queue::Check;
@@ -9,15 +9,21 @@ use std::{
   time::Duration,
 };
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio::sync::watch::Sender;
 
 async fn hash(
   file: &mut tokio::fs::File,
   size: u64,
   check: &Check,
+  progress: &Sender<Phase>,
 ) -> anyhow::Result<(Sha256, u64)> {
   let mut digest = Sha256::new();
   let mut buffer = vec![0; 1024 * 1024];
   let mut total = 0;
+  progress.send_replace(Phase::Verifying {
+    bytes: 0,
+    total: size,
+  });
   loop {
     check()?;
     let count = file.read(&mut buffer).await?;
@@ -27,6 +33,10 @@ async fn hash(
     total += count as u64;
     ensure!(total <= size, "Linux installer exceeds its pinned size");
     digest.update(&buffer[..count]);
+    progress.send_replace(Phase::Verifying {
+      bytes: total,
+      total: size,
+    });
   }
 }
 
@@ -37,6 +47,19 @@ pub async fn fetch(
   checksum: &str,
   cache: &Path,
   check: Check,
+) -> anyhow::Result<PathBuf> {
+  let (progress, _) = tokio::sync::watch::channel(Phase::Inspecting);
+  tracked(client, url, size, checksum, cache, check, &progress).await
+}
+
+pub async fn tracked(
+  client: &Client,
+  url: &str,
+  size: u64,
+  checksum: &str,
+  cache: &Path,
+  check: Check,
+  progress: &Sender<Phase>,
 ) -> anyhow::Result<PathBuf> {
   ensure!(
     size > 0
@@ -53,7 +76,7 @@ pub async fn fetch(
   match std::fs::symlink_metadata(&complete) {
     Ok(_) => {
       let mut file = tokio::fs::File::from_std(files::open(&complete, false)?);
-      let (digest, total) = hash(&mut file, size, &check).await?;
+      let (digest, total) = hash(&mut file, size, &check, progress).await?;
       ensure!(
         total == size && format!("{:x}", digest.finalize()) == checksum,
         "Cached Linux media failed verification; preserve it for recovery"
@@ -71,7 +94,7 @@ pub async fn fetch(
     .context("Another VM is downloading Linux media")?;
   // the inode lock follows pending async writes after caller cancellation.
   let mut file = tokio::fs::File::from_std(file);
-  let (mut digest, mut written) = hash(&mut file, size, &check).await?;
+  let (mut digest, mut written) = hash(&mut file, size, &check, progress).await?;
   if written == size {
     check()?;
     if format!("{:x}", digest.clone().finalize()) != checksum {
@@ -88,6 +111,10 @@ pub async fn fetch(
     fs2::available_space(cache)? >= size - written + (64 << 20),
     "Linux installer download needs more free disk space"
   );
+  progress.send_replace(Phase::Downloading {
+    bytes: written,
+    total: size,
+  });
   let mut request = client
     .get(url)
     .header(header::ACCEPT_ENCODING, "identity")
@@ -140,6 +167,10 @@ pub async fn fetch(
     digest = Sha256::new();
     written = 0;
   }
+  progress.send_replace(Phase::Downloading {
+    bytes: written,
+    total: size,
+  });
   while let Some(bytes) = response.chunk().await? {
     check()?;
     ensure!(
@@ -149,6 +180,10 @@ pub async fn fetch(
     file.write_all(&bytes).await?;
     digest.update(&bytes);
     written += bytes.len() as u64;
+    progress.send_replace(Phase::Downloading {
+      bytes: written,
+      total: size,
+    });
   }
   file.sync_all().await?;
   check()?;

@@ -47,11 +47,17 @@ async fn automatic_launch_preserves_partial_disks_and_reuses_completed_systems()
   .unwrap();
   let (client, _) = vz::channel();
   let service = Service::new(manager.clone(), client);
+  let (report, status) =
+    tokio::sync::watch::channel(engine::machines::linux::preparation::Phase::Inspecting);
   let prepared = service
-    .prepare_linux(&record.id, Actor::Agent, Stage::Launch)
+    .prepare_linux_tracked(&record.id, Actor::Agent, Stage::Launch, report)
     .await
     .unwrap();
   assert_eq!(prepared.stage(), Stage::Unattended);
+  assert_eq!(
+    *status.borrow(),
+    engine::machines::linux::preparation::Phase::Ready
+  );
   drop(prepared);
   let target = manager.root.join("vz").join(&record.id);
   std::fs::create_dir(&target).unwrap();
