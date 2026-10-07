@@ -1,4 +1,6 @@
+mod install;
 mod status;
+pub use install::Installation;
 pub use status::Status;
 
 use super::{Action, Pending, Vm};
@@ -24,12 +26,14 @@ pub struct Owner {
   wake: Arc<Notify>,
   machines: BTreeMap<String, Vm>,
   pending: BTreeMap<String, Operation>,
+  installations: BTreeMap<String, install::Operation>,
   generation: u64,
 }
 
 enum Request {
   Transition(Transition),
   Status(Query),
+  Install(install::RequestInstall),
 }
 
 struct Query {
@@ -60,6 +64,7 @@ pub fn channel() -> (Client, Owner) {
       wake,
       machines: BTreeMap::new(),
       pending: BTreeMap::new(),
+      installations: BTreeMap::new(),
       generation: 0,
     },
   )
@@ -131,7 +136,7 @@ impl Owner {
   }
 
   pub fn active(&self) -> bool {
-    !self.pending.is_empty()
+    !self.pending.is_empty() || !self.installations.is_empty()
   }
 
   pub fn insert(&mut self, id: &str, vm: Vm) -> anyhow::Result<()> {
@@ -171,7 +176,7 @@ impl Owner {
 
   pub fn can_replace(&self, id: &str) -> anyhow::Result<()> {
     ensure!(
-      !self.pending.contains_key(id),
+      !self.pending.contains_key(id) && !self.installations.contains_key(id),
       "VZ operation is still active"
     );
     let vm = self.machines.get(id).context("VZ machine is not owned")?;
@@ -203,6 +208,7 @@ impl Owner {
   }
 
   pub fn tick(&mut self) {
+    self.tick_installations();
     let mut finished = Vec::new();
     for (id, operation) in &self.pending {
       match super::poll(&operation.pending) {
@@ -222,6 +228,10 @@ impl Owner {
       };
       let request = match request {
         Request::Transition(request) => request,
+        Request::Install(request) => {
+          self.install(request);
+          continue;
+        }
         Request::Status(query) => {
           if !query.send.is_closed() {
             let result = (query.check)().map(|()| {
@@ -250,7 +260,7 @@ impl Owner {
           vm.stop_requested.set(true);
         }
         ensure!(
-          !self.pending.contains_key(&request.id),
+          !self.pending.contains_key(&request.id) && !self.installations.contains_key(&request.id),
           "Another VZ operation is active"
         );
         super::scoped_transition(vm, request.action, request.check.clone())

@@ -26,6 +26,18 @@ pub struct Prepared {
 }
 
 impl Prepared {
+  pub fn install(
+    self,
+    main: machine::vz::MainThreadMarker,
+    owner: &mut super::Owner,
+  ) -> anyhow::Result<machine::vz::queue::Installation> {
+    let id = self.platform.machine.id.clone();
+    let check = self.platform.check.clone();
+    let path = self.media.path().join("restore.ipsw");
+    self.admit(main, owner)?;
+    owner.install_checked(&id, path, check)
+  }
+
   pub fn admit(
     self,
     main: machine::vz::MainThreadMarker,

@@ -67,7 +67,7 @@ pub struct Vm {
   displaying: Rc<Cell<bool>>,
   installer: bool,
   started: Cell<bool>,
-  stop_requested: Cell<bool>,
+  stop_requested: Rc<Cell<bool>>,
   generation: Cell<u64>,
 }
 
@@ -108,7 +108,7 @@ fn configured(
     displaying: Rc::new(Cell::new(false)),
     installer: false,
     started: Cell::new(false),
-    stop_requested: Cell::new(false),
+    stop_requested: Rc::new(Cell::new(false)),
     generation: Cell::new(0),
   }
 }

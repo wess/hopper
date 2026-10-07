@@ -125,6 +125,101 @@ fn main() -> anyhow::Result<()> {
     "Repeated admission changed platform identity"
   );
   prepared.admit(main, &mut owner, media.clone())?;
+  let invalid = media.path().join("restore.ipsw");
+  std::fs::write(&invalid, b"owned malformed restore media")?;
+  for attempt in 0..4 {
+    let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let access = allowed.clone();
+    let original = check.clone();
+    let scope: Check = Arc::new(move || {
+      original()?;
+      ensure!(
+        access.load(std::sync::atomic::Ordering::Acquire),
+        "Installer access revoked"
+      );
+      Ok(())
+    });
+    let installation = owner.install_checked(&machine.id, invalid.clone(), scope)?;
+    ensure!(
+      owner.active() && owner.inspect(&machine.id)?.busy,
+      "Installation lost queue ownership"
+    );
+    ensure!(
+      owner.can_replace(&machine.id).is_err(),
+      "Active installation allowed hardware replacement"
+    );
+    if attempt == 3 {
+      installation.cancel();
+    }
+    let installation = if attempt == 1 {
+      drop(installation);
+      None
+    } else {
+      if attempt == 2 {
+        allowed.store(false, std::sync::atomic::Ordering::Release);
+      }
+      Some(installation)
+    };
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while owner.active() {
+      owner.tick();
+      ensure!(
+        Instant::now() < deadline,
+        "Owned malformed installation did not complete"
+      );
+      run_loop.runMode_beforeDate(
+        unsafe { NSDefaultRunLoopMode },
+        &NSDate::dateWithTimeIntervalSinceNow(0.01),
+      );
+    }
+    if let Some(installation) = installation {
+      ensure!(
+        (0.0..=1.0).contains(&installation.fraction()),
+        "Unbounded installer progress"
+      );
+      let error = runtime
+        .block_on(installation.wait())
+        .err()
+        .context("Malformed installation succeeded")?;
+      if attempt == 2 {
+        ensure!(
+          error.to_string().contains("revoked"),
+          "Revocation was not retained: {error}"
+        );
+      }
+    }
+    let controller = service.clone();
+    let id = machine.id.clone();
+    let pending = runtime.spawn(async move {
+      controller
+        .transition(&id, Actor::Person, vz::Action::Start)
+        .await
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !pending.is_finished() {
+      owner.tick();
+      ensure!(
+        Instant::now() < deadline,
+        "Post-installation Start rejection timed out"
+      );
+      run_loop.runMode_beforeDate(
+        unsafe { NSDefaultRunLoopMode },
+        &NSDate::dateWithTimeIntervalSinceNow(0.01),
+      );
+    }
+    let error = runtime
+      .block_on(pending)?
+      .err()
+      .context("Failed installation enabled Start")?;
+    ensure!(
+      error.to_string().contains("Install macOS"),
+      "Unexpected startup failure: {error}"
+    );
+  }
+  ensure!(
+    std::fs::read(&invalid)? == b"owned malformed restore media",
+    "Installer changed source media"
+  );
   owner.retire(&machine.id)?;
   let prepared = platform::prepare(&manager, machine.clone(), image, check)?;
   manager.set_agent_access(&machine.id, false)?;
@@ -136,7 +231,7 @@ fn main() -> anyhow::Result<()> {
     std::fs::read(target.join("platform"))? == original,
     "Rejected admission changed persistent platform state"
   );
-  println!("Signed native macOS platform publication, repeated stopped-hardware admission, identity/auxiliary binding, display ownership and uninstalled-start/revocation rejection verified using supported SDK metadata; no valid local IPSW, installation, rendering/input or macOS first boot was verified");
+  println!("Signed native macOS platform publication, repeated stopped-hardware admission, identity/auxiliary binding, display ownership and uninstalled-start/revocation rejection, owned malformed installation, caller cancellation and installer revocation verified using supported SDK metadata; no valid local IPSW, installation, rendering/input or macOS first boot was verified");
   Ok(())
 }
 

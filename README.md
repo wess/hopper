@@ -209,8 +209,14 @@ on the main thread. Publication stores machine identity, restore
 build/version/requirements and matching auxiliary firmware together. Retry validates and
 reuses those bindings; caller cancellation cleans unpublished storage. SDK hardware and
 displays retain runtime and media ownership. Normal Start rejects macOS hardware until
-native installation reports success; failed installation keeps the guard in place. This
-API does not yet download an IPSW, integrate installation into the library or install macOS.
+native installation reports success; failed installation keeps the guard in place.
+Inspected preparation can now start installation through the owned main queue and return
+a progress/completion handle. SDK callbacks retain hardware, media and original operation
+authorization through cancellation acknowledgement. Dropping or cancelling a handle,
+revoking access, requesting Stop or exceeding the bounded deadline cancels installation;
+failed or cancelled completion cannot enable Start. Installation remains exclusive through
+queue completion, including after the SDK callback. Automatic IPSW acquisition, persisted
+installation readiness, library integration and successful macOS installation remain pending.
 
 The `vzmac` example discovers Apple's supported restore-image metadata and configures
 a macOS platform with its CPU/RAM requirements, independent identity and matching

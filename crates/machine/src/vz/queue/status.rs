@@ -16,7 +16,9 @@ impl Owner {
     let vm = self.machines.get(id).context("VZ machine is not owned")?;
     Ok(Status {
       state: super::super::state(vm),
-      busy: self.pending.contains_key(id) || vm.installing.get(),
+      busy: self.pending.contains_key(id)
+        || self.installations.contains_key(id)
+        || vm.installing.get(),
       generation: vm.generation.get(),
       installer: vm.installer,
       started: vm.started.get(),

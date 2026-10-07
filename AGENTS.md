@@ -12,7 +12,9 @@ retains original policy/stop intent and keeps staging/operation ownership throug
 Inspected restore results prepare private native platform state and admit stopped hardware on
 the main thread. Identity, requirements and auxiliary firmware remain bound to the selected
 restore build. Normal Start is blocked until successful native installation; automatic download
-and installation/viewer integration remain pending. Previous untagged Linux/macOS records keep the
+and library installation/viewer integration remain pending. Inspected preparation can start
+owned queue installation with bounded progress, caller cancellation and original-policy
+checks through SDK acknowledgement. Installed readiness is not yet persisted for re-admission. Previous untagged Linux/macOS records keep the
 Lima/VZ recovery path. Previous QEMU/swtpm Windows instances remain
 preserved for migration and are not started through the native path. All desktop guest families are experimental. Release hosts remain
 Apple silicon macOS 26+.

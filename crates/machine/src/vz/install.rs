@@ -26,14 +26,30 @@ use std::{
 /// }
 /// ```
 pub struct Installation<'vm> {
+  pending: Pending,
+  _vm: &'vm mut Vm,
+}
+
+pub(crate) struct Pending {
   installer: Retained<VZMacOSInstaller>,
   receive: mpsc::Receiver<anyhow::Result<()>>,
   done: Rc<Cell<bool>>,
   cancelled: Rc<Cell<bool>>,
-  _vm: &'vm mut Vm,
 }
 
 pub fn start<'vm>(vm: &'vm mut Vm, path: &Path) -> anyhow::Result<Installation<'vm>> {
+  let pending = start_checked(vm, path, None)?;
+  Ok(Installation { pending, _vm: vm })
+}
+
+pub(crate) fn start_checked(
+  vm: &Vm,
+  path: &Path,
+  check: Option<super::queue::Check>,
+) -> anyhow::Result<Pending> {
+  if let Some(check) = &check {
+    check()?;
+  }
   ensure!(vm.mac, "macOS installation requires a macOS platform");
   ensure!(!vm.installing.get(), "macOS installation is already active");
   ensure!(
@@ -57,6 +73,9 @@ pub fn start<'vm>(vm: &'vm mut Vm, path: &Path) -> anyhow::Result<Installation<'
       &url,
     )
   };
+  if let Some(check) = &check {
+    check()?;
+  }
   let (send, receive) = mpsc::sync_channel(1);
   let busy = vm.installing.clone();
   let ready = vm.mac_ready.clone();
@@ -64,14 +83,23 @@ pub fn start<'vm>(vm: &'vm mut Vm, path: &Path) -> anyhow::Result<Installation<'
   let completed = done.clone();
   let cancelled = Rc::new(Cell::new(false));
   let requested = cancelled.clone();
+  let stopped = vm.stop_requested.clone();
   // cancellation is asynchronous; the callback owns hardware until it acknowledges completion.
   let held = Rc::new(RefCell::new(Some((
     installer.clone(),
     vm.ownership.clone(),
+    check,
   ))));
   let completion = RcBlock::new(move |error: *mut NSError| {
-    let result = if requested.get() {
+    let authorized = held
+      .borrow()
+      .as_ref()
+      .and_then(|(_, _, check)| check.as_ref())
+      .map_or(Ok(()), |check| check());
+    let result = if requested.get() || stopped.get() {
       Err(anyhow::anyhow!("macOS installation was cancelled"))
+    } else if let Err(error) = authorized {
+      Err(error)
     } else if error.is_null() {
       ready.set(true);
       Ok(())
@@ -88,16 +116,19 @@ pub fn start<'vm>(vm: &'vm mut Vm, path: &Path) -> anyhow::Result<Installation<'
   unsafe {
     installer.installWithCompletionHandler(&completion);
   }
-  Ok(Installation {
+  Ok(Pending {
     installer,
     receive,
     done,
     cancelled,
-    _vm: vm,
   })
 }
 
 pub fn fraction(installation: &Installation<'_>) -> f64 {
+  fraction_pending(&installation.pending)
+}
+
+pub(crate) fn fraction_pending(installation: &Pending) -> f64 {
   let fraction = unsafe { installation.installer.progress() }.fractionCompleted();
   if fraction.is_finite() {
     fraction.clamp(0.0, 1.0)
@@ -107,6 +138,10 @@ pub fn fraction(installation: &Installation<'_>) -> f64 {
 }
 
 pub fn cancel(installation: &Installation<'_>) {
+  cancel_pending(&installation.pending);
+}
+
+pub(crate) fn cancel_pending(installation: &Pending) {
   if !installation.done.get() {
     installation.cancelled.set(true);
     unsafe { installation.installer.progress() }.cancel();
@@ -114,6 +149,10 @@ pub fn cancel(installation: &Installation<'_>) {
 }
 
 pub fn poll(installation: &Installation<'_>) -> anyhow::Result<Option<anyhow::Result<()>>> {
+  poll_pending(&installation.pending)
+}
+
+pub(crate) fn poll_pending(installation: &Pending) -> anyhow::Result<Option<anyhow::Result<()>>> {
   match installation.receive.try_recv() {
     Ok(result) => Ok(Some(result)),
     Err(mpsc::TryRecvError::Empty) => Ok(None),
@@ -121,8 +160,8 @@ pub fn poll(installation: &Installation<'_>) -> anyhow::Result<Option<anyhow::Re
   }
 }
 
-impl Drop for Installation<'_> {
+impl Drop for Pending {
   fn drop(&mut self) {
-    cancel(self);
+    cancel_pending(self);
   }
 }
