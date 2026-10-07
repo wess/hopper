@@ -1,3 +1,5 @@
+mod admit;
+pub mod deployment;
 pub mod media;
 pub mod platform;
 
@@ -20,6 +22,20 @@ pub struct Restore {
   machine: model::Machine,
 }
 
+pub struct System {
+  platform: platform::Prepared,
+}
+
+impl System {
+  pub fn admit(
+    self,
+    main: machine::vz::MainThreadMarker,
+    owner: &mut super::Owner,
+  ) -> anyhow::Result<()> {
+    self.platform.admit_system(main, owner)
+  }
+}
+
 pub struct Prepared {
   platform: platform::Prepared,
   media: Arc<tempfile::TempDir>,
@@ -34,8 +50,30 @@ impl Prepared {
     let id = self.platform.machine.id.clone();
     let check = self.platform.check.clone();
     let path = self.media.path().join("restore.ipsw");
+    let directory = self.platform.target.clone();
+    ensure!(
+      !self.platform.installed,
+      "macOS is installed; choose system boot"
+    );
     self.admit(main, owner)?;
-    owner.install_checked(&id, path, check)
+    let attempt = match (|| {
+      check()?;
+      deployment::begin(&directory, &id)
+    })() {
+      Ok(attempt) => attempt,
+      Err(error) => {
+        owner.retire(&id)?;
+        return Err(error);
+      }
+    };
+    let authorized = check.clone();
+    let commit: Check = Arc::new(move || {
+      authorized()?;
+      deployment::installed(&attempt)?;
+      authorized()?;
+      Ok(())
+    });
+    owner.install_committed(&id, path, check, commit)
   }
 
   pub fn admit(
@@ -74,6 +112,25 @@ impl Restore {
 }
 
 impl Service {
+  pub async fn prepare_mac_system(&self, id: &str, actor: Actor) -> anyhow::Result<System> {
+    let (machine, check) = self.scope(id, actor)?;
+    ensure!(
+      machine.guest == GuestOs::Macos
+        && machine.profile == "macos"
+        && machine.runtime == Some(MachineRuntime::Virtualization),
+      "System boot requires native macOS"
+    );
+    let control = intent::read(&self.manager, id)?;
+    let check = intent::checked(self.manager.clone(), id.into(), control, check);
+    let manager = self.manager.clone();
+    tokio::task::spawn_blocking(move || {
+      Ok(System {
+        platform: platform::system(&manager, machine, check)?,
+      })
+    })
+    .await?
+  }
+
   pub async fn inspect_mac(&self, id: &str, actor: Actor) -> anyhow::Result<Restore> {
     let (machine, original) = self.scope(id, actor)?;
     ensure!(

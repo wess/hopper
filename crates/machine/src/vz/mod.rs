@@ -91,6 +91,13 @@ pub fn create_mac(main: MainThreadMarker, boot: &mac::Mac) -> anyhow::Result<Vm>
   Ok(configured(main, &config, true))
 }
 
+// the caller validates a durable successful-installation receipt before recovering hardware.
+pub fn recover_mac(main: MainThreadMarker, boot: &mac::Mac) -> anyhow::Result<Vm> {
+  let vm = create_mac(main, boot)?;
+  vm.mac_ready.set(true);
+  Ok(vm)
+}
+
 fn configured(
   main: MainThreadMarker,
   config: &objc2_virtualization::VZVirtualMachineConfiguration,

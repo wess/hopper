@@ -27,6 +27,7 @@ pub struct Prepared {
   pub(super) temporary: Option<tempfile::TempDir>,
   pub(super) runtime: Arc<store::lock::Lease>,
   pub(super) check: Check,
+  pub(super) installed: bool,
 }
 
 pub fn prepare(
@@ -67,9 +68,20 @@ pub fn prepare(
   let parent = manager.root.join("vz");
   files::parent(&parent)?;
   let target = parent.join(&machine.id);
+  let mut installed = false;
   let temporary = match std::fs::symlink_metadata(&target) {
     Ok(_) => {
       validate(&target, &machine, &image)?;
+      let phase = super::deployment::read(&target, &machine.id)?;
+      ensure!(
+        phase != Some(super::deployment::Phase::Installing),
+        "macOS installation requires recovery; its disk is preserved"
+      );
+      ensure!(
+        phase.is_some() || !super::deployment::written(&target)?,
+        "Written macOS disk requires recovery; its data is preserved"
+      );
+      installed = phase == Some(super::deployment::Phase::Installed);
       None
     }
     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -90,7 +102,55 @@ pub fn prepare(
     temporary,
     runtime,
     check,
+    installed,
   })
+}
+
+fn saved(target: &std::path::Path) -> anyhow::Result<Platform> {
+  files::directory(target)?;
+  Ok(serde_json::from_reader(std::io::Read::take(
+    files::read(&target.join("platform"), 512 << 10)?,
+    (512 << 10) + 1,
+  ))?)
+}
+
+pub fn inspect(target: &std::path::Path, machine: &Machine) -> anyhow::Result<Platform> {
+  let saved = saved(target)?;
+  ensure!(
+    machine.resources.cpus as usize >= saved.minimum_cpus
+      && u64::from(machine.resources.memory_gib) << 30 >= saved.minimum_memory,
+    "macOS resources are below the installed platform's requirements"
+  );
+  let image = Image {
+    url: String::new(),
+    build: saved.build.clone(),
+    version: saved.os_version,
+    hardware: saved.hardware.clone(),
+    minimum_cpus: saved.minimum_cpus,
+    minimum_memory: saved.minimum_memory,
+  };
+  validate(target, machine, &image)
+}
+
+pub fn system(manager: &Machines, machine: Machine, check: Check) -> anyhow::Result<Prepared> {
+  check()?;
+  ensure!(
+    manager.root.is_absolute(),
+    "Native macOS root must be absolute"
+  );
+  crate::machines::validate_id(&machine.id)?;
+  let platform = inspect(&manager.root.join("vz").join(&machine.id), &machine)?;
+  let image = Image {
+    url: String::new(),
+    build: platform.build,
+    version: platform.os_version,
+    hardware: platform.hardware,
+    minimum_cpus: platform.minimum_cpus,
+    minimum_memory: platform.minimum_memory,
+  };
+  let prepared = prepare(manager, machine, image, check)?;
+  ensure!(prepared.installed, "Install macOS before system boot");
+  Ok(prepared)
 }
 
 pub fn validate(
@@ -99,10 +159,7 @@ pub fn validate(
   image: &Image,
 ) -> anyhow::Result<Platform> {
   files::directory(target)?;
-  let platform: Platform = serde_json::from_reader(std::io::Read::take(
-    files::read(&target.join("platform"), 512 << 10)?,
-    (512 << 10) + 1,
-  ))?;
+  let platform = saved(target)?;
   ensure!(
     platform.version == 1
       && platform.id == machine.id
@@ -179,35 +236,5 @@ impl Prepared {
     (self.check)()?;
     validate(&self.target, &self.machine, &self.image)
       .context("Validate native macOS state before admission")
-  }
-}
-
-impl Prepared {
-  pub fn admit(
-    mut self,
-    main: machine::vz::MainThreadMarker,
-    owner: &mut super::super::Owner,
-    media: Arc<tempfile::TempDir>,
-  ) -> anyhow::Result<()> {
-    let platform = self.publish(main)?;
-    let boot = machine::vz::mac::Mac {
-      cpus: self.machine.resources.cpus as usize,
-      memory: u64::from(self.machine.resources.memory_gib) << 30,
-      width: 1024,
-      height: 768,
-      image: self.image.clone(),
-      identity: platform.identity,
-      auxiliary: self.target.join("auxiliary"),
-      disk: self.target.join("disk"),
-    };
-    let mut vm = machine::vz::create_mac(main, &boot)?;
-    machine::vz::retain(&mut vm, Arc::new((self.runtime, media)))?;
-    (self.check)()?;
-    owner.insert(&self.machine.id, vm)?;
-    if let Err(error) = (self.check)() {
-      owner.retire(&self.machine.id)?;
-      return Err(error);
-    }
-    Ok(())
   }
 }

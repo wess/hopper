@@ -84,11 +84,41 @@ pub(crate) fn status(
           if prepared {
             super::files::directory(&manager.root.join("vz").join(&machine.id))?;
           }
+          let phase = if prepared {
+            super::mac::deployment::read(&manager.root.join("vz").join(&machine.id), &machine.id)?
+          } else {
+            None
+          };
+          let directory = manager.root.join("vz").join(&machine.id);
+          let written = phase.is_none()
+            && prepared
+            && directory.join("platform").try_exists()?
+            && super::mac::deployment::written(&directory)?;
+          if phase == Some(super::mac::deployment::Phase::Installed) {
+            super::mac::platform::inspect(&directory, &machine)?;
+          }
           return Ok(MachineStatus {
             machine,
-            state: "Setup required".into(),
+            state: match phase {
+              Some(super::mac::deployment::Phase::Installed) => "Ready to start",
+              Some(super::mac::deployment::Phase::Installing) => "Installation recovery required",
+              None if written => "Installation recovery required",
+              None => "Setup required",
+            }
+            .into(),
             busy: false,
-            progress: Some("Native macOS installation is in development".into()),
+            progress: Some(
+              phase
+                .map_or(
+                  if written {
+                    "Written macOS disk requires recovery; its data is preserved"
+                  } else {
+                    "Native macOS installation is in development"
+                  },
+                  |phase| phase.message(),
+                )
+                .into(),
+            ),
           });
         }
         let phase = if prepared {

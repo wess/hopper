@@ -38,7 +38,7 @@ pub(crate) struct Pending {
 }
 
 pub fn start<'vm>(vm: &'vm mut Vm, path: &Path) -> anyhow::Result<Installation<'vm>> {
-  let pending = start_checked(vm, path, None)?;
+  let pending = start_checked(vm, path, None, None)?;
   Ok(Installation { pending, _vm: vm })
 }
 
@@ -46,6 +46,7 @@ pub(crate) fn start_checked(
   vm: &Vm,
   path: &Path,
   check: Option<super::queue::Check>,
+  commit: Option<super::queue::Check>,
 ) -> anyhow::Result<Pending> {
   if let Some(check) = &check {
     check()?;
@@ -89,20 +90,38 @@ pub(crate) fn start_checked(
     installer.clone(),
     vm.ownership.clone(),
     check,
+    commit,
   ))));
   let completion = RcBlock::new(move |error: *mut NSError| {
     let authorized = held
       .borrow()
       .as_ref()
-      .and_then(|(_, _, check)| check.as_ref())
+      .and_then(|(_, _, check, _)| check.as_ref())
       .map_or(Ok(()), |check| check());
     let result = if requested.get() || stopped.get() {
       Err(anyhow::anyhow!("macOS installation was cancelled"))
     } else if let Err(error) = authorized {
       Err(error)
     } else if error.is_null() {
-      ready.set(true);
-      Ok(())
+      let result = (|| {
+        let retained = held.borrow();
+        let (_, _, check, commit) = retained
+          .as_ref()
+          .context("Installer completion lost ownership")?;
+        if let Some(commit) = commit {
+          commit()?;
+        }
+        if let Some(check) = check {
+          check()?;
+        }
+        ensure!(
+          !requested.get() && !stopped.get(),
+          "macOS installation was cancelled"
+        );
+        ready.set(true);
+        Ok(())
+      })();
+      result
     } else {
       let message: String = unsafe { &*error }.to_string().chars().take(512).collect();
       Err(anyhow::anyhow!("macOS installation failed: {message}"))

@@ -215,8 +215,14 @@ a progress/completion handle. SDK callbacks retain hardware, media and original 
 authorization through cancellation acknowledgement. Dropping or cancelling a handle,
 revoking access, requesting Stop or exceeding the bounded deadline cancels installation;
 failed or cancelled completion cannot enable Start. Installation remains exclusive through
-queue completion, including after the SDK callback. Automatic IPSW acquisition, persisted
-installation readiness, library integration and successful macOS installation remain pending.
+queue completion, including after the SDK callback. Installation now saves a private,
+platform-bound attempt before starting the SDK and commits installed state only on authorized
+successful completion. Interrupted installation or written disks without a receipt require
+recovery, preserving guest data. System preparation validates the saved receipt, identity,
+capacity, hardware and requirements, then admits installed hardware without restore media.
+Listing distinguishes setup, recovery and installed readiness; it does not claim a verified
+desktop. Automatic IPSW acquisition, library integration, valid-media installation and
+installed macOS boot remain pending.
 
 The `vzmac` example discovers Apple's supported restore-image metadata and configures
 a macOS platform with its CPU/RAM requirements, independent identity and matching

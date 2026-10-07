@@ -22,6 +22,7 @@ pub(super) struct RequestInstall {
   id: String,
   path: PathBuf,
   check: Check,
+  commit: Option<Check>,
   send: oneshot::Sender<anyhow::Result<()>>,
   progress: watch::Sender<f64>,
 }
@@ -92,6 +93,7 @@ fn request(id: &str, path: PathBuf, original: Check) -> (RequestInstall, Install
       id: id.into(),
       path,
       check: check.clone(),
+      commit: None,
       send,
       progress,
     },
@@ -138,6 +140,21 @@ impl Owner {
     Ok(installation)
   }
 
+  pub fn install_committed(
+    &mut self,
+    id: &str,
+    path: PathBuf,
+    check: Check,
+    commit: Check,
+  ) -> anyhow::Result<Installation> {
+    validate(id)?;
+    check()?;
+    let (mut request, installation) = request(id, path, check);
+    request.commit = Some(commit);
+    self.install(request);
+    Ok(installation)
+  }
+
   pub(super) fn install(&mut self, request: RequestInstall) {
     if request.send.is_closed() {
       return;
@@ -153,7 +170,12 @@ impl Owner {
         .get(&request.id)
         .context("VZ machine is not owned")?;
       ensure!(!vm.stop_requested.get(), "macOS installation was stopped");
-      install::start_checked(vm, &request.path, Some(request.check.clone()))
+      install::start_checked(
+        vm,
+        &request.path,
+        Some(request.check.clone()),
+        request.commit.clone(),
+      )
     })();
     match result {
       Ok(pending) => {
