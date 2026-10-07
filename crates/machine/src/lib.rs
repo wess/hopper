@@ -9,6 +9,7 @@ pub mod platform;
 pub mod psci;
 pub mod smccc;
 pub mod setup;
+pub mod runtime;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub mod hypervisor;
