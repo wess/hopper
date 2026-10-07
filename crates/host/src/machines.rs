@@ -90,8 +90,8 @@ impl Host {
 
   pub async fn create_machine(&self, request: CreateMachine) -> anyhow::Result<Machine> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    if request.profile == "ubuntu" {
-      return ::engine::machines::linux::records::create(&self.machines(), request);
+    if matches!(request.profile.as_str(), "ubuntu" | "macos") {
+      return ::engine::machines::vz::records::create(&self.machines(), request);
     }
     if self
       .machines()

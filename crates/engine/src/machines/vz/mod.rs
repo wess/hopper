@@ -2,6 +2,7 @@ pub(crate) mod files;
 mod identity;
 mod intent;
 mod prepare;
+pub mod records;
 mod watch;
 pub use watch::{Installation, Permit};
 

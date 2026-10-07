@@ -17,7 +17,7 @@ pub fn profiles() -> Vec<MachineProfile> {
             "macos",
             "macOS",
             GuestOs::Macos,
-            "macOS 26. Requires an Apple silicon Mac running the same or a newer macOS version.",
+            "Native macOS on Apple silicon. Restore-image discovery and runtime support are in development; installation and guest tools are not yet available.",
             None,
             false,
             true,

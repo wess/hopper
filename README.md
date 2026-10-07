@@ -176,7 +176,10 @@ and asynchronous lifecycle on the main thread, with persistent identity/EFI vari
 raw storage, installer media and desktop devices. Host exposes native Linux preparation
 and authorized lifecycle operations. Already-admitted VMs use a dedicated native viewer;
 complete viewer verification remains unfinished. New Ubuntu creation and first startup
-use the native path; previous records and macOS creation keep their earlier recovery paths. A signed diagnostic
+use the native path. New macOS records now explicitly select the native runtime through the
+same validated record creator, preserving default agent access and optional local restore
+media. Listing reports Setup required until native macOS installation is integrated. Existing
+guest data remains on its recovery or migration path. A signed diagnostic
 verifies real VZ hardware transitions with a temporary blank disk:
 
 ```sh

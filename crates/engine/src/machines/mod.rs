@@ -182,7 +182,7 @@ impl Machines {
             if self.native_vz(&machine.id)? {
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 if machine.runtime == Some(model::MachineRuntime::Virtualization) {
-                    native.push(linux::records::status(self, machine, actor)?);
+                    native.push(vz::records::status(self, machine, actor)?);
                     continue;
                 }
                 native.push(MachineStatus {
@@ -250,6 +250,10 @@ impl Machines {
     pub async fn create(&self, request: CreateMachine) -> anyhow::Result<Machine> {
         if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
             bail!("Desktop VMs currently require an Apple silicon Mac");
+        }
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        if matches!(request.profile.as_str(), "ubuntu" | "macos") {
+            return vz::records::create(self, request);
         }
         if request.name.trim().is_empty() || request.name.len() > 100 {
             bail!("Choose a VM name of 1–100 characters");
