@@ -4,6 +4,8 @@ pub mod iso;
 pub mod kernel;
 mod files;
 pub mod provision;
+pub mod progress;
+pub mod observe;
 pub mod records;
 pub mod seed;
 

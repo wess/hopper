@@ -66,10 +66,19 @@ impl Host {
               };
               row.state = state.into();
               row.busy = status.busy || transitional;
-              row.progress = (state == "Unavailable").then(|| {
-                "Controls are unavailable for this VM in this build. Its files are preserved."
-                  .into()
-              });
+              row.progress = if row.machine.guest == model::GuestOs::Linux {
+                service
+                  .installation(&row.machine.id, actor)?
+                  .map(|phase| phase.message().into())
+              } else {
+                None
+              };
+              if state == "Unavailable" {
+                row.progress = Some(
+                  "Controls are unavailable for this VM in this build. Its files are preserved."
+                    .into(),
+                );
+              }
             }
           }
         }

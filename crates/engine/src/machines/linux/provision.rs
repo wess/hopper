@@ -114,3 +114,20 @@ pub fn prepare(id: &str, credentials: &Credentials) -> anyhow::Result<Plan> {
     }))?,
   })
 }
+
+pub fn tracked(id: &str, credentials: &Credentials, attempt: &str) -> anyhow::Result<Plan> {
+  super::progress::Decoder::new(attempt)?;
+  let mut plan = prepare(id, credentials)?;
+  let mut configuration: serde_json::Value = serde_yaml::from_str(&plan.user_data)?;
+  for (key, phase) in [
+    ("early-commands", "installing"),
+    ("late-commands", "deployed"),
+    ("error-commands", "failed"),
+  ] {
+    configuration["autoinstall"][key] = json!([format!(
+      "printf '\\nHOPPER-INSTALL:{attempt}:{phase}\\n' > /dev/hvc0"
+    )]);
+  }
+  plan.user_data = format!("#cloud-config\n{}", serde_yaml::to_string(&configuration)?);
+  Ok(plan)
+}

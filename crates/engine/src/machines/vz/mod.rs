@@ -1,4 +1,4 @@
-mod files;
+pub(crate) mod files;
 mod prepare;
 
 use super::{Actor, Machines};
@@ -90,6 +90,33 @@ impl Service {
       }
     })
     .await?
+  }
+
+  pub fn installation(
+    &self,
+    id: &str,
+    actor: Actor,
+  ) -> anyhow::Result<Option<super::linux::progress::Phase>> {
+    let original = self.manager.machine(id, actor)?;
+    ensure!(
+      original.guest == GuestOs::Linux
+        && original.runtime == Some(model::MachineRuntime::Virtualization),
+      "Installation status requires native Linux"
+    );
+    let directory = self.manager.root.join("vz").join(id);
+    let phase = match std::fs::symlink_metadata(&directory) {
+      Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+      Err(error) => return Err(error.into()),
+      Ok(_) => super::linux::progress::read(&directory)?,
+    };
+    let current = self.manager.machine(id, actor)?;
+    ensure!(
+      current.guest == original.guest
+        && current.runtime == original.runtime
+        && (actor != Actor::Agent || current.agent_generation == original.agent_generation),
+      "VM installation policy changed"
+    );
+    Ok(phase)
   }
 
   fn scope(

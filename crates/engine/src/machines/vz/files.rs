@@ -9,7 +9,7 @@ use std::{
   path::Path,
 };
 
-pub(super) fn directory(path: &Path) -> anyhow::Result<()> {
+pub(crate) fn directory(path: &Path) -> anyhow::Result<()> {
   let info = std::fs::symlink_metadata(path)?;
   ensure!(
     info.is_dir() && info.uid() == unsafe { libc::geteuid() } && info.mode() & 0o077 == 0,
@@ -29,7 +29,7 @@ pub(super) fn parent(path: &Path) -> anyhow::Result<()> {
   directory(path)
 }
 
-pub(super) fn read(path: &Path, maximum: u64) -> anyhow::Result<File> {
+pub(crate) fn read(path: &Path, maximum: u64) -> anyhow::Result<File> {
   let file = OpenOptions::new()
     .read(true)
     .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)

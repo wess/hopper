@@ -75,14 +75,20 @@ pub(crate) fn status(
           Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
           Err(error) => return Err(error.into()),
         };
+        let phase = if prepared {
+          super::progress::read(&manager.root.join("vz").join(&machine.id))?
+        } else {
+          None
+        };
         (
-          if prepared {
-            "Ready to start"
-          } else {
-            "Not created"
+          match phase {
+            Some(super::progress::Phase::Deployed) => "Deployment finished",
+            Some(_) => "Installation recovery required",
+            None if prepared => "Ready to start",
+            None => "Not created",
           },
           false,
-          None,
+          phase.map(|phase| phase.message()),
         )
       }
       Err(error) if busy(&error) => (

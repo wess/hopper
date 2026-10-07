@@ -27,6 +27,7 @@ pub struct Prepared {
   seed: Option<tempfile::TempDir>,
   media: Option<tempfile::TempDir>,
   unattended: bool,
+  attempt: Option<String>,
   runtime: Arc<store::lock::Lease>,
   check: Check,
   client: Client,
@@ -141,6 +142,7 @@ pub(super) fn prepare(
     seed: None,
     media: None,
     unattended: false,
+    attempt: None,
     runtime,
     check,
     client,
@@ -167,7 +169,10 @@ impl Prepared {
     let credentials =
       crate::machines::linux::provision::persisted(manager, &self.machine.id, actor)?;
     (self.check)()?;
-    let plan = crate::machines::linux::provision::prepare(&self.machine.id, &credentials)?;
+    let attempt = uuid::Uuid::new_v4().to_string();
+    let plan =
+      crate::machines::linux::provision::tracked(&self.machine.id, &credentials, &attempt)?;
+    self.attempt = Some(attempt);
     self = self.provision(&plan)?;
     self.installer = Some(directory.path().join("installer"));
     self.media = Some(directory);
@@ -222,6 +227,13 @@ impl Prepared {
       files::publish(temporary, &self.target)?;
     }
     let identity = validate(&self.target, &self.machine)?;
+    let observation = self
+      .attempt
+      .as_deref()
+      .map(|attempt| {
+        crate::machines::linux::observe::start_owned(&self.target, attempt, self.runtime.clone())
+      })
+      .transpose()?;
     let boot = vz::Linux {
       cpus: self.machine.resources.cpus as usize,
       memory: u64::from(self.machine.resources.memory_gib) << 30,
@@ -238,13 +250,19 @@ impl Prepared {
         .as_ref()
         .map(|directory| directory.path().join("seed")),
       network: Some(vz::network::Mode::Nat),
-      console: None,
+      console: observation
+        .as_ref()
+        .map(|(output, _)| output.try_clone())
+        .transpose()?,
     };
     let mut vm = vz::create(main, &boot)?;
     if self.unattended {
       vz::restrict_installer_restart(&mut vm)?;
     }
-    vz::retain(&mut vm, Arc::new((self.runtime, self.seed, self.media)))?;
+    vz::retain(
+      &mut vm,
+      Arc::new((self.runtime, self.seed, self.media, observation)),
+    )?;
     (self.check)()?;
     owner.insert(&self.machine.id, vm)?;
     Ok(Admission {

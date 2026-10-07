@@ -472,3 +472,9 @@ the configured `CODESIGN_IDENTITY` credentials.
 ## Sponsor
 
 ♥ [Sponsor this project](https://github.com/sponsors/wess)
+
+Unattended Ubuntu setup now emits attempt-scoped serial phases for installation,
+deployment completion and failure. The runtime drains console noise without saving guest
+logs, and persists a private bounded journal that status checks can read after restart.
+Deployment completion does not establish desktop readiness; the installed-system handoff
+and full Ubuntu installation remain unfinished.
