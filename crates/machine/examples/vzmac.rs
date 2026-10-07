@@ -101,10 +101,40 @@ fn main() -> anyhow::Result<()> {
     auxiliary,
     disk,
   };
-  let vm = vz::create_mac(main, &boot)?;
+  let mut vm = vz::create_mac(main, &boot)?;
   ensure!(
     vz::state(&vm) == VZVirtualMachineState::Stopped,
     "Configuration must not start macOS hardware"
+  );
+  for _ in 0..2 {
+    let installation = vz::install::start(&mut vm, &invalid)?;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+      ensure!(
+        (0.0..=1.0).contains(&vz::install::fraction(&installation)),
+        "Installer progress exceeds bounds"
+      );
+      if let Some(result) = vz::install::poll(&installation)? {
+        ensure!(
+          result.is_err(),
+          "Installer must reject malformed restore media"
+        );
+        break;
+      }
+      ensure!(
+        Instant::now() < deadline,
+        "Invalid installation did not complete"
+      );
+      run_loop.runMode_beforeDate(
+        unsafe { NSDefaultRunLoopMode },
+        &NSDate::dateWithTimeIntervalSinceNow(0.01),
+      );
+    }
+    drop(installation);
+  }
+  ensure!(
+    std::fs::read(&invalid)? == b"invalid restore image",
+    "Installer changed restore input"
   );
   drop(vm);
   let cpus = boot.cpus;
@@ -133,7 +163,7 @@ fn main() -> anyhow::Result<()> {
     std::fs::read(boot.auxiliary.join("state"))? == original,
     "Mismatched model changed auxiliary storage"
   );
-  println!("macOS restore discovery, invalid local media rejection, configuration and auxiliary binding verified; no IPSW was downloaded or installed");
+  println!("macOS restore discovery, invalid local media/installation rejection, configuration and auxiliary binding verified; no IPSW was downloaded or installed");
   Ok(())
 }
 

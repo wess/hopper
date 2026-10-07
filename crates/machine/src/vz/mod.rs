@@ -1,6 +1,7 @@
 mod auxiliary;
 mod config;
 mod console;
+pub mod install;
 mod kernel;
 pub mod mac;
 pub mod restore;
@@ -11,7 +12,7 @@ pub use config::{create_variables, identity};
 use objc2::{rc::Retained, AllocAnyThread, MainThreadMarker};
 use objc2_foundation::NSError;
 use objc2_virtualization::{VZVirtualMachine, VZVirtualMachineState};
-use std::{path::PathBuf, sync::mpsc};
+use std::{cell::Cell, path::PathBuf, rc::Rc, sync::mpsc};
 
 pub struct Linux {
   pub cpus: usize,
@@ -46,6 +47,8 @@ pub enum Boot {
 pub struct Vm {
   machine: Retained<VZVirtualMachine>,
   _main: MainThreadMarker,
+  mac: bool,
+  installing: Rc<Cell<bool>>,
 }
 
 #[derive(Clone, Copy)]
@@ -60,23 +63,26 @@ pub struct Pending(mpsc::Receiver<anyhow::Result<()>>);
 
 pub fn create(main: MainThreadMarker, boot: &Linux) -> anyhow::Result<Vm> {
   let config = config::linux(boot)?;
-  Ok(configured(main, &config))
+  Ok(configured(main, &config, false))
 }
 
 pub fn create_mac(main: MainThreadMarker, boot: &mac::Mac) -> anyhow::Result<Vm> {
   let config = mac::config(boot)?;
-  Ok(configured(main, &config))
+  Ok(configured(main, &config, true))
 }
 
 fn configured(
   main: MainThreadMarker,
   config: &objc2_virtualization::VZVirtualMachineConfiguration,
+  mac: bool,
 ) -> Vm {
   let machine =
     unsafe { VZVirtualMachine::initWithConfiguration(VZVirtualMachine::alloc(), config) };
   Vm {
     machine,
     _main: main,
+    mac,
+    installing: Rc::new(Cell::new(false)),
   }
 }
 
@@ -85,6 +91,10 @@ pub fn state(vm: &Vm) -> VZVirtualMachineState {
 }
 
 pub fn transition(vm: &Vm, action: Action) -> anyhow::Result<Pending> {
+  ensure!(
+    !vm.installing.get(),
+    "macOS installation owns the VM lifecycle"
+  );
   let (send, receive) = mpsc::sync_channel(1);
   let completion = RcBlock::new(move |error: *mut NSError| {
     let result = if error.is_null() {

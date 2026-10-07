@@ -197,7 +197,12 @@ and refuses to replace existing data. A signed live check validates configuratio
 rejects insufficient resources and model mismatches. Local restore inspection uses the
 framework to read media, checks the returned file URL, and rejects symlinks and
 invalid files without changing their contents. It downloads no IPSW and performs
-no installation or macOS first boot; manager/viewer integration remains unfinished.
+no successful installation or macOS first boot; manager/viewer integration remains
+unfinished. The native installer controller holds exclusive main-queue VM access, reports
+progress and completion, and requests cancellation on handle drop. A callback retains
+hardware through asynchronous completion, and lifecycle commands remain blocked while
+installation is active. The signed probe checks malformed-media installation failure;
+successful installation and cancellation of a valid IPSW remain unverified.
 
 On Apple silicon macOS, install LLVM, lld, and ACPICA for firmware compilation.
 `scripts/build/firmware.sh` builds pinned TianoCore source into

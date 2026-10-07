@@ -60,8 +60,11 @@ and hardware-model binding together with exclusive rename; opening it checks pri
 ownership and exact model consistency before framework configuration. Existing state is
 never replaced. Local restore inspection validates regular bounded files through the SDK
 and checks the returned URL against the requested file; invalid media is preserved.
-IPSW download, installation, first boot and viewer integration remain
-pending; the signed macOS check discovers metadata and validates configuration only.
+The installer controller borrows the VM exclusively and stays on its queue. Dropping its
+handle requests cancellation; callback ownership retains the installer and hardware until
+completion, and the VM rejects lifecycle changes while installation remains active.
+The signed probe verifies invalid-media failure. IPSW download, successful installation,
+valid-media cancellation, first boot and viewer integration remain pending.
 Neither diagnostic establishes a usable desktop. Keep the prototype records intact.
 The native `machine` crate supplies the `hoppervm` worker, bundled with its firmware
 and Hypervisor entitlement. Its bounded parent-only pipe protocol lives in
