@@ -57,6 +57,7 @@ impl Prepared {
         .map(|directory| directory.path().join("seed")),
       network: Some(self.network),
       shares: self.shares,
+      speakers: self.speakers,
       console: observation
         .as_ref()
         .map(|(output, _)| output.try_clone())

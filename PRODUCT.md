@@ -10,6 +10,9 @@ Developers and agents running containers and desktop virtual machines. Hopper re
 
 ## Product constraints
 
+VM engines and firmware must not require paid third-party licenses or subscriptions.
+Redistributed firmware retains its required license notices. Guest OS licensing is separate.
+
 The container engine and user VMs have separate lifecycles and persistent storage. Stopping a user VM must not stop containers.
 
 Each VM opens in a dedicated viewer window. Agent access is enabled by default for new VMs and can be disabled per VM. Clones inherit the source's setting. Agents should have guest commands, screen capture, input, file transfer, and snapshot recovery, without gaining access to arbitrary host files or host input.

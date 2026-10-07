@@ -1,7 +1,7 @@
 mod admit;
 
 use super::{files, identity::validate, Client};
-use crate::machines::{native::assets, Machines};
+use crate::machines::{native::assets, Actor, Machines};
 use anyhow::{ensure, Context};
 use machine::vz::{self, queue::Check};
 use model::Machine;
@@ -34,6 +34,7 @@ pub struct Prepared {
   attempt: Option<String>,
   runtime: Arc<store::lock::Lease>,
   network: vz::network::Mode,
+  speakers: bool,
   shares: Vec<vz::sharing::Directory>,
   check: Check,
   client: Client,
@@ -88,6 +89,7 @@ pub(super) fn prepare(
   };
   let runtime = Arc::new(manager.guard(&machine.id, ".runtime")?);
   let network = super::network::mode(&manager, &machine.id)?;
+  let speakers = super::audio::speakers(&manager, &machine.id, Actor::Person)?;
   let shares = super::sharing::directories(&manager, &machine.id)?;
   let parent = manager.root.join("vz");
   files::parent(&parent)?;
@@ -152,6 +154,7 @@ pub(super) fn prepare(
     attempt: None,
     runtime,
     network,
+    speakers,
     shares,
     check,
     client,

@@ -12,6 +12,7 @@ pub struct Status {
   pub stop_requested: bool,
   pub network_connected: Option<bool>,
   pub sharing_devices: usize,
+  pub audio_devices: usize,
 }
 
 impl Owner {
@@ -28,6 +29,7 @@ impl Owner {
       started: vm.started.get(),
       stop_requested: vm.stop_requested.get(),
       sharing_devices: super::super::sharing::device_count(vm),
+      audio_devices: vm.audio_devices,
       network_connected: match super::super::network::attachments(vm).as_slice() {
         [connected] => Some(*connected),
         _ => None,

@@ -50,6 +50,7 @@ fn main() -> anyhow::Result<()> {
   )?;
   let media = Arc::new(tempfile::tempdir()?);
   vz::network::set_connected(&manager, &machine.id, false)?;
+  vz::audio::set_speakers(&manager, &machine.id, false)?;
   let shared = root.path().join("shared");
   std::fs::create_dir(&shared)?;
   vz::sharing::add(
@@ -84,6 +85,14 @@ fn main() -> anyhow::Result<()> {
   let target = manager.root.join("vz").join(&machine.id);
   let original = std::fs::read(target.join("platform"))?;
   prepared.admit(main, &mut owner, media.clone())?;
+  ensure!(
+    owner.inspect(&machine.id)?.audio_devices == 0,
+    "Muted guest admitted an audio device"
+  );
+  ensure!(
+    vz::audio::set_speakers(&manager, &machine.id, true).is_err(),
+    "Owned guest allowed speaker policy replacement"
+  );
   ensure!(
     owner.inspect(&machine.id)?.network_connected == Some(false),
     "Persisted offline policy was not applied to macOS hardware"
@@ -143,6 +152,7 @@ fn main() -> anyhow::Result<()> {
   drop(display);
   owner.retire(&machine.id)?;
   vz::network::set_connected(&manager, &machine.id, true)?;
+  vz::audio::set_speakers(&manager, &machine.id, true)?;
   run_loop.runMode_beforeDate(
     unsafe { NSDefaultRunLoopMode },
     &NSDate::dateWithTimeIntervalSinceNow(0.01),
@@ -154,6 +164,10 @@ fn main() -> anyhow::Result<()> {
     "Repeated admission changed platform identity"
   );
   prepared.admit(main, &mut owner, media.clone())?;
+  ensure!(
+    owner.inspect(&machine.id)?.audio_devices == 1,
+    "Enabled speakers were not attached on readmission"
+  );
   ensure!(
     owner.inspect(&machine.id)?.network_connected == Some(true),
     "Persisted NAT policy was not applied on macOS readmission"

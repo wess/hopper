@@ -67,6 +67,7 @@ fn main() -> anyhow::Result<()> {
       seed: None,
       network: None,
       shares: Vec::new(),
+      speakers: false,
       console: Some(output),
     };
     let mut vm = machine::vz::create(main, &boot)?;

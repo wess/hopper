@@ -27,6 +27,7 @@ pub struct Prepared {
   pub(super) temporary: Option<tempfile::TempDir>,
   pub(super) runtime: Arc<store::lock::Lease>,
   pub(super) network: machine::vz::network::Mode,
+  pub(super) speakers: bool,
   pub(super) shares: Vec<machine::vz::sharing::Directory>,
   pub(super) check: Check,
   pub(super) installed: bool,
@@ -68,6 +69,7 @@ pub fn prepare(
   );
   let runtime = Arc::new(manager.guard(&machine.id, ".runtime")?);
   let network = super::super::network::mode(manager, &machine.id)?;
+  let speakers = super::super::audio::speakers(manager, &machine.id, crate::machines::Actor::Person)?;
   let shares = super::super::sharing::directories(manager, &machine.id)?;
   let parent = manager.root.join("vz");
   files::parent(&parent)?;
@@ -106,6 +108,7 @@ pub fn prepare(
     temporary,
     runtime,
     network,
+    speakers,
     shares,
     check,
     installed,

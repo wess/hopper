@@ -268,7 +268,7 @@ impl Machines {
     } else if row.machine.guest == model::GuestOs::Macos {
       "Changes apply on next start. macOS mounts shared folders automatically."
     } else {
-      "Changes apply on next start. In Linux, mount the hopper virtiofs device to access these folders."
+      "Changes apply on next start. New Ubuntu guests show these folders in Shared in your home folder."
     }).size(Size::Xs).dimmed())
   }
 }

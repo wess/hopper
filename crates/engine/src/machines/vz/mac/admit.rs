@@ -53,6 +53,7 @@ impl Prepared {
       disk: self.target.join("disk"),
       network: self.network,
       shares: self.shares,
+      speakers: self.speakers,
     };
     let mut vm = if installed {
       machine::vz::recover_mac(main, &boot)?

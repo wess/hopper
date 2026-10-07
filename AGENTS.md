@@ -35,6 +35,13 @@ virtiofs mount service at /mnt/hopper with nosuid,nodev and a ~/Shared link. The
 diagnostic exercises the production helper, no-device skip, repeated mounting and ordinary
 UID access. Installed Ubuntu service activation, existing-guest updates, Mac guest access
 and Windows sharing remain pending.
+Native Linux and macOS also persist a private bounded identity-bound speaker setting,
+defaulting on. Changes require operation/runtime exclusion and retired stopped hardware;
+preparation freezes the choice before storage allocation. Enabled hardware has one host-output
+virtio sound stream; disabled hardware has no audio device. No microphone input is configured.
+Signed Linux diagnostics verify playback-device discovery without capture and disabled-device
+absence; signed admission checks cover persisted device counts and mutation exclusion. Audible
+playback, installed desktop audio, microphone opt-in and Windows audio remain pending.
 New macOS creation persists native VZ records. Library Start discovers and downloads supported
 official restore media when no local image is selected, then inspects it, prepares hardware, opens its dedicated viewer and installs through
 the owned queue. Creation offers a local restore picker and automatic acquisition; profile

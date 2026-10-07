@@ -66,6 +66,7 @@ fn main() -> anyhow::Result<()> {
       seed: None,
       network: Some(mode),
       shares: shares.clone(),
+      speakers: false,
       console: Some(console),
     };
     if present {

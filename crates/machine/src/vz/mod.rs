@@ -1,3 +1,4 @@
+mod audio;
 mod auxiliary;
 mod config;
 mod console;
@@ -39,6 +40,7 @@ pub struct Linux {
   pub network: Option<network::Mode>,
   pub console: Option<std::fs::File>,
   pub shares: Vec<sharing::Directory>,
+  pub speakers: bool,
 }
 
 pub enum Boot {
@@ -63,6 +65,7 @@ pub struct Vm {
   machine: Retained<VZVirtualMachine>,
   _main: MainThreadMarker,
   mac: bool,
+  audio_devices: usize,
   installing: Rc<Cell<bool>>,
   mac_ready: Rc<Cell<bool>>,
   ownership: Option<std::sync::Arc<dyn Send + Sync>>,
@@ -113,6 +116,7 @@ fn configured(
     machine,
     _main: main,
     mac,
+    audio_devices: unsafe { config.audioDevices().len() },
     installing: Rc::new(Cell::new(false)),
     mac_ready: Rc::new(Cell::new(!mac)),
     ownership: None,

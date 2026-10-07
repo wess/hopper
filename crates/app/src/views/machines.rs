@@ -8,6 +8,8 @@ mod lifecycle;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod macos;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod audio;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod network;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod sharing;
@@ -27,6 +29,7 @@ use crate::theme;
 pub struct Machines {
     state: AppState,
     rows: Load<Vec<MachineStatus>>,
+    speakers: BTreeMap<String, Result<bool, String>>,
     networks: BTreeMap<String, Result<bool, String>>,
     folders: BTreeMap<String, Result<Vec<model::MachineFolder>, String>>,
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -58,6 +61,7 @@ impl Machines {
         let mut view = Self {
             state,
             rows: Load::Loading,
+            speakers: BTreeMap::new(),
             networks: BTreeMap::new(),
             folders: BTreeMap::new(),
             #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -145,13 +149,25 @@ impl Machines {
                     .collect();
                 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
                 let folders = BTreeMap::<String, Result<Vec<model::MachineFolder>, String>>::new();
-                Ok::<_, anyhow::Error>((rows, networks, folders))
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let speakers = rows.iter()
+                    .filter(|row| row.machine.runtime == Some(model::MachineRuntime::Virtualization))
+                    .map(|row| {
+                        let enabled = host.virtual_machine_speakers(&row.machine.id, MachineActor::Person)
+                            .map_err(|error| format!("{error:#}"));
+                        (row.machine.id.clone(), enabled)
+                    })
+                    .collect();
+                #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+                let speakers = BTreeMap::<String, Result<bool, String>>::new();
+                Ok::<_, anyhow::Error>((rows, networks, folders, speakers))
             },
             move |result, cx| {
                 if let Some(view) = weak.upgrade() {
                     view.update(cx, |this, cx| {
                         this.rows = match result {
-                            Ok((rows, networks, folders)) => {
+                            Ok((rows, networks, folders, speakers)) => {
+                                this.speakers = speakers;
                                 this.folders = folders;
                                 this.networks = networks;
                                 Load::Ready(rows)
@@ -557,7 +573,11 @@ impl Machines {
             .child(controls)
             .when(row_native, |view| {
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                { view.child(self.network(row, busy, cx)).child(self.sharing(row, busy, cx)) }
+                {
+                    view.child(self.network(row, busy, cx))
+                        .child(self.audio(row, busy, cx))
+                        .child(self.sharing(row, busy, cx))
+                }
                 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
                 { view }
             })

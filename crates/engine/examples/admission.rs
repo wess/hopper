@@ -44,6 +44,7 @@ fn main() -> anyhow::Result<()> {
   );
   let id = record.id.as_str();
   vz::network::set_connected(&manager, id, false)?;
+  vz::audio::set_speakers(&manager, id, false)?;
   let shared = root.path().join("shared");
   std::fs::create_dir(&shared)?;
   vz::sharing::add(
@@ -84,6 +85,14 @@ fn main() -> anyhow::Result<()> {
   let prepared = runtime.block_on(service.prepare_linux(id, Actor::Person, Stage::Installer))?;
   let prepared = prepared.provision(&plan)?;
   let admission = prepared.admit(main, &mut owner)?;
+  ensure!(
+    owner.inspect(id)?.audio_devices == 0,
+    "Muted guest admitted an audio device"
+  );
+  ensure!(
+    vz::audio::set_speakers(&manager, id, true).is_err(),
+    "Owned guest allowed speaker policy replacement"
+  );
   ensure!(
     owner.inspect(id)?.network_connected == Some(false),
     "Persisted offline policy was not applied to Linux hardware"
@@ -216,6 +225,7 @@ fn main() -> anyhow::Result<()> {
   drop(display);
   owner.retire(id)?;
   vz::network::set_connected(&manager, id, true)?;
+  vz::audio::set_speakers(&manager, id, true)?;
   vz::sharing::set_read_only(&manager, id, "work", false)?;
   lock.try_lock_exclusive()?;
   FileExt::unlock(&lock)?;
@@ -223,6 +233,10 @@ fn main() -> anyhow::Result<()> {
   let prepared = runtime.block_on(service.prepare_linux(id, Actor::Person, Stage::Installer))?;
   let prepared = prepared.provision(&plan)?;
   let admission = prepared.admit(main, &mut owner)?;
+  ensure!(
+    owner.inspect(id)?.audio_devices == 1,
+    "Enabled speakers were not attached on readmission"
+  );
   ensure!(
     owner.inspect(id)?.network_connected == Some(true),
     "Persisted NAT policy was not applied on Linux readmission"

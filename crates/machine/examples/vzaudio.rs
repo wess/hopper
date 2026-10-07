@@ -11,8 +11,8 @@ fn main() -> anyhow::Result<()> {
 
   let args: Vec<_> = std::env::args_os().skip(1).collect();
   ensure!(
-    (2..=3).contains(&args.len()),
-    "Provide diagnostic ARM64 kernel, network initramfs and optional NoCloud seed"
+    args.len() == 3,
+    "Provide diagnostic ARM64 kernel, audio initramfs and verified Alpine modloop"
   );
   let main = MainThreadMarker::new().context("VZ probe requires the main thread")?;
   let root = tempfile::tempdir()?;
@@ -25,9 +25,9 @@ fn main() -> anyhow::Result<()> {
     .set_len(1 << 30)?;
   let identity = vz::identity();
   let run_loop = NSRunLoop::currentRunLoop();
-  for (mode, option, marker) in [
-    (Mode::Nat, "online", "HOPPER_NETWORK_NAT_OK"),
-    (Mode::Disconnected, "offline", "HOPPER_NETWORK_OFFLINE_OK"),
+  for (speakers, option, marker) in [
+    (true, "enabled", "HOPPER_AUDIO_ENABLED_OK"),
+    (false, "disabled", "HOPPER_AUDIO_DISABLED_OK"),
   ] {
     let output = root.path().join(option);
     let console = std::fs::OpenOptions::new()
@@ -44,17 +44,14 @@ fn main() -> anyhow::Result<()> {
       boot: Boot::Kernel {
         kernel: args[0].clone().into(),
         initramfs: Some(args[1].clone().into()),
-        command_line: format!(
-          "console=hvc0 rdinit=/init hopper.network={option} hopper.seed={}",
-          if args.len() == 3 { 1 } else { 0 }
-        ),
+        command_line: format!("console=hvc0 rdinit=/init hopper.audio={option}"),
       },
       disk: disk.clone(),
       installer: None,
       seed: args.get(2).map(|path| path.clone().into()),
-      network: Some(mode),
+      network: Some(Mode::Disconnected),
       shares: Vec::new(),
-      speakers: false,
+      speakers,
       console: Some(console),
     };
     let vm = vz::create(main, &boot)?;
@@ -80,12 +77,12 @@ fn main() -> anyhow::Result<()> {
           "Serial output exceeds bounds"
         );
         let text = std::fs::read_to_string(&output)?;
-        if text.contains(marker) && (args.len() == 2 || text.contains("HOPPER_SEED_OK")) {
+        if text.contains(marker) {
           return Ok(());
         }
-        if text.contains("HOPPER_NETWORK_FAILED") || Instant::now() >= deadline {
+        if text.contains("HOPPER_AUDIO_FAILED") || Instant::now() >= deadline {
           anyhow::bail!(
-            "Guest network probe failed: {}",
+            "Guest audio probe failed: {}",
             text.lines().rev().take(15).collect::<Vec<_>>().join("\n")
           );
         }
@@ -98,12 +95,9 @@ fn main() -> anyhow::Result<()> {
     let stopped = wait(vz::transition(&vm, Action::Stop)?);
     result?;
     stopped?;
-    if args.len() == 3 {
-      println!("Read-only NoCloud seed files and account configuration verified in the guest");
-    }
-    println!("Guest network verified: {mode:?}");
+    println!("Guest audio device verified: {option}");
   }
-  println!("NAT DHCP, DNS and public download plus disconnected guest link verified; no OS installation was performed");
+  println!("Output-only speaker device and disabled audio verified; audible playback and installed desktops remain unverified");
   Ok(())
 }
 

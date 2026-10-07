@@ -29,6 +29,7 @@ pub(super) fn linux(boot: &Linux) -> anyhow::Result<Retained<VZVirtualMachineCon
       super::network::attach(&config, &boot.identity, mode)?;
     }
     super::sharing::attach(&config, &boot.shares, false)?;
+    super::audio::attach(&config, boot.speakers);
     let disk = storage(&boot.disk, false)?;
     let media = boot
       .installer

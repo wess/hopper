@@ -601,3 +601,26 @@ The diagnostic identity helper is a Linux ARM64 fixture, not an installed guest 
 This does not prove service activation or sharing inside an installed Ubuntu desktop or a
 macOS guest. Existing-guest tool updates, Windows sharing and end-to-end desktop sharing
 verification remain unfinished.
+
+Native Linux and macOS guests also have a persisted **Speakers** switch in the VM library.
+It defaults on, requires a stopped VM with hardware ownership released, and applies on the
+next start. Enabled hardware has one output-only virtio sound stream connected to the host;
+disabled hardware has no audio device. No microphone stream is configured. Microphone input
+and Windows audio remain unavailable. Invalid or foreign settings block preparation instead
+of silently restoring enabled speakers.
+
+The signed audio diagnostic checks a real Linux guest's playback device and absence of capture
+streams in enabled/disabled configurations, using the matching verified Alpine module image:
+
+```sh
+bsdtar -xOf /path/to/verified-alpine-virt.iso boot/modloop-virt > /path/to/modloop
+python3 scripts/check/audio.py /path/to/initramfs-virt /path/to/audio.gz
+cargo build -p machine --example vzaudio
+codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/vzaudio
+codesign --verify --strict target/debug/examples/vzaudio
+target/debug/examples/vzaudio /path/to/uncompressed/Image /path/to/audio.gz /path/to/modloop
+```
+
+This verifies device discovery, not audible playback or installed-desktop sound. Signed Linux
+and Mac admission probes also check the persisted enabled/disabled audio-device count and
+reject setting changes while hardware is owned. Full desktop audio verification remains pending.

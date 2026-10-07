@@ -104,6 +104,7 @@ fn main() -> anyhow::Result<()> {
     disk,
     network: vz::network::Mode::Nat,
     shares: vec![vz::sharing::Directory::open("work", &shared, true)?],
+    speakers: false,
   };
   for mode in [vz::network::Mode::Nat, vz::network::Mode::Disconnected] {
     boot.network = mode;

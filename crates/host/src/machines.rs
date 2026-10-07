@@ -111,6 +111,14 @@ impl Host {
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 impl Host {
+  pub fn virtual_machine_speakers(&self, id: &str, actor: MachineActor) -> anyhow::Result<bool> {
+    ::engine::machines::vz::audio::speakers(&self.machines(), id, actor)
+  }
+
+  pub fn set_virtual_machine_speakers(&self, id: &str, enabled: bool) -> anyhow::Result<()> {
+    ::engine::machines::vz::audio::set_speakers(&self.machines(), id, enabled)
+  }
+
   pub fn virtual_machine_network(&self, id: &str, actor: MachineActor) -> anyhow::Result<bool> {
     ::engine::machines::vz::network::connected(&self.machines(), id, actor)
   }

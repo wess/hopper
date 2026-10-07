@@ -47,6 +47,7 @@ fn main() -> anyhow::Result<()> {
     seed: None,
     network: None,
     shares: Vec::new(),
+    speakers: false,
     console: Some(console),
   };
   let vm = vz::create(main, &boot)?;
