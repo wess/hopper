@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
   use anyhow::{bail, ensure, Context};
   use machine::{
     arm,
-    devices::{flash as nor, pci, serial, virtio::{block, console as channel, gpu, input as vinput, pci as vpci, scsi}},
+    devices::{flash as nor, pci, serial, virtio::{block, bus as routing, console as channel, gpu, input as vinput, pci as vpci, scsi}},
     acpi, hypervisor as hv, platform, psci, smccc,
   };
   use hv::{registers as regs, secondary};
@@ -114,7 +114,6 @@ fn main() -> anyhow::Result<()> {
   let mut selected_shell = false;
   let mut input = VecDeque::new();
   let mut updates = 0usize;
-  let mut bus = pci::Bus::default();
   let disk = std::env::args().nth(4).filter(|path| path != "-").map(|path| {
     if optical_boot { vpci::optical(scsi::open(std::path::Path::new(&path))?) }
     else { vpci::create(block::open(std::path::Path::new(&path), true, [0; 20])?) }
@@ -339,16 +338,11 @@ fn main() -> anyhow::Result<()> {
               counts[direction] += 1;
             }
           }
-          let device = devices.get_mut(index).and_then(Option::as_mut).filter(|_| offset & 0x7000 == 0);
           if access.write {
             let value = if access.register == 31 { 0 } else { regs::read(&registers, access.register.into())? };
-            if let Some(device) = device {
-              vpci::config_write(device, &mut ram, (offset & 0xfff) as usize, access.bytes.into(), value as u32)?;
-            } else { bus.write(offset, access.bytes.into(), value as u32)?; }
+            routing::write(&mut devices, &mut ram, offset, access.bytes.into(), value as u32)?;
           } else {
-            let value = if let Some(device) = device {
-              vpci::config_read(device, (offset & 0xfff) as usize, access.bytes.into())?
-            } else { bus.read(offset, access.bytes.into())? };
+            let value = routing::read(&mut devices, offset, access.bytes.into())?;
             pci_reads += 1;
             if access.register != 31 { regs::write(&mut registers, access.register.into(), value as u64)?; }
           }
@@ -358,19 +352,16 @@ fn main() -> anyhow::Result<()> {
           let pc = regs::read(&registers, 31)?;
           regs::write(&mut registers, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
-        arm::Trap::DataAbort(Some(access)) if devices.iter().flatten().any(|device| device.pci.memory(physical_address).is_some()) => {
-          let (index, device) = devices.iter_mut().enumerate().find_map(|(index, device)| {
-            device.as_mut().filter(|device| device.pci.memory(physical_address).is_some()).map(|device| (index, device))
-          }).context("Unmapped Virtio device")?;
-          let (bar, offset) = device.pci.memory(physical_address).context("Unmapped Virtio BAR")?;
-          if access.write {
+        arm::Trap::DataAbort(Some(access)) if routing::mapped(&devices, physical_address)?.is_some() => {
+          let index = if access.write {
             let value = if access.register == 31 { 0 } else { regs::read(&registers, access.register.into())? };
-            vpci::memory_write(device, &mut ram, bar, offset, access.bytes.into(), value)?;
+            routing::memory_write(&mut devices, &mut ram, physical_address, access.bytes.into(), value)?
           } else {
-            let value = vpci::memory_read(device, bar, offset, access.bytes.into())?;
-            if access.register != 31 { regs::write(&mut registers, access.register.into(), value as u64)?; }
-          }
-          messages += interrupts::deliver(&gic, index, device)?;
+            let (index, value) = routing::memory_read(&mut devices, physical_address, access.bytes.into())?;
+            if access.register != 31 { regs::write(&mut registers, access.register.into(), value)?; }
+            index
+          };
+          messages += interrupts::deliver(&gic, index, devices[index].as_mut().context("Missing PCI device")?)?;
           let pc = regs::read(&registers, 31)?;
           regs::write(&mut registers, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }

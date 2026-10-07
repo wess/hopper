@@ -254,7 +254,7 @@ impl Function {
   }
 }
 
-fn access(offset: usize, width: usize) -> anyhow::Result<()> {
+pub(crate) fn access(offset: usize, width: usize) -> anyhow::Result<()> {
   ensure!(
     matches!(width, 1 | 2 | 4)
       && offset.is_multiple_of(width)

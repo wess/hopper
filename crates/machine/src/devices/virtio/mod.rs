@@ -1,4 +1,5 @@
 pub mod block;
+pub mod bus;
 pub mod console;
 pub mod gpu;
 pub mod input;
