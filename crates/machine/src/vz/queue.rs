@@ -164,6 +164,15 @@ impl Owner {
     super::display::create(vm)
   }
 
+  pub fn guest_socket(&self, id: &str, check: Check) -> anyhow::Result<super::socket::Listener> {
+    ensure!(
+      !self.pending.contains_key(id) && !self.installations.contains_key(id),
+      "VZ operation is still active"
+    );
+    let vm = self.machines.get(id).context("VZ machine is not owned")?;
+    super::socket::listen(vm, check)
+  }
+
   pub fn installer(&self, id: &str) -> anyhow::Result<bool> {
     Ok(
       self
@@ -198,6 +207,7 @@ impl Owner {
       !vm.displaying.get(),
       "Close the VM display before retiring ownership"
     );
+    ensure!(!vm.listening.get(), "Close the guest transport before retiring ownership");
     Ok(())
   }
 

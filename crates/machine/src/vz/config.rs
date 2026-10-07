@@ -30,6 +30,9 @@ pub(super) fn linux(boot: &Linux) -> anyhow::Result<Retained<VZVirtualMachineCon
     }
     super::sharing::attach(&config, &boot.shares, false)?;
     super::audio::attach(&config, boot.speakers);
+    config.setSocketDevices(&NSArray::<VZSocketDeviceConfiguration>::from_slice(&[
+      &VZVirtioSocketDeviceConfiguration::new(),
+    ]));
     let disk = storage(&boot.disk, false)?;
     let media = boot
       .installer

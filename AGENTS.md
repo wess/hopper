@@ -268,6 +268,19 @@ Started means allocated hardware, and Deployed means deployment completed; neith
 proves a usable desktop. Direct VZ integration, inside-guest transport, guest tools and
 running-memory snapshots remain pending.
 
+Native Linux configurations include one virtio socket device. The core owns an optional
+guest-initiated listener on port 6200 on the VM queue, with one retained connection, bounded
+64 KiB nonblocking I/O, close-on-exec and no SIGPIPE. Original authorization applies before
+acceptance and before/after I/O; policy failure closes the connection and clears read bytes
+if revoked during a read. Stopped or paused hardware cannot serve transport I/O. A listener
+retains runtime ownership, prevents duplicate attachment and blocks queue retirement until
+closed. A signed disconnected Linux diagnostic verifies a real UID 1001 socket exchange,
+I/O bounds, revocation/off-on rejection, ownership lifetime and retirement exclusion. This
+is a core transport foundation, not an agent endpoint. Guest service provisioning, job/file
+framing, app/MCP integration, Windows transport and macOS socket configuration remain pending.
+Automated native VZ viewer Shift/Control chords arrive without modifiers; physical modifier
+input is unverified.
+
 ## What this is
 
 Hopper is a native desktop app for running and managing containers — a Docker

@@ -10,6 +10,7 @@ pub mod network;
 pub mod queue;
 pub mod restore;
 pub mod sharing;
+pub mod socket;
 
 use anyhow::{ensure, Context};
 use block2::RcBlock;
@@ -71,6 +72,7 @@ pub struct Vm {
   ownership: Option<std::sync::Arc<dyn Send + Sync>>,
   shares: std::sync::Arc<Vec<sharing::Directory>>,
   displaying: Rc<Cell<bool>>,
+  listening: Rc<Cell<bool>>,
   installer: bool,
   started: Cell<bool>,
   stop_requested: Rc<Cell<bool>>,
@@ -122,6 +124,7 @@ fn configured(
     ownership: None,
     shares: std::sync::Arc::new(shares.to_vec()),
     displaying: Rc::new(Cell::new(false)),
+    listening: Rc::new(Cell::new(false)),
     installer: false,
     started: Cell::new(false),
     stop_requested: Rc::new(Cell::new(false)),

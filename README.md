@@ -635,3 +635,32 @@ target/debug/examples/vzaudio /path/to/uncompressed/Image /path/to/audio.gz /pat
 This verifies device discovery, not audible playback or installed-desktop sound. Signed Linux
 and Mac admission probes also check the persisted enabled/disabled audio-device count and
 reject setting changes while hardware is owned. Full desktop audio verification remains pending.
+
+
+Native Linux hardware also includes one virtio socket device for guest-tool transport.
+The core can attach one guest-initiated listener on port 6200, retaining one connection
+on the VM queue. Reads and writes are nonblocking and limited to 64 KiB per call; descriptors
+are close-on-exec and suppress SIGPIPE. The original authorization is checked on acceptance
+and before/after I/O. Revocation closes the connection; revoked read data is cleared before
+return. Paused or stopped hardware cannot serve I/O. Closing the listener removes its SDK
+registration and releases retained runtime ownership. An attached listener blocks retirement.
+
+A signed disconnected Linux diagnostic verifies actual UID 1001 guest-to-host socket data,
+bounded reads/writes, duplicate-listener rejection, pause/resume disconnection, original-policy
+off/on rejection, ownership lifetime and retirement exclusion. The ARM64 socket executable
+is a disposable diagnostic fixture, not a guest command service:
+
+```sh
+clang --target=aarch64-linux-gnu -nostdlib -static -fno-stack-protector -fno-builtin -O2 \
+  -Wall -Wextra -Werror --ld-path=/opt/homebrew/bin/ld.lld scripts/check/socket.c -o /tmp/hoppersocket
+python3 scripts/check/socket.py /path/to/initramfs-virt /path/to/socket.gz /tmp/hoppersocket
+cargo build -p machine --example vzsocket
+codesign --force --sign - --entitlements assets/machine.entitlements target/debug/examples/vzsocket
+codesign --verify --strict target/debug/examples/vzsocket
+target/debug/examples/vzsocket /path/to/uncompressed/Image /path/to/socket.gz /path/to/modloop
+```
+
+The modloop must come from the same verified Alpine image as the kernel and initramfs.
+Guest service installation, bounded normal/admin jobs, file framing, app/MCP routing and
+macOS/Windows guest transports remain unfinished. Native VZ viewer automation currently
+loses Shift and Control modifiers; physical keyboard modifier behavior is unverified.
