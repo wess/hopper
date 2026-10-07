@@ -209,3 +209,18 @@ fn independent_identities_get_distinct_storage_and_disk_serials() {
   assert_ne!(first.store, second.store);
   assert_ne!(first.disk, second.disk);
 }
+
+#[test]
+fn setup_media_scope_and_checksum_are_checked_before_deployment() {
+  let f = Fixture::new();
+  let paths = f.initialize();
+  let metadata = paths.setup.with_extension("json");
+  let original = std::fs::read(&metadata).unwrap();
+  let mut manifest: serde_json::Value = serde_json::from_slice(&original).unwrap();
+  manifest["vmId"] = "8197e0f0-0603-43e9-a817-eaf7ab0327ae".into();
+  std::fs::write(&metadata, serde_json::to_vec(&manifest).unwrap()).unwrap();
+  assert!(config::prepare(&f.manager, ID, &f.assets(), Stage::Deployment).is_err());
+  std::fs::write(&metadata, original).unwrap();
+  std::fs::write(&paths.setup, [3; 32]).unwrap();
+  assert!(config::prepare(&f.manager, ID, &f.assets(), Stage::Deployment).is_err());
+}

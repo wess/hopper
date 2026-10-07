@@ -101,7 +101,7 @@ pub fn prepare(
       #[cfg(not(unix))]
       anyhow::bail!("Native deployment requires a Unix host");
       private_directory(&paths.root.join("setup"))?;
-      private_file(&assets::regular(&paths.setup, 2 * 1024 * 1024 * 1024)?)?;
+      verify_setup(&paths.setup, id)?;
       let installer = machine
         .installer
         .as_deref()
@@ -195,4 +195,57 @@ fn text(path: &Path) -> anyhow::Result<String> {
       .context("Native path is not UTF-8")?
       .to_owned(),
   )
+}
+
+fn verify_setup(path: &Path, id: &str) -> anyhow::Result<()> {
+  #[derive(serde::Deserialize)]
+  #[serde(rename_all = "camelCase")]
+  struct Manifest {
+    vm_id: String,
+    size: u64,
+    sha256: String,
+    contains_guest_credentials: bool,
+    detach_before_first_boot: bool,
+  }
+  let metadata = assets::regular(&path.with_extension("json"), 1024 * 1024)?;
+  private_file(&metadata)?;
+  let manifest: Manifest = serde_json::from_reader(metadata.take(1024 * 1024 + 1))?;
+  ensure!(
+    manifest.vm_id == id
+      && manifest.contains_guest_credentials
+      && manifest.detach_before_first_boot,
+    "Setup media does not belong to this VM or has invalid first-boot policy"
+  );
+  ensure!(
+    (1..=2 * 1024 * 1024 * 1024).contains(&manifest.size),
+    "Invalid setup image size"
+  );
+  ensure!(
+    manifest.sha256.len() == 64 && manifest.sha256.bytes().all(|byte| byte.is_ascii_hexdigit()),
+    "Invalid setup image checksum"
+  );
+  let file = assets::regular(path, manifest.size)?;
+  private_file(&file)?;
+  ensure!(
+    file.metadata()?.len() == manifest.size,
+    "Setup image size mismatch"
+  );
+  let mut file = file.take(manifest.size + 1);
+  let mut hash = Sha256::new();
+  let mut total = 0u64;
+  let mut buffer = [0; 64 * 1024];
+  loop {
+    let read = file.read(&mut buffer)?;
+    if read == 0 {
+      break;
+    }
+    total += read as u64;
+    hash.update(&buffer[..read]);
+  }
+  ensure!(
+    total == manifest.size
+      && format!("{:x}", hash.finalize()).eq_ignore_ascii_case(&manifest.sha256),
+    "Setup image checksum mismatch"
+  );
+  Ok(())
 }

@@ -81,6 +81,17 @@ impl Fixture {
       .unwrap();
     file.set_len(64 * 1024 * 1024 * 1024).unwrap();
     std::fs::write(&paths.setup, [1; 32]).unwrap();
+    let metadata = paths.setup.with_extension("json");
+    std::fs::write(
+      &metadata,
+      serde_json::to_vec(&serde_json::json!({
+        "vmId": ID, "size": 32, "sha256": format!("{:x}", Sha256::digest([1; 32])),
+        "containsGuestCredentials": true, "detachBeforeFirstBoot": true,
+      }))
+      .unwrap(),
+    )
+    .unwrap();
+    std::fs::set_permissions(&metadata, std::fs::Permissions::from_mode(0o600)).unwrap();
     std::fs::set_permissions(&paths.setup, std::fs::Permissions::from_mode(0o600)).unwrap();
     paths
   }
