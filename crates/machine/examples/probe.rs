@@ -3,7 +3,19 @@ fn main() -> anyhow::Result<()> {
   use machine::{arm, hypervisor as hv};
 
   let vm = hv::create()?;
-  let gic = hv::gic::create(&vm, 0x08000000, 0x0a000000)?;
+  for (address, first, count) in [
+    (0x30000001, 64, 32),
+    (0x30000000, 64, 0),
+    (0x08000000, 64, 32),
+    (0x0a000000, 64, 32),
+    (0x30000000, 64, u32::MAX),
+  ] {
+    anyhow::ensure!(
+      hv::gic::create_msi(&vm, 0x08000000, 0x0a000000, address, first, count).is_err(),
+      "Invalid MSI configuration was accepted"
+    );
+  }
+  let gic = hv::gic::create_msi(&vm, 0x08000000, 0x0a000000, 0x30000000, 64, 32)?;
   let mut memory = hv::memory(&vm, 0x40000000, 0x4000)?;
   // mov x1, #0x1000; mov x0, #42; str x0, [x1]; ldr x2, [x1]; hvc #0.
   // the unmapped address exercises the same traps used by virtual devices.
@@ -64,6 +76,27 @@ fn main() -> anyhow::Result<()> {
   );
   hv::gic::signal(&gic, 33, false)?;
   println!("Native interrupt controller and peripheral signal passed");
+  let kind = hv::gic::read_msi(&gic)?;
+  anyhow::ensure!(
+    (kind >> 16) & 0x3ff == 64 && kind & 0x3ff == 32,
+    "Native MSI frame reports a different interrupt range"
+  );
+  anyhow::ensure!(
+    hv::gic::signal(&gic, 64, true).is_err(),
+    "MSI interrupt accepted through the wired signal path"
+  );
+  anyhow::ensure!(
+    hv::gic::message(&gic, 0x30000044, 64).is_err()
+      && hv::gic::message(&gic, 0x30000040, 96).is_err(),
+    "Invalid MSI message target was accepted"
+  );
+  hv::gic::message(&gic, 0x30000040, 64)?;
+  hv::gic::message(&gic, 0x30000040, 95)?;
+  anyhow::ensure!(
+    hv::gic::read(&gic, 0x208)? & 0x80000001 == 0x80000001,
+    "Message interrupts did not become pending"
+  );
+  println!("Native MSI frame, bounded targets and message delivery passed");
   hv::write(&mut memory, 0, &0x14000000u32.to_le_bytes())?;
   hv::enter(&mut cpu, 0x40000000)?;
   let mut canceled = false;

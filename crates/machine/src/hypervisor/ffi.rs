@@ -41,12 +41,18 @@ extern "C" {
   pub fn hv_gic_config_create() -> *mut c_void;
   pub fn hv_gic_config_set_distributor_base(config: *mut c_void, address: u64) -> i32;
   pub fn hv_gic_config_set_redistributor_base(config: *mut c_void, address: u64) -> i32;
+  pub fn hv_gic_config_set_msi_region_base(config: *mut c_void, address: u64) -> i32;
+  pub fn hv_gic_config_set_msi_interrupt_range(config: *mut c_void, base: u32, count: u32) -> i32;
   pub fn hv_gic_create(config: *mut c_void) -> i32;
   pub fn hv_gic_get_distributor_size(size: *mut usize) -> i32;
   pub fn hv_gic_get_distributor_base_alignment(alignment: *mut usize) -> i32;
   pub fn hv_gic_get_redistributor_region_size(size: *mut usize) -> i32;
   pub fn hv_gic_get_redistributor_base_alignment(alignment: *mut usize) -> i32;
   pub fn hv_gic_get_spi_interrupt_range(base: *mut u32, count: *mut u32) -> i32;
+  pub fn hv_gic_get_msi_region_size(size: *mut usize) -> i32;
+  pub fn hv_gic_get_msi_region_base_alignment(alignment: *mut usize) -> i32;
+  pub fn hv_gic_get_msi_reg(register: u16, value: *mut u64) -> i32;
+  pub fn hv_gic_send_msi(address: u64, interrupt: u32) -> i32;
   pub fn hv_gic_get_distributor_reg(register: u16, value: *mut u64) -> i32;
   pub fn hv_gic_set_spi(interrupt: u32, level: bool) -> i32;
 }

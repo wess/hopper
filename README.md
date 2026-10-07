@@ -255,6 +255,15 @@ A live run with the Virtio Windows 0.1.302 ARM64 package reported successful
 `drvload` results for both drivers (exit code 0), but DiskPart found no disks or
 volumes. Package acceptance does not establish working device enumeration, disk
 access or input; those remain under development.
+The firmware probe now reports PCI accesses after its exit callback, each device's
+command/BAR state and Virtio status. In a repeated WinPE run, both input controllers
+reached driver-ready status (`0x0f`), while storage reported failure (`0x8b`).
+The Hypervisor wrapper now supports a separate native MSI frame with a checked
+interrupt range. The native CPU probe verifies frame identification, rejected
+overlapping/misaligned regions, invalid message targets and pending message
+interrupts alongside wired interrupts. PCI MSI-X tables and guest discovery of
+that frame are still required before Windows storage can use it. Frame export
+also preserves valid black displays rather than discarding their diagnostic evidence.
 
 ```sh
 python3 scripts/build/windowsprobe.py /path/to/installer.iso /path/to/virtio-win/drivers/by-driver /tmp/hopperdrivers

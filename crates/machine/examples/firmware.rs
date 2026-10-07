@@ -95,6 +95,9 @@ fn main() -> anyhow::Result<()> {
   let mut read_storage = false;
   let mut checked_storage = false;
   let mut pci_reads = 0usize;
+  let mut handed_off = false;
+  let mut guest_pci = [[0usize; 2]; 4];
+  let mut guest_bus = [0usize; 2];
   let mut listed_acpi = false;
   let mut seen_acpi = [false; 5];
   let mut checked_acpi = [false; 2];
@@ -142,6 +145,9 @@ fn main() -> anyhow::Result<()> {
               std::io::stdout().flush()?;
               if output.len() == 64 { output.remove(0); }
               output.push(byte);
+              if boot_media && output.ends_with(b"VirtioInputExitBoot:") {
+                handed_off = true;
+              }
               if boot_media && output.ends_with(b"cdboot.efi") {
                 media_key = Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
               }
@@ -216,6 +222,13 @@ fn main() -> anyhow::Result<()> {
         arm::Trap::DataAbort(Some(access)) if (platform::ECAM..platform::ECAM + pci::ECAM_SIZE).contains(&physical_address) => {
           let offset = physical_address - platform::ECAM;
           let index = (offset >> 15) as usize;
+          if handed_off {
+            let direction = usize::from(access.write);
+            guest_bus[direction] += 1;
+            if let Some(counts) = guest_pci.get_mut(index) {
+              counts[direction] += 1;
+            }
+          }
           let device = devices.get_mut(index).and_then(Option::as_mut).filter(|_| offset & 0x7000 == 0);
           if access.write {
             let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
@@ -317,6 +330,16 @@ fn main() -> anyhow::Result<()> {
     fault::report(&cpu)?;
   }
   if boot_media {
+    eprintln!("Firmware exit callback observed: {handed_off}");
+    eprintln!("Post-handoff PCI configuration: {} reads, {} writes",
+      guest_bus[0], guest_bus[1]);
+    for (index, device) in devices.iter_mut().enumerate() {
+      if let Some(device) = device {
+        eprintln!("PCI device {index}: {} reads, {} writes, command 0x{:04x}, BAR0 0x{:08x}, Virtio status 0x{:02x}",
+          guest_pci[index][0], guest_pci[index][1], device.pci.read(4, 2)?,
+          device.pci.read(0x10, 4)?, vpci::read(device, 20, 1)?);
+      }
+    }
     for device in devices[2..].iter().flatten() {
       eprintln!("Installer completed {} input events; fault: {:?}", vpci::completed(device), vpci::fault(device));
     }

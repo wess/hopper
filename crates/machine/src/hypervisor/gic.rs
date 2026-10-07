@@ -12,7 +12,15 @@ pub struct Gic<'a> {
   pub redistributor_size: usize,
   pub spi_base: u32,
   pub spi_count: u32,
+  pub msi: Option<Msi>,
   _vm: &'a Vm,
+}
+
+pub struct Msi {
+  pub address: u64,
+  pub size: usize,
+  pub first: u32,
+  pub count: u32,
 }
 
 struct Config(NonNull<c_void>);
@@ -24,6 +32,31 @@ impl Drop for Config {
 }
 
 pub fn create(vm: &Vm, distributor: u64, redistributor: u64) -> anyhow::Result<Gic<'_>> {
+  configured(vm, distributor, redistributor, None)
+}
+
+pub fn create_msi(
+  vm: &Vm,
+  distributor: u64,
+  redistributor: u64,
+  address: u64,
+  first: u32,
+  count: u32,
+) -> anyhow::Result<Gic<'_>> {
+  configured(
+    vm,
+    distributor,
+    redistributor,
+    Some((address, first, count)),
+  )
+}
+
+fn configured(
+  vm: &Vm,
+  distributor: u64,
+  redistributor: u64,
+  requested: Option<(u64, u32, u32)>,
+) -> anyhow::Result<Gic<'_>> {
   let mut distributor_size = 0;
   let mut distributor_alignment = 0;
   let mut redistributor_size = 0;
@@ -73,6 +106,58 @@ pub fn create(vm: &Vm, distributor: u64, redistributor: u64) -> anyhow::Result<G
   let config = Config(
     NonNull::new(unsafe { ffi::hv_gic_config_create() }).context("Create GIC configuration")?,
   );
+  let msi = requested
+    .map(|(address, first, count)| -> anyhow::Result<Msi> {
+      let mut size = 0;
+      let mut alignment = 0;
+      unsafe {
+        check(
+          ffi::hv_gic_get_msi_region_size(&mut size),
+          "Read MSI region size",
+        )?;
+        check(
+          ffi::hv_gic_get_msi_region_base_alignment(&mut alignment),
+          "Read MSI alignment",
+        )?;
+      }
+      ensure!(
+        alignment > 0 && address.is_multiple_of(alignment as u64),
+        "MSI region address is not aligned"
+      );
+      ensure!(
+        count > 0
+          && first >= spi_base
+          && (first - spi_base)
+            .checked_add(count)
+            .is_some_and(|end| end <= spi_count),
+        "MSI interrupts are outside the GIC range"
+      );
+      let end = address
+        .checked_add(size as u64)
+        .context("MSI region range overflow")?;
+      ensure!(
+        (end <= distributor || address >= distributor_end)
+          && (end <= redistributor || address >= redistributor_end),
+        "GIC MSI region overlaps"
+      );
+      unsafe {
+        check(
+          ffi::hv_gic_config_set_msi_region_base(config.0.as_ptr(), address),
+          "Set MSI address",
+        )?;
+        check(
+          ffi::hv_gic_config_set_msi_interrupt_range(config.0.as_ptr(), first, count),
+          "Set MSI interrupt range",
+        )?;
+      }
+      Ok(Msi {
+        address,
+        size,
+        first,
+        count,
+      })
+    })
+    .transpose()?;
   unsafe {
     check(
       ffi::hv_gic_config_set_distributor_base(config.0.as_ptr(), distributor),
@@ -95,6 +180,7 @@ pub fn create(vm: &Vm, distributor: u64, redistributor: u64) -> anyhow::Result<G
     redistributor_size,
     spi_base,
     spi_count,
+    msi,
     _vm: vm,
   })
 }
@@ -104,10 +190,41 @@ pub fn signal(gic: &Gic<'_>, interrupt: u32, level: bool) -> anyhow::Result<()> 
     interrupt >= gic.spi_base && interrupt - gic.spi_base < gic.spi_count,
     "Peripheral interrupt is outside the GIC range"
   );
+  ensure!(
+    !gic
+      .msi
+      .as_ref()
+      .is_some_and(|msi| interrupt >= msi.first && interrupt - msi.first < msi.count),
+    "Message interrupt cannot use the peripheral signal path"
+  );
   check(
     unsafe { ffi::hv_gic_set_spi(interrupt, level) },
     "Signal peripheral interrupt",
   )
+}
+
+pub fn message(gic: &Gic<'_>, address: u64, interrupt: u32) -> anyhow::Result<()> {
+  let msi = gic.msi.as_ref().context("GIC has no MSI region")?;
+  ensure!(
+    msi.address.checked_add(0x40) == Some(address)
+      && interrupt >= msi.first
+      && interrupt - msi.first < msi.count,
+    "Message interrupt target is outside the MSI region"
+  );
+  check(
+    unsafe { ffi::hv_gic_send_msi(address, interrupt) },
+    "Send message interrupt",
+  )
+}
+
+pub fn read_msi(gic: &Gic<'_>) -> anyhow::Result<u64> {
+  ensure!(gic.msi.is_some(), "GIC has no MSI region");
+  let mut value = 0;
+  check(
+    unsafe { ffi::hv_gic_get_msi_reg(8, &mut value) },
+    "Read MSI region type",
+  )?;
+  Ok(value)
 }
 
 pub fn read(_gic: &Gic<'_>, offset: u16) -> anyhow::Result<u64> {
