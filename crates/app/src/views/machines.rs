@@ -3,6 +3,8 @@ mod native;
 mod start;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod preparation;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod lifecycle;
 use gpui::prelude::*;
 use gpui::{div, px, Context, Entity, PathPromptOptions, SharedString, Window};
 use guise::prelude::*;
@@ -345,6 +347,25 @@ impl Machines {
                         this.show_snapshots(history_id.clone(), cx)
                     })),
             );
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        if running && (virtual_owned
+            || windows && machine.runtime == Some(model::MachineRuntime::Hypervisor))
+        {
+            let pause_id = id.clone();
+            let resume = row.state == "Paused";
+            controls = controls.child(
+                Button::new(
+                    SharedString::from(format!("pause-{id}")),
+                    if resume { "Resume" } else { "Pause" },
+                )
+                    .size(Size::Sm)
+                    .variant(Variant::Subtle)
+                    .disabled(busy)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.pause_virtual(pause_id.clone(), windows, resume, cx);
+                    })),
+            );
+        }
         if running {
             controls = controls.child(
                 Button::new(SharedString::from(format!("view-{id}")), "View")

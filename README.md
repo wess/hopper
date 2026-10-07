@@ -495,6 +495,10 @@ across a failed handoff or app restart. Pressing Start on a completed, stopped i
 retires its hardware and reuses the dedicated window for the replacement VM. The installed
 system omits installation and seed media, while retaining its disk, platform identity and
 EFI variables. Successful installer shutdown now triggers the same handoff automatically.
+The library exposes Pause and Resume for owned native Linux and Windows machines, including
+a running Ubuntu installer. Controls wait for acknowledged lifecycle completion, recheck
+authorization and refresh status; paused installation time stays outside the watch timeout.
+Native window rendering and desktop application continuity remain unverified.
 Explicit Stop requests and agent-access revocation suppress it, and runtime generations
 prevent stale callbacks from replacing newer hardware. Paused installation time does not
 consume the automatic watch timeout. Incomplete installations remain on the recovery path.
