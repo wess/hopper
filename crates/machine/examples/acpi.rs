@@ -18,6 +18,13 @@ fn main() -> anyhow::Result<()> {
     cpus,
     distributor_size: 0x10000,
     redistributor_size: 0x2000000,
+    msi: std::env::args()
+      .any(|argument| argument == "--msi")
+      .then_some(machine::platform::Msi {
+        size: 0x1000,
+        first: 64,
+        count: 32,
+      }),
   })?;
   std::fs::create_dir_all(&out)?;
   std::fs::write(out.join("handoff.bin"), &blob)?;

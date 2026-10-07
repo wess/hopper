@@ -7,6 +7,9 @@ mod frame;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 #[path = "support/fault.rs"]
 mod fault;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[path = "support/interrupt.rs"]
+mod interrupts;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 fn main() -> anyhow::Result<()> {
@@ -24,18 +27,24 @@ fn main() -> anyhow::Result<()> {
     .context("Provide an ARM64 EDK2 firmware image")?;
   let arguments: Vec<_> = std::env::args().collect();
   let boot_media = arguments.iter().any(|argument| argument == "--boot-media");
+  let guest_input = arguments.iter().any(|argument| argument == "--check-guest-input");
+  ensure!(!guest_input || boot_media, "Guest input check requires boot-only driver media");
   let firmware = std::fs::read(path)?;
   ensure!(
     !firmware.is_empty() && firmware.len() <= 0x4000000,
     "Firmware exceeds its flash bank"
   );
   let vm = hv::create()?;
-  let gic = hv::gic::create(&vm, platform::DISTRIBUTOR, platform::REDISTRIBUTOR)?;
+  let gic = hv::gic::create_msi(&vm, platform::DISTRIBUTOR, platform::REDISTRIBUTOR,
+    platform::MSI, 64, 32)?;
   let topology = platform::Topology {
     memory: if boot_media { 0x100000000 } else { 0x10000000 },
     cpus: 1,
     distributor_size: gic.distributor_size as u64,
     redistributor_size: gic.redistributor_size as u64,
+    msi: gic.msi.as_ref().map(|msi| platform::Msi {
+      size: msi.size as u64, first: msi.first, count: msi.count,
+    }),
   };
   let tree = platform::tree(&topology)?;
   if let Some(path) = std::env::args().nth(2) {
@@ -108,18 +117,28 @@ fn main() -> anyhow::Result<()> {
     seconds
   } else if check_input || boot_media { 60 } else { 30 };
   let mut pulses = 0;
+  let mut messages = 0usize;
+  let mut guest_sent = false;
   let boot = hv::paced(&mut cpu, std::time::Duration::from_secs(deadline), std::time::Duration::from_millis(20), |cpu| {
     for _ in 0..2000000 {
+      if guest_input && !guest_sent && handed_off && start.elapsed().as_secs() >= 35 {
+        ensure!(vpci::read(devices[2].as_mut().context("Missing keyboard")?, 20, 1)? == 15,
+          "Guest keyboard driver is not ready");
+        text_input.extend(b"echo hopper windows input verified\r");
+        read_input = true;
+        guest_sent = true;
+        eprintln!("Queued the Windows keyboard check command");
+      }
       if media_key.is_some_and(|time| time <= std::time::Instant::now()) {
         vpci::send_input(devices[2].as_mut().context("Missing keyboard")?, &mut ram, &keyboard::text(b"\r")?)?;
-        hv::gic::signal(&gic, pci::interrupt(2, 1)?, vpci::interrupt(devices[2].as_ref().context("Missing keyboard")?))?;
+        messages += interrupts::deliver(&gic, 2, devices[2].as_mut().context("Missing keyboard")?)?;
         media_key = None;
         eprintln!("Firmware queued the installer Enter key");
       }
       if read_input && !text_input.is_empty() && next_input <= std::time::Instant::now() {
         let byte = text_input.pop_front().context("Missing diagnostic key")?;
         vpci::send_input(devices[2].as_mut().context("Missing keyboard")?, &mut ram, &keyboard::text(&[byte])?)?;
-        hv::gic::signal(&gic, pci::interrupt(2, 1)?, vpci::interrupt(devices[2].as_ref().context("Missing keyboard")?))?;
+        messages += interrupts::deliver(&gic, 2, devices[2].as_mut().context("Missing keyboard")?)?;
         next_input = std::time::Instant::now() + std::time::Duration::from_millis(150);
       }
       ensure!(
@@ -172,8 +191,8 @@ fn main() -> anyhow::Result<()> {
                     let events = [vinput::Event { kind: 3, code: 0, value: 32768 },
                       vinput::Event { kind: 3, code: 1, value: 32768 }, vinput::SYN];
                     vpci::send_input(devices[3].as_mut().context("Missing pointer")?, &mut ram, &events)?;
-                    for (index, device) in devices.iter().enumerate().skip(2) {
-                      if let Some(device) = device { hv::gic::signal(&gic, pci::interrupt(index as u8, 1)?, vpci::interrupt(device))?; }
+                    for (index, device) in devices.iter_mut().enumerate().skip(2) {
+                      if let Some(device) = device { messages += interrupts::deliver(&gic, index, device)?; }
                     }
                     read_input = true;
                   } else if let Some(disk) = &devices[0] {
@@ -242,8 +261,8 @@ fn main() -> anyhow::Result<()> {
             pci_reads += 1;
             if access.register != 31 { hv::set(cpu, access.register.into(), value as u64)?; }
           }
-          for (index, device) in devices.iter().enumerate() {
-            if let Some(device) = device { hv::gic::signal(&gic, pci::interrupt(index as u8, 1)?, vpci::interrupt(device))?; }
+          for (index, device) in devices.iter_mut().enumerate() {
+            if let Some(device) = device { messages += interrupts::deliver(&gic, index, device)?; }
           }
           let pc = hv::get(cpu, 31)?;
           hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
@@ -252,15 +271,15 @@ fn main() -> anyhow::Result<()> {
           let (index, device) = devices.iter_mut().enumerate().find_map(|(index, device)| {
             device.as_mut().filter(|device| device.pci.memory(physical_address).is_some()).map(|device| (index, device))
           }).context("Unmapped Virtio device")?;
-          let (_, offset) = device.pci.memory(physical_address).context("Unmapped Virtio BAR")?;
+          let (bar, offset) = device.pci.memory(physical_address).context("Unmapped Virtio BAR")?;
           if access.write {
             let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
-            vpci::write(device, &mut ram, offset, access.bytes.into(), value as u32)?;
+            vpci::memory_write(device, &mut ram, bar, offset, access.bytes.into(), value)?;
           } else {
-            let value = vpci::read(device, offset, access.bytes.into())?;
+            let value = vpci::memory_read(device, bar, offset, access.bytes.into())?;
             if access.register != 31 { hv::set(cpu, access.register.into(), value as u64)?; }
           }
-          hv::gic::signal(&gic, pci::interrupt(index as u8, 1)?, vpci::interrupt(device))?;
+          messages += interrupts::deliver(&gic, index, device)?;
           let pc = hv::get(cpu, 31)?;
           hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
@@ -326,6 +345,7 @@ fn main() -> anyhow::Result<()> {
       .unwrap_or_else(|| "Boot native firmware".into())
   });
   eprintln!("Firmware serviced {pulses} host polling exits");
+  eprintln!("Delivered {messages} native MSI messages");
   if boot_media && boot.is_err() {
     fault::report(&cpu)?;
   }

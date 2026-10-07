@@ -30,7 +30,7 @@ fn current(mut resources: Vec<u8>) -> Vec<u8> {
   bytes
 }
 
-pub(super) fn namespace() -> Vec<u8> {
+pub(super) fn namespace(msi: Option<&platform::Msi>) -> Vec<u8> {
   let mut root = b"PCI0\x08_HID\x0dPNP0A08\0\x08_CID\x0dPNP0A03\0".to_vec();
   root.extend(b"\x08_UID\0\x08_SEG\0\x08_BBN\0\x08_CCA\x01\x08_STA\x0a\x0f");
   let mut resources = resource(2, 0, 2, 0, 1);
@@ -64,6 +64,11 @@ pub(super) fn namespace() -> Vec<u8> {
   let mut ecam = vec![0x86, 9, 0, 1];
   ecam.extend((platform::ECAM as u32).to_le_bytes());
   ecam.extend((ECAM_SIZE as u32).to_le_bytes());
+  if let Some(msi) = msi {
+    ecam.extend([0x86, 9, 0, 1]);
+    ecam.extend((platform::MSI as u32).to_le_bytes());
+    ecam.extend((msi.size as u32).to_le_bytes());
+  }
   reserved.extend(current(ecam));
   bytes.extend(package(&[0x5b, 0x82], &reserved));
   bytes

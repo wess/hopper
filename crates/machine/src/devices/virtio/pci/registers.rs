@@ -1,4 +1,4 @@
-use super::{backend, common, features, queue, queue_state, Device, VERSION};
+use super::{backend, common, features, msix, queue, queue_state, Device, VERSION};
 use crate::dma::Memory;
 use anyhow::ensure;
 
@@ -53,6 +53,18 @@ pub(super) fn write(
     (0 | 8, 4) | (22, 2) => {
       device.common[offset..offset + width].copy_from_slice(&value.to_le_bytes()[..width])
     }
+    (16 | 26, 2) => {
+      let vector = if (value as usize) < msix::count(&device.msix) {
+        value as u16
+      } else {
+        u16::MAX
+      };
+      if offset == 16 {
+        device.common[16..18].copy_from_slice(&vector.to_le_bytes());
+      } else if let Some(state) = device.queues.get_mut(word(&device.common, 22) as usize) {
+        state.registers[2..4].copy_from_slice(&vector.to_le_bytes());
+      }
+    }
     (12, 4) if device.common[20] & 8 == 0 => {
       let select = dword(&device.common, 8);
       if select < 2 {
@@ -73,6 +85,7 @@ pub(super) fn write(
           *state = queue_state(index as u16);
         }
         device.isr = 0;
+        msix::clear(&mut device.msix);
         device.pci.interrupt_status(false);
         device.fault = None;
       } else {

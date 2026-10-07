@@ -227,7 +227,7 @@ The firmware profile connects its Virtio keyboard to the UEFI console. Add
 `--check-input` to type a check command through that keyboard and deliver pointer
 events. This check allows 60 seconds and paces keys because the upstream firmware
 driver retains one key per poll. Pointer interaction with a guest application and
-Windows input drivers remain unverified.
+Windows guest input is checked separately by the WinPE diagnostic below.
 
 `--boot-media` is a separate installer diagnostic: it maps 4 GiB of guest RAM,
 attaches keyboard/pointer controllers, and sends Enter after Microsoft's ARM64
@@ -252,18 +252,24 @@ change the source installer. Windows remains responsible for accepting driver ca
 the diagnostic does not disable signature checks. It requires `bsdtar`, `wimlib-imagex`
 and a UDF-capable `mkisofs` to preserve the installer's filesystem format.
 A live run with the Virtio Windows 0.1.302 ARM64 package reported successful
-`drvload` results for both drivers (exit code 0), but DiskPart found no disks or
-volumes. Package acceptance does not establish working device enumeration, disk
-access or input; those remain under development.
-The firmware probe now reports PCI accesses after its exit callback, each device's
-command/BAR state and Virtio status. In a repeated WinPE run, both input controllers
-reached driver-ready status (`0x0f`), while storage reported failure (`0x8b`).
-The Hypervisor wrapper now supports a separate native MSI frame with a checked
-interrupt range. The native CPU probe verifies frame identification, rejected
-overlapping/misaligned regions, invalid message targets and pending message
-interrupts alongside wired interrupts. PCI MSI-X tables and guest discovery of
-that frame are still required before Windows storage can use it. Frame export
-also preserves valid black displays rather than discarding their diagnostic evidence.
+`drvload` results for both drivers (exit code 0). PCI MSI-X tables now connect
+queue vectors to the native MSI frame advertised through ACPI and FDT. Storage
+and both input controllers reach driver-ready status (`0x0f`), and DiskPart sees
+the 604 MB diagnostic image as an online disk. It exposes no volumes: installation
+media mounting, a writable installation target and a complete Windows installation
+remain unfinished.
+A separate run with `--check-guest-input` on this boot-only diagnostic media typed
+`echo hopper windows input verified` through the Windows keyboard driver. The
+exported frame showed the command and its output at the WinPE prompt; 144 input
+events completed and 38 native MSI messages were delivered without device faults.
+Use this flag only with the driver diagnostic image, which opens a command prompt.
+The firmware probe reports PCI accesses after its exit callback, each device's
+command/BAR state, Virtio status and delivered native MSI messages. The Hypervisor
+probe verifies frame identification, rejected overlapping/misaligned regions,
+invalid message targets and pending interrupts alongside wired interrupts.
+Tests cover vector selection, masks, pending replay, read-only capability fields,
+bus-master gating and reset. Frame export preserves valid black displays rather
+than discarding their diagnostic evidence.
 
 ```sh
 python3 scripts/build/windowsprobe.py /path/to/installer.iso /path/to/virtio-win/drivers/by-driver /tmp/hopperdrivers

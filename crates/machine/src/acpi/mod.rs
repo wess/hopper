@@ -44,9 +44,14 @@ fn append(blob: &mut Vec<u8>, bytes: &[u8]) -> u64 {
 pub fn bundle(topology: &Topology) -> anyhow::Result<Vec<u8>> {
   platform::validate(topology)?;
   let mut blob = vec![0; 36];
-  let dsdt = append(&mut blob, &table(b"DSDT", 2, &aml::namespace(topology.cpus)));
+  let dsdt = append(&mut blob, &table(b"DSDT", 2, &aml::namespace(topology)));
   let mut pointers = Vec::new();
-  for bytes in [arm::fadt(dsdt), arm::madt(topology), arm::timers(), pci::mcfg()] {
+  for bytes in [
+    arm::fadt(dsdt),
+    arm::madt(topology),
+    arm::timers(),
+    pci::mcfg(),
+  ] {
     pointers.extend(append(&mut blob, &bytes).to_le_bytes());
   }
   let xsdt = append(&mut blob, &table(b"XSDT", 1, &pointers));

@@ -43,6 +43,16 @@ pub(super) fn madt(topology: &Topology) -> Vec<u8> {
     &(topology.redistributor_size as u32).to_le_bytes(),
   );
   body.extend(redistributor);
+  if let Some(msi) = topology.msi {
+    let mut frame = [0; 24];
+    frame[0] = 13;
+    frame[1] = 24;
+    put(&mut frame, 8, &platform::MSI.to_le_bytes());
+    put(&mut frame, 16, &1u32.to_le_bytes());
+    put(&mut frame, 20, &(msi.count as u16).to_le_bytes());
+    put(&mut frame, 22, &(msi.first as u16).to_le_bytes());
+    body.extend(frame);
+  }
   table(b"APIC", 5, &body)
 }
 

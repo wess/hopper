@@ -1,10 +1,12 @@
 mod backend;
 mod config;
+mod memory;
+pub mod msix;
 mod registers;
+pub use memory::{memory_read, memory_write, read, write};
 
 use super::{block, gpu, input, queue};
 use crate::{devices::pci::Function, dma::Memory};
-use anyhow::ensure;
 use backend::Backend;
 
 pub const NOTIFY: u64 = 0x1000;
@@ -27,6 +29,7 @@ pub struct Device {
   window_offset: usize,
   completed: u64,
   fault: Option<String>,
+  msix: msix::State,
 }
 
 struct QueueState {
@@ -107,6 +110,7 @@ fn build(backend: Backend) -> anyhow::Result<Device> {
   };
   let mut pci = Function::new(0x1af4, id, class, 1)?;
   pci.add_bar(0, 0x4000, true)?;
+  pci.add_bar(2, msix::SIZE, false)?;
   pci.interrupt_pin(1)?;
   let mut window_offset = 0;
   for (kind, offset, length) in [
@@ -131,6 +135,7 @@ fn build(backend: Backend) -> anyhow::Result<Device> {
       window_offset = position;
     }
   }
+  pci.add_msix(count + 1, 2, 0, msix::PENDING as u32)?;
   Ok(Device {
     pci,
     backend,
@@ -143,6 +148,7 @@ fn build(backend: Backend) -> anyhow::Result<Device> {
     window_offset,
     completed: 0,
     fault: None,
+    msix: msix::create(count as usize + 1)?,
   })
 }
 
@@ -151,7 +157,27 @@ pub fn features(device: &Device) -> u64 {
 }
 
 pub fn interrupt(device: &Device) -> bool {
-  device.isr != 0 && device.pci.interrupt_enabled()
+  device.isr != 0 && device.pci.interrupt_enabled() && !device.pci.msix_enabled()
+}
+
+pub fn messages(device: &mut Device) -> Vec<msix::Message> {
+  msix::take(
+    &mut device.msix,
+    device.pci.msix_enabled() && device.pci.bus_master(),
+    device.pci.msix_masked(),
+  )
+}
+
+fn interrupt_status(device: &mut Device) {
+  device
+    .pci
+    .interrupt_status(device.isr != 0 && !device.pci.msix_enabled());
+}
+
+fn raise(device: &mut Device, vector: u16) {
+  if device.pci.msix_enabled() {
+    msix::raise(&mut device.msix, vector);
+  }
 }
 
 pub fn completed(device: &Device) -> u64 {
@@ -172,93 +198,8 @@ pub fn config_write(
   width: usize,
   value: u32,
 ) -> anyhow::Result<()> {
-  config::write(device, memory, offset, width, value)
-}
-
-pub(super) fn access(offset: u64, width: usize) -> anyhow::Result<()> {
-  ensure!(
-    matches!(width, 1 | 2 | 4)
-      && offset.is_multiple_of(width as u64)
-      && offset
-        .checked_add(width as u64)
-        .is_some_and(|end| end <= 0x4000),
-    "Invalid Virtio PCI register access"
-  );
-  Ok(())
-}
-
-pub fn read(device: &mut Device, offset: u64, width: usize) -> anyhow::Result<u32> {
-  access(offset, width)?;
-  if (gpu::linear::BASE..gpu::linear::BASE + 32).contains(&offset) && width == 4 {
-    if let Backend::Gpu(display) = &device.backend {
-      return Ok(gpu::linear_read(display, offset - gpu::linear::BASE));
-    }
-  }
-  if offset < 56 && offset + width as u64 <= 56 {
-    return registers::read(device, offset as usize, width);
-  }
-  if offset == ISR && width == 1 {
-    let value = device.isr;
-    device.isr = 0;
-    device.pci.interrupt_status(false);
-    return Ok(value as u32);
-  }
-  let length = backend::config_length(&device.backend);
-  if (SPECIFIC..SPECIFIC + length).contains(&offset) && offset + width as u64 <= SPECIFIC + length {
-    let bytes = backend::config(&device.backend);
-    let start = (offset - SPECIFIC) as usize;
-    return Ok(
-      bytes[start..start + width]
-        .iter()
-        .enumerate()
-        .fold(0, |value, (index, byte)| {
-          value | (*byte as u32) << (index * 8)
-        }),
-    );
-  }
-  Ok(0)
-}
-
-pub fn write(
-  device: &mut Device,
-  memory: &mut impl Memory,
-  offset: u64,
-  width: usize,
-  value: u32,
-) -> anyhow::Result<()> {
-  access(offset, width)?;
-  let value = value & (u32::MAX >> ((4 - width) * 8));
-  let result = if (gpu::linear::BASE..gpu::linear::BASE + 32).contains(&offset) && width == 4 {
-    if let Backend::Gpu(display) = &mut device.backend {
-      gpu::linear_write(display, memory, offset - gpu::linear::BASE, value)
-    } else {
-      Ok(())
-    }
-  } else if offset < 56 && offset + width as u64 <= 56 {
-    registers::write(device, memory, offset as usize, width, value)
-  } else if (NOTIFY..NOTIFY + device.queues.len() as u64 * 4).contains(&offset)
-    && offset.is_multiple_of(4)
-    && width == 2
-    && value as usize == ((offset - NOTIFY) / 4) as usize
-  {
-    notify(device, memory, value as usize)
-  } else if (SPECIFIC..SPECIFIC + backend::config_length(&device.backend)).contains(&offset) {
-    backend::configure(
-      &mut device.backend,
-      (offset - SPECIFIC) as usize,
-      width,
-      value,
-    );
-    Ok(())
-  } else {
-    Ok(())
-  };
-  if let Err(error) = result {
-    device.common[20] |= 64;
-    device.isr |= 2;
-    device.pci.interrupt_status(true);
-    device.fault = Some(error.to_string());
-  }
+  config::write(device, memory, offset, width, value)?;
+  interrupt_status(device);
   Ok(())
 }
 
@@ -266,9 +207,11 @@ fn notify(device: &mut Device, memory: &mut impl Memory, index: usize) -> anyhow
   if device.common[20] & 0xcf != 15 || !device.pci.bus_master() {
     return Ok(());
   }
+  let vector = u16::from_le_bytes(device.queues[index].registers[2..4].try_into()?);
   let Some(queue) = &mut device.queues[index].queue else {
     return Ok(());
   };
+  let mut raised = false;
   while backend::ready(&device.backend, index) {
     let Some(chain) = queue::pop(queue, memory)? else {
       break;
@@ -276,9 +219,13 @@ fn notify(device: &mut Device, memory: &mut impl Memory, index: usize) -> anyhow
     let length = backend::execute(&mut device.backend, memory, &chain, index)?;
     if queue::complete(queue, memory, &chain, length)? {
       device.isr |= 1;
+      raised = true;
     }
     device.completed += 1;
   }
-  device.pci.interrupt_status(device.isr != 0);
+  if raised {
+    raise(device, vector);
+  }
+  interrupt_status(device);
   Ok(())
 }

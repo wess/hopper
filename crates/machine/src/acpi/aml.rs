@@ -20,9 +20,9 @@ pub(super) fn package(opcode: &[u8], body: &[u8]) -> Vec<u8> {
   bytes
 }
 
-pub(super) fn namespace(count: u32) -> Vec<u8> {
+pub(super) fn namespace(topology: &crate::platform::Topology) -> Vec<u8> {
   let mut scope = b"\\_SB_".to_vec();
-  for index in 0..count {
+  for index in 0..topology.cpus {
     let mut device = format!("C{index:03X}").into_bytes();
     device.extend(b"\x08_HID\x0dACPI0007\0");
     device.extend(b"\x08_UID\x0c");
@@ -30,6 +30,6 @@ pub(super) fn namespace(count: u32) -> Vec<u8> {
     device.extend(b"\x08_STA\x0a\x0f");
     scope.extend(package(&[0x5b, 0x82], &device));
   }
-  scope.extend(super::pci::namespace());
+  scope.extend(super::pci::namespace(topology.msi.as_ref()));
   package(&[0x10], &scope)
 }

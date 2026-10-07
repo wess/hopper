@@ -40,6 +40,56 @@ fn submit(ram: &mut Ram) {
 }
 
 #[test]
+fn disk_completion_uses_msix_masks_bus_mastering_and_reset() {
+  let (_image, mut device, mut ram) = device();
+  initialize(&mut device, &mut ram);
+  let mut cap = pci::config_read(&mut device, 0x34, 1).unwrap() as usize;
+  while pci::config_read(&mut device, cap, 1).unwrap() != 0x11 {
+    cap = pci::config_read(&mut device, cap + 1, 1).unwrap() as usize;
+    assert_ne!(cap, 0);
+  }
+  pci::write(&mut device, &mut ram, 16, 2, 0).unwrap();
+  assert_eq!(pci::read(&mut device, 16, 2).unwrap(), 0);
+  pci::write(&mut device, &mut ram, 26, 2, 2).unwrap();
+  assert_eq!(pci::read(&mut device, 26, 2).unwrap(), 0xffff);
+  pci::write(&mut device, &mut ram, 26, 2, 1).unwrap();
+  pci::config_write(&mut device, &mut ram, cap + 2, 2, 0x8000).unwrap();
+  pci::memory_write(&mut device, &mut ram, 2, 16, 8, 0x30000040).unwrap();
+  pci::memory_write(&mut device, &mut ram, 2, 24, 4, 64).unwrap();
+  submit(&mut ram);
+  pci::write(&mut device, &mut ram, pci::NOTIFY, 2, 0).unwrap();
+  assert_eq!(pci::completed(&device), 1);
+  assert!(!pci::interrupt(&device));
+  assert_eq!(pci::config_read(&mut device, 6, 2).unwrap() & 8, 0);
+  assert!(pci::messages(&mut device).is_empty());
+  assert_eq!(
+    pci::memory_read(&mut device, 2, pci::msix::PENDING, 8).unwrap(),
+    2
+  );
+  pci::memory_write(&mut device, &mut ram, 2, 28, 4, 0).unwrap();
+  pci::config_write(&mut device, &mut ram, 4, 2, 2).unwrap();
+  assert!(pci::messages(&mut device).is_empty());
+  pci::config_write(&mut device, &mut ram, 4, 2, 6).unwrap();
+  assert_eq!(
+    pci::messages(&mut device),
+    vec![pci::msix::Message {
+      address: 0x30000040,
+      data: 64,
+    }]
+  );
+  assert!(pci::messages(&mut device).is_empty());
+  assert_eq!(
+    pci::memory_read(&mut device, 2, pci::msix::PENDING, 8).unwrap(),
+    0
+  );
+  pci::write(&mut device, &mut ram, 20, 1, 0).unwrap();
+  assert_eq!(pci::read(&mut device, 16, 2).unwrap(), 0xffff);
+  assert_eq!(pci::read(&mut device, 26, 2).unwrap(), 0xffff);
+  assert!(device.pci.msix_enabled());
+  assert_eq!(pci::memory_read(&mut device, 2, 16, 8).unwrap(), 0x30000040);
+}
+
+#[test]
 fn modern_pci_transport_discovers_and_reads_a_disk() {
   let (_image, mut device, mut ram) = device();
   assert_eq!(pci::config_read(&mut device, 0, 4).unwrap(), 0x10421af4);

@@ -6,6 +6,7 @@ fn topology() -> Topology {
     cpus: 1,
     distributor_size: 0x10000,
     redistributor_size: 0x800000,
+    msi: None,
   }
 }
 

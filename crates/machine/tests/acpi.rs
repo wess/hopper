@@ -6,6 +6,7 @@ fn topology(cpus: u32) -> Topology {
     cpus,
     distributor_size: 0x10000,
     redistributor_size: 0x2000000,
+    msi: None,
   }
 }
 
@@ -125,4 +126,42 @@ fn maximum_topology_fits_and_invalid_regions_are_rejected() {
   let mut input = topology(1);
   input.redistributor_size = u64::MAX;
   assert!(acpi::bundle(&input).is_err());
+}
+
+#[test]
+fn msi_frame_and_reserved_memory_match_the_configured_interrupt_range() {
+  let mut input = topology(1);
+  input.msi = Some(machine::platform::Msi {
+    size: 0x1000,
+    first: 64,
+    count: 32,
+  });
+  let blob = acpi::bundle(&input).unwrap();
+  let xsdt = table(&blob, u64_at(&blob, 24));
+  let madt = table(&blob, u64_at(xsdt, 44));
+  let frame = &madt[44 + 80 + 24 + 16..];
+  assert_eq!(frame.len(), 24);
+  assert_eq!(&frame[..2], &[13, 24]);
+  assert_eq!(u64_at(frame, 8), machine::platform::MSI);
+  assert_eq!(u32_at(frame, 16), 1);
+  assert_eq!(&frame[20..24], &[32, 0, 64, 0]);
+  let fadt = table(&blob, u64_at(xsdt, 36));
+  let dsdt = table(&blob, u64_at(fadt, 140));
+  let expected = [0x86, 9, 0, 1, 0, 0, 0, 0x30, 0, 0x10, 0, 0];
+  assert!(dsdt.windows(expected.len()).any(|bytes| bytes == expected));
+  let tree = machine::platform::tree(&input).unwrap();
+  assert!(tree
+    .windows(18)
+    .any(|bytes| bytes == b"arm,gic-v2m-frame\0"));
+  for (size, first, count) in [
+    (0, 64, 32),
+    (u64::MAX, 64, 32),
+    (0x1000, 33, 32),
+    (0x1000, 64, 0),
+    (0x1000, 1000, 32),
+  ] {
+    input.msi = Some(machine::platform::Msi { size, first, count });
+    assert!(acpi::bundle(&input).is_err());
+    assert!(machine::platform::tree(&input).is_err());
+  }
 }

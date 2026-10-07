@@ -1,7 +1,8 @@
 //! PCI configuration space for memory-backed native devices.
 
 use anyhow::{ensure, Context};
-use std::collections::BTreeMap;
+mod bus;
+pub use bus::Bus;
 
 pub const ECAM_SIZE: u64 = 1 << 20;
 pub const FIRST_IRQ: u32 = 33;
@@ -26,6 +27,8 @@ pub struct Function {
   config: [u8; 4096],
   bars: Vec<Bar>,
   capability: usize,
+  next_capability: usize,
+  msix: Option<usize>,
 }
 
 impl Function {
@@ -45,6 +48,8 @@ impl Function {
       config,
       bars: Vec::new(),
       capability: 0,
+      next_capability: 0x40,
+      msix: None,
     })
   }
 
@@ -77,21 +82,53 @@ impl Function {
 
   pub fn add_vendor_capability(&mut self, bytes: &[u8]) -> anyhow::Result<usize> {
     ensure!(bytes.len() >= 2, "PCI capability is too short");
-    let start = if self.capability == 0 {
-      0x40
-    } else {
-      let length = self.config[self.capability + 2] as usize;
-      ensure!(length >= 3, "Previous capability has no length");
-      (self.capability + length).next_multiple_of(4)
-    };
     ensure!(
       bytes.len() >= 3 && bytes[2] as usize == bytes.len(),
       "PCI vendor capability length is invalid"
     );
+    ensure!(bytes[0] == 9, "PCI vendor capability does not fit");
+    self.add_capability(bytes)
+  }
+
+  pub fn add_msix(
+    &mut self,
+    count: u16,
+    slot: usize,
+    table: u32,
+    pending: u32,
+  ) -> anyhow::Result<usize> {
     ensure!(
-      bytes[0] == 9 && start + bytes.len() <= 0x100,
-      "PCI vendor capability does not fit"
+      self.msix.is_none()
+        && (1..=2048).contains(&count)
+        && table.is_multiple_of(8)
+        && pending.is_multiple_of(8),
+      "Invalid MSI-X capability"
     );
+    let bar = self
+      .bars
+      .iter()
+      .find(|bar| bar.slot == slot)
+      .context("MSI-X BAR is missing")?;
+    let table_end = table as u64 + count as u64 * 16;
+    let pending_end = pending as u64 + (count as u64).div_ceil(64) * 8;
+    ensure!(
+      table_end <= bar.size
+        && pending_end <= bar.size
+        && (table_end <= pending as u64 || pending_end <= table as u64),
+      "MSI-X tables overlap or exceed BAR"
+    );
+    let mut bytes = vec![0x11, 0];
+    bytes.extend((count - 1).to_le_bytes());
+    bytes.extend((table | slot as u32).to_le_bytes());
+    bytes.extend((pending | slot as u32).to_le_bytes());
+    let offset = self.add_capability(&bytes)?;
+    self.msix = Some(offset);
+    Ok(offset)
+  }
+
+  fn add_capability(&mut self, bytes: &[u8]) -> anyhow::Result<usize> {
+    let start = self.next_capability;
+    ensure!(start + bytes.len() <= 0x100, "PCI capability does not fit");
     if self.capability == 0 {
       self.config[0x34] = start as u8;
       self.config[6] |= 0x10;
@@ -101,6 +138,7 @@ impl Function {
     self.config[start..start + bytes.len()].copy_from_slice(bytes);
     self.config[start + 1] = 0;
     self.capability = start;
+    self.next_capability = (start + bytes.len()).next_multiple_of(4);
     Ok(start)
   }
 
@@ -166,6 +204,9 @@ impl Function {
         5 => self.config[5] = byte & 4,
         7 => self.config[7] &= !(byte & 0xf9),
         0x3c => self.config[0x3c] = *byte,
+        _ if self.msix.is_some_and(|offset| address == offset + 3) => {
+          self.config[address] = (self.config[address] & 0x3f) | (byte & 0xc0);
+        }
         _ => {}
       }
     }
@@ -199,6 +240,18 @@ impl Function {
   pub fn interrupt_enabled(&self) -> bool {
     self.config[5] & 4 == 0
   }
+
+  pub fn msix_enabled(&self) -> bool {
+    self
+      .msix
+      .is_some_and(|offset| self.config[offset + 3] & 0x80 != 0)
+  }
+
+  pub fn msix_masked(&self) -> bool {
+    self
+      .msix
+      .is_some_and(|offset| self.config[offset + 3] & 0x40 != 0)
+  }
 }
 
 fn access(offset: usize, width: usize) -> anyhow::Result<()> {
@@ -209,49 +262,4 @@ fn access(offset: usize, width: usize) -> anyhow::Result<()> {
     "Invalid PCI configuration access"
   );
   Ok(())
-}
-
-#[derive(Default)]
-pub struct Bus {
-  functions: BTreeMap<u8, Function>,
-}
-
-impl Bus {
-  pub fn attach(&mut self, device: u8, function: u8, config: Function) -> anyhow::Result<()> {
-    ensure!(device < 32 && function < 8, "Invalid PCI function address");
-    let key = device * 8 + function;
-    ensure!(
-      !self.functions.contains_key(&key),
-      "PCI function is already occupied"
-    );
-    if function != 0 {
-      self
-        .functions
-        .get_mut(&(device * 8))
-        .context("PCI function zero must be attached first")?
-        .config[0x0e] |= 0x80;
-    }
-    self.functions.insert(key, config);
-    Ok(())
-  }
-
-  pub fn read(&self, offset: u64, width: usize) -> anyhow::Result<u32> {
-    ensure!(offset < ECAM_SIZE, "PCI access exceeds the bus window");
-    let register = (offset & 0xfff) as usize;
-    access(register, width)?;
-    match self.functions.get(&((offset >> 12) as u8)) {
-      Some(function) => function.read(register, width),
-      None => Ok(u32::MAX >> ((4 - width) * 8)),
-    }
-  }
-
-  pub fn write(&mut self, offset: u64, width: usize, value: u32) -> anyhow::Result<()> {
-    ensure!(offset < ECAM_SIZE, "PCI access exceeds the bus window");
-    let register = (offset & 0xfff) as usize;
-    access(register, width)?;
-    if let Some(function) = self.functions.get_mut(&((offset >> 12) as u8)) {
-      function.write(register, width, value)?;
-    }
-    Ok(())
-  }
 }
