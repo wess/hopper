@@ -50,7 +50,8 @@ def main():
     "generatedSources": {
       name: hashlib.sha256((source / "HopperPkg" / name).read_bytes()).hexdigest()
       for name in ["firmware.dsc", "common.dsc.inc", "firmware.fdf", "main.fdf.inc",
-                   "pei/PlatformPeiLib.c", "pei/PlatformPeiLib.inf"]
+                   "pei/PlatformPeiLib.c", "pei/PlatformPeiLib.inf",
+                   "boot/boot.inf", "boot/platform.c", "boot/platform.h", "boot/kernel.c"]
     },
     "target": "DEBUG",
     "toolchain": "CLANGPDB",

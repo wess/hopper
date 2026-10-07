@@ -37,6 +37,12 @@ def configure(source):
   common = replace(common, "ArmVirtPkg/Library/PlatformPeiLib/PlatformPeiLib.inf",
                    "HopperPkg/pei/PlatformPeiLib.inf")
   main = (source / "ArmVirtPkg/ArmVirtQemuFvMain.fdf.inc").read_text()
+  profile = replace(profile, "  OvmfPkg/VirtioGpuDxe/VirtioGpu.inf",
+                    "  OvmfPkg/VirtioGpuDxe/VirtioGpu.inf\n"
+                    "  OvmfPkg/VirtioInputDxe/VirtioInput.inf")
+  main = replace(main, "  INF OvmfPkg/VirtioGpuDxe/VirtioGpu.inf",
+                 "  INF OvmfPkg/VirtioGpuDxe/VirtioGpu.inf\n"
+                 "  INF OvmfPkg/VirtioInputDxe/VirtioInput.inf")
   for old, new in {
     "OvmfPkg/PlatformHasAcpiDtDxe/PlatformHasAcpiDtDxe.inf":
       "ArmVirtPkg/CloudHvPlatformHasAcpiDtDxe/CloudHvHasAcpiDtDxe.inf",
@@ -55,6 +61,59 @@ def configure(source):
   for name, text in {"firmware.dsc": profile, "common.dsc.inc": common,
                      "firmware.fdf": fdf, "main.fdf.inc": main}.items():
     (target / name).write_text(text)
+
+  boot = target / "boot"
+  boot.mkdir(exist_ok=True)
+  upstream_boot = source / "OvmfPkg/Library/PlatformBootManagerLibLight"
+  inf = (upstream_boot / "PlatformBootManagerLib.inf").read_text()
+  inf = replace(inf, "  PlatformBm.c", "  platform.c")
+  inf = replace(inf, "  PlatformBm.h", "  platform.h")
+  inf = replace(inf, "  QemuKernel.c", "  kernel.c")
+  inf = replace(inf, "[Protocols]", "[Protocols]\n  gEfiSimpleTextInProtocolGuid")
+  (boot / "boot.inf").write_text(inf)
+  (boot / "platform.h").write_bytes((upstream_boot / "PlatformBm.h").read_bytes())
+  kernel = (upstream_boot / "QemuKernel.c").read_text()
+  kernel = replace(kernel, '#include "PlatformBm.h"', '#include "platform.h"')
+  (boot / "kernel.c").write_text(kernel)
+  code = (upstream_boot / "PlatformBm.c").read_text()
+  code = replace(code, '#include "PlatformBm.h"', '#include "platform.h"')
+  code = replace(code, "STATIC\nVOID\nEFIAPI\nSetupVirtioSerial (", """STATIC
+BOOLEAN
+EFIAPI
+IsVirtioPciInput (IN EFI_HANDLE Handle, IN CONST CHAR16 *ReportText)
+{
+  return IsVirtioPci (Handle, ReportText, 18);
+}
+
+STATIC
+VOID
+EFIAPI
+AddInput (IN EFI_HANDLE Handle, IN CONST CHAR16 *ReportText)
+{
+  EFI_DEVICE_PATH_PROTOCOL *Path;
+  EFI_STATUS Status;
+
+  Path = DevicePathFromHandle (Handle);
+  if (Path == NULL) {
+    return;
+  }
+  Status = EfiBootManagerUpdateConsoleVariable (ConIn, Path, NULL);
+  DEBUG ((DEBUG_VERBOSE, "%a: %s: adding to ConIn: %r\\n", __func__, ReportText, Status));
+}
+
+STATIC
+VOID
+EFIAPI
+SetupVirtioSerial (""")
+  code = replace(code, "  FilterAndProcess (&gEfiGraphicsOutputProtocolGuid, NULL, AddOutput);",
+                 "  FilterAndProcess (&gEfiGraphicsOutputProtocolGuid, NULL, AddOutput);\n"
+                 "  FilterAndProcess (&gEfiPciIoProtocolGuid, IsVirtioPciInput, Connect);\n"
+                 "  FilterAndProcess (&gEfiSimpleTextInProtocolGuid, NULL, AddInput);")
+  (boot / "platform.c").write_text(code)
+  profile = replace(profile,
+                    "OvmfPkg/Library/PlatformBootManagerLibLight/PlatformBootManagerLib.inf",
+                    "HopperPkg/boot/boot.inf")
+  (target / "firmware.dsc").write_text(profile)
 
   pei = target / "pei"
   pei.mkdir(exist_ok=True)

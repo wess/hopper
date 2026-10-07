@@ -2,7 +2,7 @@ mod backend;
 mod config;
 mod registers;
 
-use super::{block, gpu, queue};
+use super::{block, gpu, input, queue};
 use crate::{devices::pci::Function, dma::Memory};
 use anyhow::ensure;
 use backend::Backend;
@@ -60,6 +60,30 @@ pub fn graphics(display: gpu::Display) -> anyhow::Result<Device> {
   build(Backend::Gpu(display))
 }
 
+pub fn controller(input: input::Input) -> anyhow::Result<Device> {
+  build(Backend::Input(input))
+}
+
+pub fn send_input(
+  device: &mut Device,
+  memory: &mut impl Memory,
+  events: &[input::Event],
+) -> anyhow::Result<()> {
+  let Backend::Input(input) = &mut device.backend else {
+    anyhow::bail!("Device is not an input controller");
+  };
+  input::enqueue(input, events)?;
+  write(device, memory, NOTIFY, 2, 0)
+}
+
+pub fn release_input(device: &mut Device, memory: &mut impl Memory) -> anyhow::Result<()> {
+  let Backend::Input(input) = &mut device.backend else {
+    anyhow::bail!("Device is not an input controller");
+  };
+  input::release(input);
+  write(device, memory, NOTIFY, 2, 0)
+}
+
 pub fn display(device: &Device) -> Option<&gpu::Display> {
   match &device.backend {
     Backend::Gpu(display) => Some(display),
@@ -71,6 +95,7 @@ fn build(backend: Backend) -> anyhow::Result<Device> {
   let (id, class, count, specific) = match &backend {
     Backend::Disk(_) => (0x1042, 0x010000, 1, 64),
     Backend::Gpu(_) => (0x1050, 0x038000, 2, 16),
+    Backend::Input(_) => (0x1052, 0x098000, 2, 136),
   };
   let mut pci = Function::new(0x1af4, id, class, 1)?;
   pci.add_bar(0, 0x4000, true)?;
@@ -167,8 +192,7 @@ pub fn read(device: &mut Device, offset: u64, width: usize) -> anyhow::Result<u3
   }
   let length = backend::config_length(&device.backend);
   if (SPECIFIC..SPECIFIC + length).contains(&offset) && offset + width as u64 <= SPECIFIC + length {
-    let mut bytes = [0; 64];
-    backend::config(&device.backend, &mut bytes);
+    let bytes = backend::config(&device.backend);
     let start = (offset - SPECIFIC) as usize;
     return Ok(
       bytes[start..start + width]
@@ -199,6 +223,14 @@ pub fn write(
     && value as usize == ((offset - NOTIFY) / 4) as usize
   {
     notify(device, memory, value as usize)
+  } else if (SPECIFIC..SPECIFIC + backend::config_length(&device.backend)).contains(&offset) {
+    backend::configure(
+      &mut device.backend,
+      (offset - SPECIFIC) as usize,
+      width,
+      value,
+    );
+    Ok(())
   } else {
     Ok(())
   };
@@ -218,7 +250,10 @@ fn notify(device: &mut Device, memory: &mut impl Memory, index: usize) -> anyhow
   let Some(queue) = &mut device.queues[index].queue else {
     return Ok(());
   };
-  while let Some(chain) = queue::pop(queue, memory)? {
+  while backend::ready(&device.backend, index) {
+    let Some(chain) = queue::pop(queue, memory)? else {
+      break;
+    };
     let length = backend::execute(&mut device.backend, memory, &chain, index)?;
     if queue::complete(queue, memory, &chain, length)? {
       device.isr |= 1;

@@ -211,6 +211,15 @@ target/debug/examples/firmware native/build/firmware/windows.fd /tmp/hopper.dtb 
 Frame export refuses to overwrite a file. This verifies firmware graphics and disk
 access together; Windows display drivers and 3D acceleration remain unverified.
 
+Native keyboard and absolute-pointer devices expose guest capabilities and bounded
+event queues through PCI. Input waits for guest receive buffers and bus mastering;
+release-all discards unsent transitions and releases delivered keys or buttons.
+The firmware profile connects its Virtio keyboard to the UEFI console. Add
+`--check-input` to type a check command through that keyboard and deliver pointer
+events. This check allows 60 seconds and paces keys because the upstream firmware
+driver retains one key per poll. Pointer interaction with a guest application and
+Windows input drivers remain unverified.
+
 `cargo run -p machine --example acpi -- /tmp/hopperacpi` exports the handoff and
 individual tables for ACPICA inspection. TPM is still missing. The native runtime,
 storage, and graphics have not been integrated into the app.
