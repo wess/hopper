@@ -3,7 +3,11 @@ use block2::RcBlock;
 use objc2_foundation::NSError;
 use objc2_virtualization::VZMacOSRestoreImage;
 use serde::Serialize;
-use std::{path::Path, sync::mpsc};
+use std::{
+  any::Any,
+  path::Path,
+  sync::{mpsc, Arc},
+};
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +37,13 @@ pub fn latest() -> Discovery {
 }
 
 pub fn local(path: &Path) -> anyhow::Result<Discovery> {
+  local_owned(path, Arc::new(()))
+}
+
+pub fn local_owned(
+  path: &Path,
+  ownership: Arc<dyn Any + Send + Sync>,
+) -> anyhow::Result<Discovery> {
   let url = super::config::file(path)?;
   let expected = url
     .absoluteString()
@@ -47,6 +58,7 @@ pub fn local(path: &Path) -> anyhow::Result<Discovery> {
   let (send, receive) = mpsc::sync_channel(1);
   let completion = RcBlock::new(
     move |image: *mut VZMacOSRestoreImage, error: *mut NSError| {
+      let _ownership = &ownership;
       let _ = send.try_send(result(image, error, Some(&expected)));
     },
   );

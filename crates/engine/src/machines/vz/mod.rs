@@ -1,6 +1,7 @@
 pub(crate) mod files;
 mod identity;
 mod intent;
+pub mod mac;
 mod prepare;
 pub mod records;
 mod watch;
@@ -37,7 +38,7 @@ impl Service {
     };
     if matches!(action, Action::Stop) {
       let machine = self.manager.machine(id, actor)?;
-      if machine.guest == GuestOs::Linux
+      if machine.guest != GuestOs::Windows
         && machine.runtime == Some(model::MachineRuntime::Virtualization)
       {
         ensure!(

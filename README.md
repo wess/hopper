@@ -198,6 +198,14 @@ compressed kernels use the EFI path instead. See the
 [ARM64 boot format](https://docs.kernel.org/arch/arm64/booting.html). This verifies a
 diagnostic Linux kernel and userspace, not Ubuntu desktop installation or macOS support.
 
+Native macOS restore inspection now stages local media privately before asking the framework
+to inspect it. APFS clones retain independent blocks; copy fallback checks free space and
+original authorization throughout copying. Staging checks source identity, size and timestamps,
+rejects symlinks/empty files, and retains original policy and explicit-stop cancellation through
+SDK completion. The SDK callback keeps staging data and operation ownership alive after caller
+cancellation. Dropping completed inspection releases its private copy. This API does not yet
+prepare persistent platform state, admit hardware, download an IPSW or install macOS.
+
 The `vzmac` example discovers Apple's supported restore-image metadata and configures
 a macOS platform with its CPU/RAM requirements, independent identity and matching
 auxiliary firmware. Creation publishes private state and its hardware binding together
