@@ -3,7 +3,7 @@ fn main() -> anyhow::Result<()> {
   use anyhow::{bail, ensure, Context};
   use machine::{
     arm,
-    devices::{flash as nor, pci, serial, virtio::{block, pci as vpci}},
+    devices::{flash as nor, pci, serial, virtio::{block, gpu, pci as vpci}},
     acpi, hypervisor as hv, platform, psci, smccc,
   };
   use std::collections::VecDeque;
@@ -60,10 +60,14 @@ fn main() -> anyhow::Result<()> {
   let mut input = VecDeque::new();
   let mut updates = 0usize;
   let mut bus = pci::Bus::default();
-  let mut disk = std::env::args().nth(4).map(|path| {
+  let mut disk = std::env::args().nth(4).filter(|path| path != "-").map(|path| {
     vpci::create(block::open(std::path::Path::new(&path), true, [0; 20])?)
   }).transpose()?;
-  let check_storage = std::env::args().nth(5).as_deref() == Some("--check-storage");
+  let arguments: Vec<_> = std::env::args().collect();
+  let check_storage = arguments.iter().any(|argument| argument == "--check-storage");
+  let check_graphics = arguments.iter().any(|argument| argument == "--check-graphics");
+  let mut graphics = if check_graphics { Some(vpci::graphics(gpu::create(1024, 768)?)?) } else { None };
+
   ensure!(!check_storage || disk.is_some(), "Storage check requires a disk image");
   let mut read_storage = false;
   let mut checked_storage = false;
@@ -152,22 +156,30 @@ fn main() -> anyhow::Result<()> {
           let offset = physical_address - platform::ECAM;
           if access.write {
             let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
-            if let Some(disk) = disk.as_mut().filter(|_| offset < 4096) {
-              vpci::config_write(disk, &mut ram, offset as usize, access.bytes.into(), value as u32)?;
+            let device = if offset < 4096 { disk.as_mut() }
+              else if (0x8000..0x9000).contains(&offset) { graphics.as_mut() } else { None };
+            if let Some(disk) = device {
+              vpci::config_write(disk, &mut ram, (offset & 0xfff) as usize, access.bytes.into(), value as u32)?;
             } else { bus.write(offset, access.bytes.into(), value as u32)?; }
           } else {
-            let value = if let Some(disk) = disk.as_mut().filter(|_| offset < 4096) {
-              vpci::config_read(disk, offset as usize, access.bytes.into())?
+            let device = if offset < 4096 { disk.as_mut() }
+              else if (0x8000..0x9000).contains(&offset) { graphics.as_mut() } else { None };
+            let value = if let Some(disk) = device {
+              vpci::config_read(disk, (offset & 0xfff) as usize, access.bytes.into())?
             } else { bus.read(offset, access.bytes.into())? };
             pci_reads += 1;
             if access.register != 31 { hv::set(cpu, access.register.into(), value as u64)?; }
           }
           if let Some(disk) = &disk { hv::gic::signal(&gic, pci::interrupt(0, 1)?, vpci::interrupt(disk))?; }
+          if let Some(graphics) = &graphics { hv::gic::signal(&gic, pci::interrupt(1, 1)?, vpci::interrupt(graphics))?; }
           let pc = hv::get(cpu, 31)?;
           hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
-        arm::Trap::DataAbort(Some(access)) if disk.as_ref().is_some_and(|disk| disk.pci.memory(physical_address).is_some()) => {
-          let disk = disk.as_mut().context("Missing Virtio disk")?;
+        arm::Trap::DataAbort(Some(access)) if disk.as_ref().is_some_and(|disk| disk.pci.memory(physical_address).is_some())
+          || graphics.as_ref().is_some_and(|device| device.pci.memory(physical_address).is_some()) => {
+          let (disk, index) = if disk.as_ref().is_some_and(|disk| disk.pci.memory(physical_address).is_some()) {
+            (disk.as_mut().context("Missing Virtio disk")?, 0)
+          } else { (graphics.as_mut().context("Missing Virtio GPU")?, 1) };
           let (_, offset) = disk.pci.memory(physical_address).context("Unmapped Virtio BAR")?;
           if access.write {
             let value = if access.register == 31 { 0 } else { hv::get(cpu, access.register.into())? };
@@ -176,7 +188,7 @@ fn main() -> anyhow::Result<()> {
             let value = vpci::read(disk, offset, access.bytes.into())?;
             if access.register != 31 { hv::set(cpu, access.register.into(), value as u64)?; }
           }
-          hv::gic::signal(&gic, pci::interrupt(0, 1)?, vpci::interrupt(disk))?;
+          hv::gic::signal(&gic, pci::interrupt(index, 1)?, vpci::interrupt(disk))?;
           let pc = hv::get(cpu, 31)?;
           hv::set(cpu, 31, pc.checked_add(4).context("Firmware PC overflow")?)?;
         }
@@ -233,6 +245,19 @@ fn main() -> anyhow::Result<()> {
     disk.as_ref().map(|disk| format!("Storage completed {} requests; fault: {:?}", vpci::completed(disk), vpci::fault(disk)))
       .unwrap_or_else(|| "Boot native firmware".into())
   })?;
+  if let Some(graphics) = &graphics {
+    ensure!(vpci::fault(graphics).is_none(), "Virtio GPU fault: {:?}", vpci::fault(graphics));
+    let frame = vpci::display(graphics).and_then(gpu::frame).context("Firmware produced no GPU frame")?;
+    ensure!(vpci::completed(graphics) > 0 && frame.rgba.as_chunks::<4>().0.iter()
+      .any(|pixel| pixel[..3] != [0, 0, 0]), "Firmware produced no visible graphics");
+    eprintln!("Firmware rendered {}x{} frame in {} GPU requests", frame.width, frame.height, vpci::completed(graphics));
+    if let Some(index) = arguments.iter().position(|argument| argument == "--frame") {
+      let path = arguments.get(index + 1).context("Provide a frame output path")?;
+      let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+      write!(file, "P6\n{} {}\n255\n", frame.width, frame.height)?;
+      for pixel in frame.rgba.as_chunks::<4>().0 { file.write_all(&pixel[..3])?; }
+    }
+  }
   let mut retained = vec![0; acpi::SIZE];
   hv::read(&ram, (acpi::BASE - platform::RAM) as usize, &mut retained)?;
   ensure!(retained == tables, "Firmware overwrote its reserved ACPI handoff");

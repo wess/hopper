@@ -1,4 +1,6 @@
-use super::{read as register_read, write as register_write, Device, ISR, NOTIFY, SPECIFIC};
+use super::{
+  backend, read as register_read, write as register_write, Device, ISR, NOTIFY, SPECIFIC,
+};
 use crate::dma::Memory;
 
 fn target(device: &Device) -> Option<(u64, usize)> {
@@ -7,10 +9,15 @@ fn target(device: &Device) -> Option<(u64, usize)> {
   if device.window[4] != 0 || !matches!(width, 1 | 2 | 4) || !offset.is_multiple_of(width as u64) {
     return None;
   }
-  [(0, 56), (NOTIFY, 2), (ISR, 1), (SPECIFIC, 64)]
-    .into_iter()
-    .any(|(base, length)| offset >= base && offset + width as u64 <= base + length)
-    .then_some((offset, width))
+  [
+    (0, 56),
+    (NOTIFY, device.queues.len() as u64 * 4),
+    (ISR, 1),
+    (SPECIFIC, backend::config_length(&device.backend)),
+  ]
+  .into_iter()
+  .any(|(base, length)| offset >= base && offset + width as u64 <= base + length)
+  .then_some((offset, width))
 }
 
 pub(super) fn read(device: &mut Device, offset: usize, width: usize) -> anyhow::Result<u32> {

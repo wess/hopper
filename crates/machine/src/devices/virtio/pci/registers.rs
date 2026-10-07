@@ -1,4 +1,4 @@
-use super::{block, common, features, queue, Device, FLUSH, VERSION};
+use super::{backend, common, features, queue, queue_state, Device, VERSION};
 use crate::dma::Memory;
 use anyhow::ensure;
 
@@ -26,7 +26,9 @@ pub(super) fn read(device: &Device, offset: usize, width: usize) -> anyhow::Resu
     0
   };
   bytes[12..16].copy_from_slice(&accepted.to_le_bytes());
-  if word(&bytes, 22) != 0 {
+  if let Some(state) = device.queues.get(word(&bytes, 22) as usize) {
+    bytes[24..].copy_from_slice(&state.registers);
+  } else {
     bytes[24..].fill(0);
     bytes[26..28].copy_from_slice(&u16::MAX.to_le_bytes());
   }
@@ -63,11 +65,13 @@ pub(super) fn write(
     }
     (20, 1) => {
       if value as u8 == 0 {
-        block::writeback(&mut device.disk, false)?;
-        device.common = common();
+        backend::status(&mut device.backend, 0, true)?;
+        device.common = common(device.queues.len() as u16);
         device.driver_features = 0;
         device.unsupported = false;
-        device.queue = None;
+        for (index, state) in device.queues.iter_mut().enumerate() {
+          *state = queue_state(index as u16);
+        }
         device.isr = 0;
         device.pci.interrupt_status(false);
         device.fault = None;
@@ -84,36 +88,54 @@ pub(super) fn write(
         if next & 4 != 0 && next & 8 == 0 {
           next &= !4;
         }
-        block::writeback(
-          &mut device.disk,
-          next & 8 != 0 && device.driver_features & FLUSH != 0,
+        backend::status(
+          &mut device.backend,
+          if next & 8 != 0 {
+            device.driver_features
+          } else {
+            0
+          },
+          false,
         )?;
         device.common[20] = next;
       }
     }
-    (24, 2) if word(&device.common, 22) == 0 && device.queue.is_none() => {
-      ensure!(
-        value > 0 && value <= 256 && value.is_power_of_two(),
-        "Invalid Virtio block queue size"
-      );
-      device.common[24..26].copy_from_slice(&(value as u16).to_le_bytes());
-    }
-    (28, 2) if word(&device.common, 22) == 0 && device.queue.is_none() && value == 1 => {
-      let mut addresses = [0; 3];
-      for (index, address) in addresses.iter_mut().enumerate() {
-        *address = u64::from_le_bytes(device.common[32 + index * 8..40 + index * 8].try_into()?);
+    (24 | 28, 2) | (32 | 36 | 40 | 44 | 48 | 52, 4) => {
+      let selected = word(&device.common, 22) as usize;
+      let Some(state) = device.queues.get_mut(selected) else {
+        return Ok(());
+      };
+      if state.queue.is_some() {
+        return Ok(());
       }
-      device.queue = Some(queue::create(
-        memory,
-        word(&device.common, 24),
-        addresses[0],
-        addresses[1],
-        addresses[2],
-      )?);
-      device.common[28..30].copy_from_slice(&1u16.to_le_bytes());
-    }
-    (32 | 36 | 40 | 44 | 48 | 52, 4) if word(&device.common, 22) == 0 && device.queue.is_none() => {
-      device.common[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+      match offset {
+        24 => {
+          ensure!(
+            value > 0 && value <= 256 && value.is_power_of_two(),
+            "Invalid Virtio queue size"
+          );
+          state.registers[..2].copy_from_slice(&(value as u16).to_le_bytes());
+        }
+        28 if value == 1 => {
+          let mut addresses = [0; 3];
+          for (index, address) in addresses.iter_mut().enumerate() {
+            *address =
+              u64::from_le_bytes(state.registers[8 + index * 8..16 + index * 8].try_into()?);
+          }
+          state.queue = Some(queue::create(
+            memory,
+            word(&state.registers, 0),
+            addresses[0],
+            addresses[1],
+            addresses[2],
+          )?);
+          state.registers[4..6].copy_from_slice(&1u16.to_le_bytes());
+        }
+        32..=52 => {
+          state.registers[offset - 24..offset - 24 + 4].copy_from_slice(&value.to_le_bytes())
+        }
+        _ => {}
+      }
     }
     _ => {}
   }

@@ -1,4 +1,5 @@
 mod commands;
+mod cursor;
 mod resource;
 
 use super::queue::Chain;
@@ -18,6 +19,13 @@ pub struct Display {
   scanout: Option<(u32, resource::Rect)>,
   frame: Option<Frame>,
   generation: u64,
+  cursor: cursor::Cursor,
+}
+
+pub use cursor::{execute as execute_cursor, Cursor};
+
+pub fn cursor(display: &Display) -> &Cursor {
+  &display.cursor
 }
 
 pub struct Frame {
@@ -39,6 +47,7 @@ pub fn create(width: u32, height: u32) -> anyhow::Result<Display> {
     scanout: None,
     frame: None,
     generation: 0,
+    cursor: Cursor::default(),
   })
 }
 
@@ -51,6 +60,7 @@ pub fn reset(display: &mut Display) {
   display.allocated = 0;
   display.scanout = None;
   display.frame = None;
+  display.cursor = Cursor::default();
   display.generation = display.generation.wrapping_add(1);
 }
 

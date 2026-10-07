@@ -2,7 +2,7 @@
 mod disk;
 mod support;
 
-use machine::devices::virtio::{block, pci};
+use machine::devices::virtio::{block, gpu, pci};
 use support::{descriptor, Ram, BASE};
 
 fn device() -> (disk::Image, pci::Device, Ram) {
@@ -139,4 +139,71 @@ fn configuration_window_executes_real_register_accesses() {
   assert_eq!(pci::read(&mut device, 20, 1).unwrap(), 3);
   pci::config_write(&mut device, &mut ram, offset + 4, 1, 1).unwrap();
   assert_eq!(pci::config_read(&mut device, offset + 16, 1).unwrap(), 0);
+}
+
+#[test]
+fn gpu_control_and_cursor_queues_keep_independent_configuration_and_notifications() {
+  let mut device = pci::graphics(gpu::create(1024, 768).unwrap()).unwrap();
+  let mut ram = Ram::default();
+  assert_eq!(pci::config_read(&mut device, 0, 4).unwrap(), 0x10501af4);
+  assert_eq!(pci::features(&device), pci::VERSION);
+  assert_eq!(pci::read(&mut device, 18, 2).unwrap(), 2);
+  assert_eq!(pci::read(&mut device, pci::SPECIFIC + 8, 4).unwrap(), 1);
+  assert_eq!(pci::read(&mut device, pci::SPECIFIC + 12, 4).unwrap(), 0);
+  pci::config_write(&mut device, &mut ram, 4, 2, 6).unwrap();
+  pci::write(&mut device, &mut ram, 20, 1, 3).unwrap();
+  pci::write(&mut device, &mut ram, 8, 4, 1).unwrap();
+  pci::write(&mut device, &mut ram, 12, 4, 1).unwrap();
+  pci::write(&mut device, &mut ram, 20, 1, 11).unwrap();
+  for index in 0..2 {
+    pci::write(&mut device, &mut ram, 22, 2, index).unwrap();
+    assert_eq!(pci::read(&mut device, 30, 2).unwrap(), index);
+    pci::write(&mut device, &mut ram, 24, 2, 8).unwrap();
+    for (offset, address) in [(32, BASE), (40, BASE + 0x100), (48, BASE + 0x200)] {
+      pci::write(
+        &mut device,
+        &mut ram,
+        offset,
+        4,
+        address as u32 + index * 0x400,
+      )
+      .unwrap();
+    }
+    pci::write(&mut device, &mut ram, 28, 2, 1).unwrap();
+  }
+  pci::write(&mut device, &mut ram, 20, 1, 15).unwrap();
+  ram.0[0x1000..0x1004].copy_from_slice(&0x100u32.to_le_bytes());
+  descriptor(&mut ram, 0, BASE + 0x1000, 24, 1, 1);
+  descriptor(&mut ram, 1, BASE + 0x2000, 408, 2, 0);
+  ram.0[0x102..0x104].copy_from_slice(&1u16.to_le_bytes());
+  ram.0[0x3000..0x3004].copy_from_slice(&0x300u32.to_le_bytes());
+  ram.0[0x301c..0x3020].copy_from_slice(&150u32.to_le_bytes());
+  ram.0[0x3020..0x3024].copy_from_slice(&250u32.to_le_bytes());
+  descriptor(&mut ram, 2, BASE + 0x3000, 56, 0, 0);
+  let cursor_descriptor = ram.0[32..48].to_vec();
+  ram.0[0x400..0x410].copy_from_slice(&cursor_descriptor);
+  ram.0[0x502..0x504].copy_from_slice(&1u16.to_le_bytes());
+  pci::write(&mut device, &mut ram, pci::NOTIFY + 4, 2, 0).unwrap();
+  assert_eq!(pci::completed(&device), 0);
+  pci::write(&mut device, &mut ram, pci::NOTIFY + 4, 2, 1).unwrap();
+  assert_eq!(pci::completed(&device), 1);
+  let cursor = gpu::cursor(pci::display(&device).unwrap());
+  assert_eq!((cursor.x, cursor.y), (150, 250));
+  assert_eq!(&ram.0[0x602..0x604], &1u16.to_le_bytes());
+  assert_eq!(&ram.0[0x202..0x204], &[0, 0]);
+  pci::write(&mut device, &mut ram, pci::NOTIFY, 2, 0).unwrap();
+  assert_eq!(pci::completed(&device), 2);
+  assert_eq!(&ram.0[0x2000..0x2004], &0x1101u32.to_le_bytes());
+  assert_eq!(&ram.0[0x2020..0x2028], &[0, 4, 0, 0, 0, 3, 0, 0]);
+  assert!(pci::fault(&device).is_none());
+  pci::write(&mut device, &mut ram, 22, 2, 0).unwrap();
+  assert_eq!(pci::read(&mut device, 32, 4).unwrap(), BASE as u32);
+  pci::write(&mut device, &mut ram, 20, 1, 0).unwrap();
+  for index in 0..2 {
+    pci::write(&mut device, &mut ram, 22, 2, index).unwrap();
+    assert_eq!(pci::read(&mut device, 24, 2).unwrap(), 256);
+    assert_eq!(pci::read(&mut device, 28, 2).unwrap(), 0);
+    assert_eq!(pci::read(&mut device, 32, 4).unwrap(), 0);
+  }
+  assert_eq!(gpu::cursor(pci::display(&device).unwrap()).generation, 0);
 }

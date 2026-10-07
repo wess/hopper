@@ -1,9 +1,11 @@
+mod backend;
 mod config;
 mod registers;
 
-use super::{block, queue};
+use super::{block, gpu, queue};
 use crate::{devices::pci::Function, dma::Memory};
 use anyhow::ensure;
+use backend::Backend;
 
 pub const NOTIFY: u64 = 0x1000;
 pub const ISR: u64 = 0x2000;
@@ -15,11 +17,11 @@ pub const READONLY: u64 = 1 << 5;
 
 pub struct Device {
   pub pci: Function,
-  disk: block::Disk,
+  backend: Backend,
   common: [u8; 56],
   driver_features: u64,
   unsupported: bool,
-  queue: Option<queue::Queue>,
+  queues: Vec<QueueState>,
   isr: u8,
   window: [u8; 20],
   window_offset: usize,
@@ -27,25 +29,58 @@ pub struct Device {
   fault: Option<String>,
 }
 
-fn common() -> [u8; 56] {
+struct QueueState {
+  registers: [u8; 32],
+  queue: Option<queue::Queue>,
+}
+
+fn queue_state(index: u16) -> QueueState {
+  let mut registers = [0; 32];
+  registers[..2].copy_from_slice(&256u16.to_le_bytes());
+  registers[2..4].copy_from_slice(&u16::MAX.to_le_bytes());
+  registers[6..8].copy_from_slice(&index.to_le_bytes());
+  QueueState {
+    registers,
+    queue: None,
+  }
+}
+
+fn common(count: u16) -> [u8; 56] {
   let mut bytes = [0; 56];
   bytes[16..18].copy_from_slice(&u16::MAX.to_le_bytes());
-  bytes[18..20].copy_from_slice(&1u16.to_le_bytes());
-  bytes[24..26].copy_from_slice(&256u16.to_le_bytes());
-  bytes[26..28].copy_from_slice(&u16::MAX.to_le_bytes());
+  bytes[18..20].copy_from_slice(&count.to_le_bytes());
   bytes
 }
 
 pub fn create(disk: block::Disk) -> anyhow::Result<Device> {
-  let mut pci = Function::new(0x1af4, 0x1042, 0x010000, 1)?;
+  build(Backend::Disk(disk))
+}
+
+pub fn graphics(display: gpu::Display) -> anyhow::Result<Device> {
+  build(Backend::Gpu(display))
+}
+
+pub fn display(device: &Device) -> Option<&gpu::Display> {
+  match &device.backend {
+    Backend::Gpu(display) => Some(display),
+    _ => None,
+  }
+}
+
+fn build(backend: Backend) -> anyhow::Result<Device> {
+  let (id, class, count, specific) = match &backend {
+    Backend::Disk(_) => (0x1042, 0x010000, 1, 64),
+    Backend::Gpu(_) => (0x1050, 0x038000, 2, 16),
+  };
+  let mut pci = Function::new(0x1af4, id, class, 1)?;
   pci.add_bar(0, 0x4000, true)?;
   pci.interrupt_pin(1)?;
   let mut window_offset = 0;
   for (kind, offset, length) in [
     (1, 0, 56u32),
-    (2, NOTIFY as u32, 2),
+    (2, NOTIFY as u32, count as u32 * 4),
     (3, ISR as u32, 1),
-    (4, SPECIFIC as u32, 64),
+    (4, SPECIFIC as u32, specific),
     (5, 0, 0),
   ] {
     let size = if kind == 2 || kind == 5 { 20 } else { 16 };
@@ -65,11 +100,11 @@ pub fn create(disk: block::Disk) -> anyhow::Result<Device> {
   }
   Ok(Device {
     pci,
-    disk,
-    common: common(),
+    backend,
+    common: common(count),
     driver_features: 0,
     unsupported: false,
-    queue: None,
+    queues: (0..count).map(queue_state).collect(),
     isr: 0,
     window: [0; 20],
     window_offset,
@@ -79,14 +114,7 @@ pub fn create(disk: block::Disk) -> anyhow::Result<Device> {
 }
 
 pub fn features(device: &Device) -> u64 {
-  VERSION
-    | FLUSH
-    | BLOCK_SIZE
-    | if block::readonly(&device.disk) {
-      READONLY
-    } else {
-      0
-    }
+  backend::features(&device.backend)
 }
 
 pub fn interrupt(device: &Device) -> bool {
@@ -137,10 +165,10 @@ pub fn read(device: &mut Device, offset: u64, width: usize) -> anyhow::Result<u3
     device.pci.interrupt_status(false);
     return Ok(value as u32);
   }
-  if (SPECIFIC..SPECIFIC + 64).contains(&offset) && offset + width as u64 <= SPECIFIC + 64 {
+  let length = backend::config_length(&device.backend);
+  if (SPECIFIC..SPECIFIC + length).contains(&offset) && offset + width as u64 <= SPECIFIC + length {
     let mut bytes = [0; 64];
-    bytes[..8].copy_from_slice(&block::capacity(&device.disk).to_le_bytes());
-    bytes[20..24].copy_from_slice(&512u32.to_le_bytes());
+    backend::config(&device.backend, &mut bytes);
     let start = (offset - SPECIFIC) as usize;
     return Ok(
       bytes[start..start + width]
@@ -165,8 +193,12 @@ pub fn write(
   let value = value & (u32::MAX >> ((4 - width) * 8));
   let result = if offset < 56 && offset + width as u64 <= 56 {
     registers::write(device, memory, offset as usize, width, value)
-  } else if offset == NOTIFY && width == 2 && value as u16 == 0 {
-    notify(device, memory)
+  } else if (NOTIFY..NOTIFY + device.queues.len() as u64 * 4).contains(&offset)
+    && offset.is_multiple_of(4)
+    && width == 2
+    && value as usize == ((offset - NOTIFY) / 4) as usize
+  {
+    notify(device, memory, value as usize)
   } else {
     Ok(())
   };
@@ -179,15 +211,15 @@ pub fn write(
   Ok(())
 }
 
-fn notify(device: &mut Device, memory: &mut impl Memory) -> anyhow::Result<()> {
+fn notify(device: &mut Device, memory: &mut impl Memory, index: usize) -> anyhow::Result<()> {
   if device.common[20] & 0xcf != 15 || !device.pci.bus_master() {
     return Ok(());
   }
-  let Some(queue) = &mut device.queue else {
+  let Some(queue) = &mut device.queues[index].queue else {
     return Ok(());
   };
   while let Some(chain) = queue::pop(queue, memory)? {
-    let length = block::execute(&mut device.disk, memory, &chain)?;
+    let length = backend::execute(&mut device.backend, memory, &chain, index)?;
     if queue::complete(queue, memory, &chain, length)? {
       device.isr |= 1;
     }

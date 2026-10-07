@@ -250,3 +250,58 @@ fn resource_count_is_bounded_and_unref_reclaims_capacity() {
   ok(&mut display, &mut ram, 0x102, &words(&[1, 0]));
   ok(&mut display, &mut ram, 0x101, &words(&[65, 2, 1, 1]));
 }
+
+#[test]
+fn cursor_image_hotspot_motion_and_hiding_are_independent_of_scanout() {
+  let mut display = gpu::create(1024, 768).unwrap();
+  let mut ram = Ram::default();
+  ok(&mut display, &mut ram, 0x101, &words(&[1, 1, 64, 64]));
+  let mut backing = words(&[1, 1]);
+  backing.extend((BASE + 0x4000).to_le_bytes());
+  backing.extend(words(&[64 * 64 * 4, 0]));
+  ok(&mut display, &mut ram, 0x106, &backing);
+  ram.0[0x4000..0x4004].copy_from_slice(&[10, 20, 30, 40]);
+  let mut transfer = words(&[0, 0, 64, 64]);
+  transfer.extend(0u64.to_le_bytes());
+  transfer.extend(words(&[1, 0]));
+  ok(&mut display, &mut ram, 0x105, &transfer);
+  let chain = Chain {
+    head: 0,
+    buffers: vec![Buffer {
+      span: Span {
+        address: BASE + 0x1000,
+        length: 56,
+      },
+      writable: false,
+    }],
+  };
+  let mut command = words(&[0x300, 0, 0, 0, 0, 0, 0, 300, 400, 0, 1, 2, 3, 0]);
+  ram.0[0x1000..0x1038].copy_from_slice(&command);
+  assert_eq!(
+    gpu::execute_cursor(&mut display, &mut ram, &chain).unwrap(),
+    0
+  );
+  let cursor = gpu::cursor(&display);
+  assert_eq!(
+    (cursor.x, cursor.y, cursor.hot_x, cursor.hot_y),
+    (300, 400, 2, 3)
+  );
+  assert_eq!(&cursor.rgba.as_ref().unwrap()[..4], &[30, 20, 10, 40]);
+  assert!(gpu::frame(&display).is_none());
+  command[..4].copy_from_slice(&0x301u32.to_le_bytes());
+  command[28..32].copy_from_slice(&500u32.to_le_bytes());
+  command[40..56].fill(255);
+  ram.0[0x1000..0x1038].copy_from_slice(&command);
+  gpu::execute_cursor(&mut display, &mut ram, &chain).unwrap();
+  assert_eq!(gpu::cursor(&display).x, 500);
+  assert_eq!(gpu::cursor(&display).hot_x, 2);
+  command[..4].copy_from_slice(&0x300u32.to_le_bytes());
+  command[40..44].copy_from_slice(&1u32.to_le_bytes());
+  ram.0[0x1000..0x1038].copy_from_slice(&command);
+  assert!(gpu::execute_cursor(&mut display, &mut ram, &chain).is_err());
+  assert_eq!(gpu::cursor(&display).hot_x, 2);
+  command[40..44].fill(0);
+  ram.0[0x1000..0x1038].copy_from_slice(&command);
+  gpu::execute_cursor(&mut display, &mut ram, &chain).unwrap();
+  assert!(gpu::cursor(&display).rgba.is_none());
+}
