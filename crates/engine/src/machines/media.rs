@@ -19,6 +19,10 @@ pub struct Media {
 }
 
 pub fn catalogue(xml: &str) -> anyhow::Result<Media> {
+    anyhow::ensure!(
+        xml.len() <= 16 * 1024 * 1024,
+        "Windows catalogue XML exceeds its bound"
+    );
     #[derive(Deserialize)]
     struct Root {
         #[serde(rename = "Catalogs")]
@@ -45,17 +49,23 @@ pub fn catalogue(xml: &str) -> anyhow::Result<Media> {
         files: Vec<Media>,
     }
     let root: Root = quick_xml::de::from_str(xml)?;
-    let media = root
+    let mut candidates = root
         .catalogs
         .catalog
         .media
         .files
         .files
         .into_iter()
-        .find(|m| {
+        .filter(|m| {
             m.architecture == "ARM64" && m.language_code == "en-us" && m.edition == "Professional"
-        })
+        });
+    let media = candidates
+        .next()
         .context("Microsoft's catalogue has no English US ARM64 Windows installer")?;
+    anyhow::ensure!(
+        candidates.next().is_none(),
+        "Ambiguous Windows installer catalogue"
+    );
     let url = reqwest::Url::parse(&media.file_path)?;
     if !matches!(url.scheme(), "http" | "https")
         || url.host_str() != Some("dl.delivery.mp.microsoft.com")
