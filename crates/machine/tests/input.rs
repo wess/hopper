@@ -41,7 +41,7 @@ fn configuration_reports_only_supported_capabilities_and_ignores_guest_payload_w
   input::configure(&mut pointer, 0, 1, 0x12);
   let config = input::config(&pointer);
   assert_eq!(config[2], 20);
-  assert_eq!(&config[12..16], &65535u32.to_le_bytes());
+  assert_eq!(&config[12..16], &32767u32.to_le_bytes());
   input::configure(&mut pointer, 0, 2, 0x0111);
   assert_eq!(input::config(&pointer)[8 + 34], 7);
 }
@@ -110,7 +110,16 @@ fn pointer_coordinates_wheel_buttons_and_guest_led_feedback_follow_wire_layout()
     input::execute(&mut pointer, &mut ram, &chain(BASE, 8, true), 0).unwrap();
     assert_eq!(&ram.0[..2], &event.kind.to_le_bytes());
     assert_eq!(&ram.0[2..4], &event.code.to_le_bytes());
-    assert_eq!(&ram.0[4..8], &event.value.to_le_bytes());
+    let value = if event.kind == 3 {
+      match event.code {
+        0 => 32767i32,
+        1 => 16384i32,
+        _ => unreachable!(),
+      }
+    } else {
+      event.value
+    };
+    assert_eq!(&ram.0[4..8], &value.to_le_bytes());
   }
   assert!(input::enqueue(
     &mut pointer,
@@ -146,6 +155,50 @@ fn pointer_coordinates_wheel_buttons_and_guest_led_feedback_follow_wire_layout()
   input::execute(&mut keyboard, &mut ram, &chain(BASE, 8, false), 1).unwrap();
   assert_eq!(input::leds(&keyboard), 0);
   assert!(input::execute(&mut keyboard, &mut ram, &chain(BASE, 9, false), 1).is_err());
+}
+
+#[test]
+fn pointer_range_preserves_edges_and_center_without_negative_hid_coordinates() {
+  let mut pointer = input::create(Kind::Tablet);
+  let mut ram = Ram::default();
+  for code in [0, 1] {
+    input::configure(&mut pointer, 0, 2, 0x12 | (u32::from(code) << 8));
+    let config = input::config(&pointer);
+    assert_eq!(&config[8..12], &0u32.to_le_bytes());
+    assert_eq!(&config[12..16], &32767u32.to_le_bytes());
+    for (value, expected) in [(0, 0i32), (32767, 16383), (32768, 16384), (65535, 32767)] {
+      input::enqueue(
+        &mut pointer,
+        &[
+          Event {
+            kind: 3,
+            code,
+            value,
+          },
+          SYN,
+        ],
+      )
+      .unwrap();
+      input::execute(&mut pointer, &mut ram, &chain(BASE, 8, true), 0).unwrap();
+      assert_eq!(&ram.0[4..8], &expected.to_le_bytes());
+      input::execute(&mut pointer, &mut ram, &chain(BASE, 8, true), 0).unwrap();
+    }
+    for value in [-1, 65536] {
+      assert!(input::enqueue(
+        &mut pointer,
+        &[
+          Event {
+            kind: 3,
+            code,
+            value
+          },
+          SYN
+        ]
+      )
+      .is_err());
+      assert_eq!(input::pending(&pointer), 0);
+    }
+  }
 }
 
 #[test]
@@ -199,3 +252,21 @@ fn pci_input_waits_for_events_and_bus_master_before_consuming_receive_buffers() 
   pci::write(&mut device, &mut ram, pci::SPECIFIC, 2, 1).unwrap();
   assert_eq!(pci::read(&mut device, pci::SPECIFIC + 2, 1).unwrap(), 15);
 }
+
+#[test]
+fn captured_input_retains_guest_leds_and_selected_capability() {
+  let mut ram = Ram::default();
+  let mut original = input::create(Kind::Keyboard);
+  input::configure(&mut original, 0, 2, 0x1111);
+  ram.0[..8].copy_from_slice(&[17, 0, 2, 0, 1, 0, 0, 0]);
+  input::execute(&mut original, &mut ram, &chain(BASE, 8, false), 1).unwrap();
+  let captured = original.clone();
+  input::reset(&mut original);
+  drop(original);
+  assert_eq!(input::leds(&captured), 4);
+  let config = input::config(&captured);
+  assert_eq!(&config[..3], &[0x11, 0x11, 1]);
+  assert_eq!(config[8], 7);
+}
+#[path = "input/codec.rs"]
+mod codec;

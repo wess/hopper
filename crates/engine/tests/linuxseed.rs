@@ -73,7 +73,7 @@ fn seed_rejects_invalid_or_oversized_configuration() {
   for (user_data, meta_data) in [
     ("autoinstall: {}".into(), "instance-id: owned".into()),
     (
-      format!("#cloud-config\n{}", "x".repeat(65536)),
+      format!("#cloud-config\n{}", "x".repeat(seed::USER_DATA_LIMIT)),
       "owned".into(),
     ),
     ("#cloud-config\nvalid".into(), "x".repeat(4097)),

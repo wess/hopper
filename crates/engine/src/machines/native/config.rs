@@ -1,4 +1,9 @@
-//! Per-VM boot paths. Deployment accepts only an unwritten private sparse target.
+//! Saved VM boot configuration with separate original-disk and active-generation admission.
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod generation;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) use generation::prepare as prepare_generation;
 
 use super::assets::{self, Assets};
 use crate::machines::{Actor, Machines};
@@ -27,7 +32,7 @@ pub fn paths(root: &Path, id: &str) -> anyhow::Result<Paths> {
   ensure!(root.is_absolute(), "Native VM root must be absolute");
   crate::machines::validate_id(id)?;
   ensure!(
-    uuid::Uuid::parse_str(id)?.to_string() == id,
+    model::native::machine_identity(id).is_some(),
     "Native VM identity must be canonical"
   );
   let root = root.join("native").join(id);
@@ -59,6 +64,8 @@ pub fn initialize(manager: &Machines, id: &str) -> anyhow::Result<Paths> {
     }
     private_directory(&folder)?;
   }
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  super::restore::check_start(&paths.root, id)?;
   Ok(paths)
 }
 
@@ -78,6 +85,8 @@ pub fn prepare(
   let paths = paths(&manager.root, id)?;
   private_directory(&manager.root.join("native"))?;
   private_directory(&paths.root)?;
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  super::restore::check_start(&paths.root, id)?;
   let disk = target(&paths, &machine, matches!(stage, Stage::Deployment))?;
   let (boot_media, installer) = match stage {
     Stage::Deployment => {
@@ -113,11 +122,23 @@ pub fn prepare(
       (None, None)
     }
   };
+  boot(id, &machine, &assets, &paths, boot_media, installer)
+}
+
+fn boot(
+  id: &str,
+  machine: &model::Machine,
+  assets: &Assets,
+  paths: &Paths,
+  boot_media: Option<String>,
+  installer: Option<String>,
+) -> anyhow::Result<Boot> {
   let digest = format!(
     "{:x}",
     Sha256::digest(uuid::Uuid::parse_str(id)?.as_bytes())
   );
   Ok(Boot {
+    machine_id: id.to_owned(),
     firmware: text(&assets.firmware)?,
     variables: text(&assets.variables)?,
     store: text(&paths.variables)?,

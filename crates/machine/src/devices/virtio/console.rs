@@ -4,10 +4,12 @@ use super::queue::Chain;
 use crate::dma::{self, Memory, Span};
 use anyhow::ensure;
 use std::collections::VecDeque;
+pub mod wire;
 
 pub const MULTIPORT: u64 = 1 << 1;
 pub const LIMIT: usize = 65536;
 
+#[derive(Clone)]
 pub struct Port {
   name: String,
   announced: bool,
@@ -40,6 +42,13 @@ pub fn create(name: &str) -> anyhow::Result<Port> {
 
 pub fn opened(port: &Port) -> bool {
   port.registered && port.opened
+}
+
+pub(crate) fn same_name(first: &Port, second: &Port) -> bool {
+  first.name == second.name
+}
+pub(crate) fn name(port: &Port) -> &str {
+  &port.name
 }
 
 pub fn reset(port: &mut Port) {

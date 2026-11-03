@@ -217,14 +217,30 @@ async fn guest_shutdown_can_restart_in_the_same_registry() {
 
 #[tokio::test]
 async fn startup_rejection_releases_ownership_before_returning() {
+  for mode in [
+    "startupreject",
+    "startupforeign",
+    "startupmissing",
+    "startupzero",
+    "startupconfigmissing",
+  ] {
+    let f = Fixture::new();
+    assert!(f.sessions.start(ID, &f.helper, f.boot(mode)).await.is_err());
+    assert!(f.lock(".runtime").try_lock_exclusive().is_ok());
+    assert_eq!(f.sessions.state(ID, Actor::Person).await.unwrap(), None);
+    f.start("normal").await;
+    f.sessions.stop(ID, Actor::Person).await.unwrap();
+  }
+}
+
+#[tokio::test]
+async fn foreign_boot_identity_rejects_before_worker_start_and_releases_ownership() {
   let f = Fixture::new();
-  assert!(f
-    .sessions
-    .start(ID, &f.helper, f.boot("startupreject"))
-    .await
-    .is_err());
-  assert!(f.lock(".runtime").try_lock_exclusive().is_ok());
-  assert_eq!(f.sessions.state(ID, Actor::Person).await.unwrap(), None);
+  let mut boot = f.boot("normal");
+  boot.machine_id = "01010101-0101-0101-0101-010101010101".into();
+  let error = f.sessions.start(ID, &f.helper, boot).await.unwrap_err();
+  assert!(error.to_string().contains("belongs to a different VM"));
+  assert!(!f.probe().join("pid").exists());
   f.start("normal").await;
   f.sessions.stop(ID, Actor::Person).await.unwrap();
 }

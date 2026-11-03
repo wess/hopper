@@ -63,7 +63,17 @@ impl Prepared {
         .map(|(output, _)| output.try_clone())
         .transpose()?,
     };
-    let mut vm = vz::create(main, &boot)?;
+    let mut vm = if installer {
+      vz::create(main, &boot)?
+    } else {
+      vz::bootstrap::provision(
+        main,
+        &boot,
+        &self.machine.id,
+        owner.next_generation()?,
+        &self.check,
+      )?
+    };
     if installer {
       vz::restrict_installer_restart(&mut vm)?;
     }

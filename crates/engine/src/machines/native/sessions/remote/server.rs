@@ -81,6 +81,51 @@ async fn connection(
   if matches!(request.operation, Operation::Control) {
     return super::control::serve(stream, registry, request.vm_id, request.agent_generation).await;
   }
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  if let Operation::Snapshot { id, name } = request.operation {
+    return tokio::time::timeout(
+      Duration::from_secs(310),
+      super::snapshots::serve(
+        stream,
+        registry,
+        request.vm_id,
+        request.agent_generation,
+        id,
+        name,
+      ),
+    )
+    .await
+    .context("Snapshot agent request timed out")?;
+  }
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  if let Operation::Restore { id } = request.operation {
+    return tokio::time::timeout(
+      Duration::from_secs(910),
+      super::restoration::serve(
+        stream,
+        registry,
+        request.vm_id,
+        request.agent_generation,
+        id,
+      ),
+    )
+    .await
+    .context("Restore agent request timed out")?;
+  }
+  if let Operation::Guest { length } = request.operation {
+    return tokio::time::timeout(
+      Duration::from_secs(200),
+      super::jobs::serve(
+        stream,
+        registry,
+        request.vm_id,
+        request.agent_generation,
+        length,
+      ),
+    )
+    .await
+    .context("Guest agent request timed out")?;
+  }
   tokio::time::timeout(
     Duration::from_secs(165),
     single(stream, registry, request, captures),
@@ -133,6 +178,11 @@ async fn single(
     });
     match request.operation {
       Operation::Control => unreachable!("control was dispatched before registry retention"),
+      Operation::Guest { .. } => unreachable!("guest was dispatched separately"),
+      #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+      Operation::Snapshot { .. } => unreachable!("snapshot was dispatched separately"),
+      #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+      Operation::Restore { .. } => unreachable!("restore was dispatched separately"),
       Operation::Status => {
         let state = sessions
           .state(&request.vm_id, Actor::Agent)

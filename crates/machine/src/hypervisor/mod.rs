@@ -5,8 +5,11 @@ mod cpu;
 mod exception;
 mod ffi;
 pub mod gic;
+pub mod pmu;
+pub mod ram;
 pub mod registers;
 pub mod secondary;
+pub mod state;
 mod wake;
 mod watch;
 
@@ -24,6 +27,7 @@ use std::rc::Rc;
 pub struct Vm {
   _thread: PhantomData<Rc<()>>,
   gic: Cell<bool>,
+  address_bits: u32,
 }
 
 pub struct Memory<'a> {
@@ -53,29 +57,16 @@ fn check(status: i32, operation: &str) -> anyhow::Result<()> {
 }
 
 pub fn create() -> anyhow::Result<Vm> {
-  config::create()?;
+  let address_bits = config::create()?;
   Ok(Vm {
     _thread: PhantomData,
     gic: Cell::new(false),
+    address_bits,
   })
 }
 
 pub fn memory(vm: &Vm, guest: u64, size: usize) -> anyhow::Result<Memory<'_>> {
-  let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-  ensure!(page > 0, "Cannot determine host page size");
-  let page = page as usize;
-  ensure!(
-    size > 0 && size.is_multiple_of(page),
-    "Memory size must be page aligned"
-  );
-  ensure!(
-    guest.is_multiple_of(page as u64),
-    "Guest address must be page aligned"
-  );
-  ensure!(
-    guest.checked_add(size as u64).is_some(),
-    "Guest memory range overflows"
-  );
+  validate_memory(vm, guest, size)?;
   let address = unsafe {
     libc::mmap(
       null_mut(),
@@ -104,6 +95,27 @@ pub fn memory(vm: &Vm, guest: u64, size: usize) -> anyhow::Result<Memory<'_>> {
     size,
     _vm: PhantomData,
   })
+}
+
+fn validate_memory(vm: &Vm, guest: u64, size: usize) -> anyhow::Result<()> {
+  let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+  ensure!(page > 0, "Cannot determine host page size");
+  let page = page as usize;
+  ensure!(
+    size > 0 && size.is_multiple_of(page),
+    "Memory size must be page aligned"
+  );
+  ensure!(
+    guest.is_multiple_of(page as u64),
+    "Guest address must be page aligned"
+  );
+  ensure!(
+    guest
+      .checked_add(size as u64)
+      .is_some_and(|end| end <= (1u64 << vm.address_bits)),
+    "Guest memory exceeds the supported physical address range"
+  );
+  Ok(())
 }
 
 pub fn write(memory: &mut Memory<'_>, offset: usize, bytes: &[u8]) -> anyhow::Result<()> {

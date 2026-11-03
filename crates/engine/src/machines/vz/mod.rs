@@ -1,6 +1,7 @@
 pub(crate) mod files;
 mod identity;
 mod intent;
+mod jobs;
 pub mod mac;
 pub mod audio;
 pub mod network;

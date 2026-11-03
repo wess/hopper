@@ -82,6 +82,24 @@ async fn preparation_retries_preserve_media_credentials_and_existing_disk_data()
   assert_eq!(std::fs::read(&paths.setup).unwrap(), original);
   assert_eq!(credentials.writes.load(Ordering::SeqCst), 1);
   let installer = f.root.path().join("installer.iso");
+  let finish = std::fs::read(&tools.media.finish).unwrap();
+  let mut changed = finish.clone();
+  changed.push(0);
+  std::fs::write(&tools.media.finish, changed).unwrap();
+  assert!(sessions
+    .deploy(startup::ID, &f.assets(), &tools, progress.clone())
+    .await
+    .is_err());
+  assert_eq!(std::fs::read(&paths.setup).unwrap(), original);
+  std::fs::write(&tools.media.finish, finish).unwrap();
+  let notice = std::fs::read(&tools.media.notice).unwrap();
+  std::fs::write(&tools.media.notice, b"altered project notice").unwrap();
+  assert!(sessions
+    .deploy(startup::ID, &f.assets(), &tools, progress.clone())
+    .await
+    .is_err());
+  assert_eq!(std::fs::read(&paths.setup).unwrap(), original);
+  std::fs::write(&tools.media.notice, notice).unwrap();
   std::fs::write(&installer, [7; 32]).unwrap();
   assert!(sessions
     .deploy(startup::ID, &f.assets(), &tools, progress.clone())

@@ -46,7 +46,7 @@ pub(super) fn drivers(
 
 pub fn validate(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
   ensure!(!bytes.is_empty(), "Empty guest driver file");
-  if name.ends_with(".sys") {
+  if name.ends_with(".sys") || name.ends_with(".exe") {
     ensure!(
       bytes.len() >= 64 && &bytes[..2] == b"MZ",
       "Invalid driver executable"
@@ -72,7 +72,7 @@ pub fn validate(name: &str, bytes: &[u8]) -> anyhow::Result<()> {
   Ok(())
 }
 
-pub(super) fn read(path: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
+pub(in crate::machines::windows) fn read(path: &Path, limit: u64) -> anyhow::Result<Vec<u8>> {
   let info = std::fs::symlink_metadata(path)?;
   ensure!(
     info.is_file() && (1..=limit).contains(&info.len()),

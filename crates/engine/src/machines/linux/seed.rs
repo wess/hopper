@@ -2,11 +2,12 @@ use super::provision::Plan;
 use anyhow::ensure;
 
 const SECTOR: usize = 2048;
+pub const USER_DATA_LIMIT: usize = 8 << 20;
 
 pub fn image(plan: &Plan) -> anyhow::Result<Vec<u8>> {
   ensure!(
     plan.user_data.starts_with("#cloud-config\n")
-      && (1..=65536).contains(&plan.user_data.len())
+      && (1..=USER_DATA_LIMIT).contains(&plan.user_data.len())
       && (1..=4096).contains(&plan.meta_data.len())
       && !plan.user_data.contains('\0')
       && !plan.meta_data.contains('\0'),

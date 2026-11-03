@@ -1,5 +1,6 @@
 mod config;
 mod events;
+pub mod wire;
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -22,6 +23,7 @@ pub const SYN: Event = Event {
   value: 0,
 };
 
+#[derive(Clone)]
 pub struct Input {
   kind: Kind,
   select: u8,
@@ -47,6 +49,13 @@ pub fn create(kind: Kind) -> Input {
 
 pub fn pending(input: &Input) -> usize {
   input.pending.len()
+}
+
+pub(crate) fn same_kind(first: &Input, second: &Input) -> bool {
+  first.kind == second.kind
+}
+pub(crate) fn kind(input: &Input) -> Kind {
+  input.kind
 }
 pub fn leds(input: &Input) -> u8 {
   input.leds

@@ -185,6 +185,8 @@ impl Prepared {
   ) -> anyhow::Result<Self> {
     use crate::machines::linux::preparation::Phase;
     (self.check)()?;
+    let tools = crate::machines::linux::tools::bundled()?;
+    (self.check)()?;
     progress.send_replace(Phase::Media);
     let installer = self
       .installer
@@ -203,6 +205,8 @@ impl Prepared {
     let attempt = uuid::Uuid::new_v4().to_string();
     let plan =
       crate::machines::linux::provision::tracked(&self.machine.id, &credentials, &attempt)?;
+    let plan =
+      crate::machines::linux::provision::with_tools(&plan, &tools.executable, &tools.notices)?;
     self.attempt = Some(attempt);
     self = self.provision(&plan)?;
     self.installer = Some(directory.path().join("installer"));

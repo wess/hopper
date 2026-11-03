@@ -6,16 +6,22 @@ pub mod assets;
 pub mod config;
 pub mod deployment;
 pub mod installation;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub mod restore;
 pub mod sessions;
+pub mod snapshot;
+mod startup;
 mod wire;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub use restore::{
+  launch_generation, launch_worker as launch_restored, pause_worker as pause_restored,
+  resume_generation, resume_worker as resume_restored,
+};
 
 use anyhow::{bail, Context};
 use model::native::{Boot, Command, Result as Reply, StopReason};
-use std::{path::Path, process::Stdio, sync::Arc, time::Duration};
-use tokio::{
-  process,
-  sync::{mpsc, oneshot, watch},
-};
+use std::{path::Path, sync::Arc, time::Duration};
+use tokio::sync::{mpsc, oneshot, watch};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum State {
@@ -27,6 +33,9 @@ pub enum State {
 
 #[derive(Clone)]
 pub struct Client {
+  configuration: [u8; 32],
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  hardware: Option<snapshot::Hardware>,
   requests: mpsc::Sender<Pending>,
   state: watch::Receiver<State>,
   ended: watch::Receiver<bool>,
@@ -48,65 +57,7 @@ pub struct Frame {
 }
 
 pub async fn launch(helper: &Path, boot: Boot) -> anyhow::Result<Client> {
-  let mut child = process::Command::new(helper)
-    .stdin(Stdio::piped())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::null())
-    .kill_on_drop(true)
-    .spawn()
-    .context("Launch native VM worker")?;
-  let mut input = child.stdin.take().context("Missing native worker input")?;
-  let mut output = child
-    .stdout
-    .take()
-    .context("Missing native worker output")?;
-  let (packets, mut replies) = mpsc::channel(2);
-  let reader = tokio::spawn(async move {
-    loop {
-      let packet = wire::read(&mut output).await;
-      let ended = packet.is_err();
-      if packets.send(packet).await.is_err() || ended {
-        break;
-      }
-    }
-  });
-  let reader = actor::Reader(reader.abort_handle());
-  let command = Command::Start { boot };
-  let startup = async {
-    let packet = actor::exchange(
-      &mut input,
-      &mut replies,
-      1,
-      command,
-      Duration::from_secs(30),
-    )
-    .await?;
-    if let Reply::Rejected { message } = packet.response.result {
-      bail!("Native worker rejected startup: {message}");
-    }
-    anyhow::ensure!(
-      matches!(packet.response.result, Reply::Started {}),
-      "Native worker stopped during startup"
-    );
-    Ok::<_, anyhow::Error>(())
-  }
-  .await;
-  if let Err(error) = startup {
-    let _ = child.kill().await;
-    let _ = child.wait().await;
-    return Err(error);
-  }
-  let (requests, queue) = mpsc::channel(8);
-  let (state, status) = watch::channel(State::Running);
-  let (finished, ended) = watch::channel(false);
-  tokio::spawn(actor::serve(
-    child, input, replies, queue, state, reader, finished,
-  ));
-  Ok(Client {
-    requests,
-    state: status,
-    ended,
-  })
+  startup::launch(helper, boot, startup::Kind::Normal, None).await
 }
 
 pub fn state(client: &Client) -> State {
@@ -163,7 +114,10 @@ async fn transact(
   command: Command,
   check: Option<Check>,
 ) -> anyhow::Result<wire::Packet> {
-  if matches!(command, Command::Start { .. }) {
+  if matches!(
+    command,
+    Command::Start { .. } | Command::StartRestored { .. } | Command::StartGeneration { .. }
+  ) {
     bail!("Boot configuration is only accepted when launching a native worker");
   }
   let limit = if matches!(command, Command::Capture {}) {
@@ -190,4 +144,9 @@ async fn transact(
   })
   .await
   .context("Native VM request timed out")?
+}
+
+/// Hardware fingerprint frozen by this worker before guest execution.
+pub fn configuration(client: &Client) -> [u8; 32] {
+  client.configuration
 }

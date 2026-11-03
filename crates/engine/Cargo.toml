@@ -31,6 +31,7 @@ flate2 = "1"
 zstd = "0.13"
 libc = "0.2"
 uuid = { workspace = true }
+base64 = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Apple Containers, the macOS engine. It publishes no socket, so this is a CLI

@@ -57,6 +57,7 @@ async fn main() -> anyhow::Result<()> {
       id,
       Path::new(&args[0]),
       Boot {
+        machine_id: id.into(),
         firmware: args[1].clone(),
         variables: args[2].clone(),
         store: args[3].clone(),

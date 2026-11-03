@@ -3,14 +3,27 @@
 
 use anyhow::ensure;
 use std::time::Duration;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub mod hardware;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub mod recovery;
 pub mod variables;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod control;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod native;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod prepare;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod quiesce;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod trap;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-pub use native::{run, run_persistent, Stopped};
+pub use control::{
+  run, run_captured, run_persistent, run_persistent_captured, run_restored, run_restored_captured,
+  run_restored_persistent, run_restored_persistent_captured, Stopped,
+};
 
 pub struct Boot {
   pub firmware: Vec<u8>,

@@ -1,16 +1,30 @@
 use super::{check, ffi};
-use anyhow::Context;
+use anyhow::{ensure, Context};
 use std::ptr::NonNull;
 
-pub(super) fn create() -> anyhow::Result<()> {
+pub(super) fn create() -> anyhow::Result<u32> {
   let config =
     NonNull::new(unsafe { ffi::hv_vm_config_create() }).context("Create VM configuration")?;
-  let configured = check(
-    unsafe { ffi::hv_vm_config_set_el2_enabled(config.as_ptr(), false) },
-    "Disable nested guest virtualization",
-  );
-  let result =
-    configured.and_then(|_| check(unsafe { ffi::hv_vm_create(config.as_ptr()) }, "Create VM"));
+  let result = (|| {
+    let mut maximum = 0;
+    check(
+      unsafe { ffi::hv_vm_config_get_max_ipa_size(&mut maximum) },
+      "Read VM address width",
+    )?;
+    ensure!(maximum >= 36, "Native VM address width is unsupported");
+    // 64 GiB of RAM starts above zero; the SDK's default 36-bit range is too small.
+    let bits = maximum.min(40);
+    check(
+      unsafe { ffi::hv_vm_config_set_ipa_size(config.as_ptr(), bits) },
+      "Configure VM address width",
+    )?;
+    check(
+      unsafe { ffi::hv_vm_config_set_el2_enabled(config.as_ptr(), false) },
+      "Disable nested guest virtualization",
+    )?;
+    check(unsafe { ffi::hv_vm_create(config.as_ptr()) }, "Create VM")?;
+    Ok(bits)
+  })();
   unsafe { ffi::os_release(config.as_ptr()) };
   result
 }

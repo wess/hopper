@@ -2,23 +2,26 @@ mod commands;
 mod cursor;
 pub mod linear;
 mod resource;
+pub mod snapshot;
 
 use super::queue::Chain;
 use crate::dma::{self, Memory};
 use anyhow::ensure;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 const INVALID: u32 = 0x1205;
 const MISSING: u32 = 0x1203;
 const EXHAUSTED: u32 = 0x1201;
 const LIMIT: usize = 128 * 1024 * 1024;
 
+#[derive(Clone)]
 pub struct Display {
   resources: BTreeMap<u32, resource::Resource>,
   allocated: usize,
   preferred: (u32, u32),
   scanout: Option<(u32, resource::Rect)>,
-  frame: Option<Frame>,
+  frame: Option<Arc<Frame>>,
   generation: u64,
   cursor: cursor::Cursor,
   linear: linear::Linear,
@@ -26,10 +29,15 @@ pub struct Display {
 
 pub use cursor::{execute as execute_cursor, Cursor};
 
+pub(crate) fn preferred(display: &Display) -> (u32, u32) {
+  display.preferred
+}
+
 pub fn cursor(display: &Display) -> &Cursor {
   &display.cursor
 }
 
+#[derive(Clone)]
 pub struct Frame {
   pub width: u32,
   pub height: u32,
@@ -56,9 +64,9 @@ pub fn create(width: u32, height: u32) -> anyhow::Result<Display> {
 
 pub fn frame(display: &Display) -> Option<&Frame> {
   if linear::active(&display.linear) {
-    display.linear.frame.as_ref()
+    display.linear.frame.as_deref()
   } else {
-    display.frame.as_ref()
+    display.frame.as_deref()
   }
 }
 

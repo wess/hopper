@@ -83,11 +83,8 @@ pub fn observed(previous: &Installation, next: SetupStatus) -> anyhow::Result<In
       _ => {}
     }
   }
-  Ok(if matches!(&next, SetupStatus::Deployed {}) {
-    Installation::Deployed {}
-  } else {
-    Installation::Setup { status: next }
-  })
+  // only a subsequent clean guest shutdown publishes Deployed.
+  Ok(Installation::Setup { status: next })
 }
 
 pub fn boot_stage(installation: Option<&Installation>) -> anyhow::Result<config::Stage> {

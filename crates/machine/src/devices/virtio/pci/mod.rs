@@ -3,6 +3,7 @@ mod config;
 mod memory;
 pub mod msix;
 mod registers;
+pub mod snapshot;
 pub use memory::{memory_read, memory_write, read, write};
 
 use super::{block, console, gpu, input, queue, scsi};

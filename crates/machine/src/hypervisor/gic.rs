@@ -1,5 +1,7 @@
 //! The kernel-backed GIC handles interrupt routing and guest register accesses.
 
+pub mod state;
+
 use super::{check, ffi, Vm};
 use anyhow::{ensure, Context};
 use std::ffi::c_void;

@@ -104,7 +104,7 @@ async fn deployment_handoff_preserves_identity_detaches_media_and_keeps_viewer_w
   assert_eq!(boots.len(), 2);
   assert!(boots[0]["bootMedia"].is_string() && boots[0]["installer"].is_string());
   assert!(boots[1]["bootMedia"].is_null() && boots[1]["installer"].is_null());
-  for field in ["disk", "diskId", "store", "memory", "cpus"] {
+  for field in ["machineId", "disk", "diskId", "store", "memory", "cpus"] {
     assert_eq!(boots[0][field], boots[1][field]);
   }
   tokio::time::timeout(Duration::from_secs(2), async {
@@ -130,6 +130,60 @@ async fn deployment_handoff_preserves_identity_detaches_media_and_keeps_viewer_w
 }
 
 #[tokio::test]
+async fn deployment_waits_for_guest_shutdown_before_publishing_system_boot() {
+  let f = Fixture::new().await;
+  f.written();
+  let hold = f.paths.variables.join("finishhold");
+  std::fs::write(&hold, "").unwrap();
+  f.emit(SetupStatus::Deployed {});
+  tokio::time::timeout(Duration::from_secs(3), async {
+    while !f.paths.variables.join("finishreceived").exists() {
+      tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+  })
+  .await
+  .unwrap();
+  assert_eq!(f.boots().len(), 1);
+  assert_eq!(
+    f.installation(),
+    Installation::Setup {
+      status: SetupStatus::Deployed {}
+    }
+  );
+  assert!(installation::boot_stage(Some(&f.installation())).is_err());
+  assert!(f
+    .sessions
+    .request(ID, Actor::Person, Command::FinishDeployment {})
+    .await
+    .is_err());
+  std::fs::remove_file(hold).unwrap();
+  f.wait(Installation::SystemStarted {}).await;
+  assert_eq!(f.boots().len(), 2);
+  f.sessions.stop(ID, Actor::Person).await.unwrap();
+}
+
+#[tokio::test]
+async fn unclean_installer_stop_preserves_disk_and_requires_recovery() {
+  let f = Fixture::new().await;
+  f.written();
+  std::fs::write(f.paths.variables.join("finishrequested"), "").unwrap();
+  f.emit(SetupStatus::Deployed {});
+  f.wait(Installation::Interrupted {
+    status: SetupStatus::Deployed {},
+  })
+  .await;
+  assert_eq!(f.boots().len(), 1);
+  assert!(installation::boot_stage(Some(&f.installation())).is_err());
+  let mut prefix = [0; 26];
+  use std::io::Read;
+  std::fs::File::open(&f.paths.disk)
+    .unwrap()
+    .read_exact(&mut prefix)
+    .unwrap();
+  assert_eq!(&prefix, b"synthetic deployed system\0");
+}
+
+#[tokio::test]
 async fn paused_completion_waits_for_resume_and_failures_preserve_recovery_state() {
   let f = Fixture::new().await;
   f.sessions
@@ -138,7 +192,10 @@ async fn paused_completion_waits_for_resume_and_failures_preserve_recovery_state
     .unwrap();
   f.written();
   f.emit(SetupStatus::Deployed {});
-  f.wait(Installation::Deployed {}).await;
+  f.wait(Installation::Setup {
+    status: SetupStatus::Deployed {},
+  })
+  .await;
   tokio::time::sleep(Duration::from_millis(600)).await;
   assert_eq!(f.boots().len(), 1);
   assert_eq!(

@@ -14,21 +14,20 @@ use std::{
 
 pub(super) struct Parent {
   pub input: File,
-  pub output: File,
+  pub output: ipc::Output,
   pub stream: ipc::Stream,
   pub pending: Option<Request>,
   pub held: bool,
   pub stopping: Option<u64>,
   pub input_since: Option<Instant>,
-  pub write_since: Option<Instant>,
   pub setup: setup::Decoder,
+  pub snapshots: Option<super::snapshot::Snapshots>,
+  pub restore: Option<super::restore::Gate>,
 }
 
 impl Parent {
   pub fn reply(&mut self, id: u64, result: Reply, payload: &[u8]) -> anyhow::Result<()> {
-    ipc::send(&mut self.stream, &Response { id, result }, payload)?;
-    self.write_since = Some(Instant::now());
-    Ok(())
+    self.output.send(&Response { id, result }, payload)
   }
 
   pub fn poll(
@@ -37,6 +36,10 @@ impl Parent {
     ram: &mut Memory<'_>,
     mode: Mode,
   ) -> anyhow::Result<Control> {
+    if let Some(gate) = &self.restore {
+      gate.check()?;
+      ensure!(mode == Mode::Paused, "Restored CPUs escaped admission hold");
+    }
     ensure!(
       devices
         .iter()
@@ -59,39 +62,65 @@ impl Parent {
       release(devices, ram)?;
       self.input_since = None;
     }
-    if self.stream.flush(&mut self.output)? > 0 {
-      self.write_since = Some(Instant::now());
+    if let Some(snapshots) = &mut self.snapshots {
+      snapshots.tick();
     }
-    if self.stream.pending() {
-      ensure!(
-        self
-          .write_since
-          .is_some_and(|since| since.elapsed() < Duration::from_secs(5)),
-        "Native parent stopped receiving replies"
+    if self.output.pending()? {
+      return Ok(
+        if self.held
+          || self
+            .snapshots
+            .as_ref()
+            .is_some_and(|snapshots| snapshots.capturing())
+        {
+          Control::Pause
+        } else {
+          Control::Continue
+        },
       );
-      return Ok(if self.held {
-        Control::Pause
-      } else {
-        Control::Continue
-      });
     }
     let request = if let Some(request) = self.pending.take() {
       request
     } else {
       let Some(request) = ipc::receive(&mut self.stream, &mut self.input)? else {
-        return Ok(if self.held {
-          Control::Pause
-        } else {
-          Control::Continue
-        });
+        return Ok(
+          if self.held
+            || self
+              .snapshots
+              .as_ref()
+              .is_some_and(|snapshots| snapshots.capturing())
+          {
+            Control::Pause
+          } else {
+            Control::Continue
+          },
+        );
       };
       request
     };
-    if matches!(request.command, Command::Capture {} | Command::Pause {}) && mode != Mode::Paused {
+    if matches!(
+      request.command,
+      Command::Capture {} | Command::Pause {} | Command::SnapshotStart { .. }
+    ) && mode != Mode::Paused
+    {
       self.pending = Some(request);
       return Ok(Control::Pause);
     }
     let id = request.id;
+    if self
+      .restore
+      .as_ref()
+      .is_some_and(|gate| gate.blocks(&request.command))
+    {
+      self.reply(
+        id,
+        Reply::Rejected {
+          message: "Restore requires its original explicit resume authorization".into(),
+        },
+        &[],
+      )?;
+      return Ok(Control::Pause);
+    }
     let result = match request.command {
       Command::Status {} => {
         let setup = match setup::status(&self.setup) {
@@ -110,13 +139,15 @@ impl Parent {
           &[],
         )
       }
-      Command::Start { .. } => self.reply(
-        id,
-        Reply::Rejected {
-          message: "Native worker is already initialized".into(),
-        },
-        &[],
-      ),
+      Command::Start { .. } | Command::StartRestored { .. } | Command::StartGeneration { .. } => {
+        self.reply(
+          id,
+          Reply::Rejected {
+            message: "Native worker is already initialized".into(),
+          },
+          &[],
+        )
+      }
       Command::Capture {} => {
         capture(devices, ram).and_then(|(header, bytes)| self.reply(id, header, &bytes))
       }
@@ -124,6 +155,8 @@ impl Parent {
         self.held = true;
         self.reply(id, Reply::Paused {}, &[])
       }
+      Command::RestoreResume { restore } => super::restore::activate(self, id, restore, false),
+      Command::RestorePause { restore } => super::restore::activate(self, id, restore, true),
       Command::Resume {} => {
         self.held = false;
         self.reply(id, Reply::Running {}, &[])
@@ -160,7 +193,65 @@ impl Parent {
         self.input_since = None;
         self.reply(id, Reply::Accepted {}, &[])
       }),
+      Command::FinishDeployment {} => {
+        let mut finish = || -> anyhow::Result<()> {
+          ensure!(
+            !self.held && setup::status(&self.setup) == setup::Status::Deployed,
+            "Installer is not ready to shut down"
+          );
+          pci::send_serial(
+            devices[6].as_mut().context("Missing setup device")?,
+            ram,
+            b"HOPPER_SHUTDOWN\r\n",
+          )
+        };
+        finish().and_then(|()| self.reply(id, Reply::Accepted {}, &[]))
+      }
+      Command::SnapshotStart {
+        snapshot_id,
+        policy_generation,
+      } => {
+        if let Some(gate) = &mut self.restore {
+          gate.begin_capture()?;
+        }
+        self
+          .snapshots
+          .as_mut()
+          .context("Snapshots unavailable")?
+          .start(snapshot_id, policy_generation)
+          .and_then(|()| self.reply(id, Reply::Accepted {}, &[]))
+      }
+      Command::SnapshotPoll {
+        snapshot_id,
+        policy_generation,
+      } => self
+        .snapshots
+        .as_ref()
+        .context("Snapshots unavailable")?
+        .poll(&snapshot_id, policy_generation)
+        .and_then(|status| {
+          self.reply(
+            id,
+            Reply::Snapshot {
+              snapshot_id,
+              status,
+            },
+            &[],
+          )
+        }),
+      Command::SnapshotCancel {
+        snapshot_id,
+        policy_generation,
+      } => self
+        .snapshots
+        .as_mut()
+        .context("Snapshots unavailable")?
+        .cancel(&snapshot_id, policy_generation)
+        .and_then(|()| self.reply(id, Reply::Accepted {}, &[])),
       Command::Stop {} => {
+        if let Some(snapshots) = &mut self.snapshots {
+          snapshots.clear();
+        }
         release(devices, ram)?;
         self.stopping = Some(id);
         return Ok(Control::Stop);
@@ -176,11 +267,18 @@ impl Parent {
         &[],
       )?;
     }
-    Ok(if self.held {
-      Control::Pause
-    } else {
-      Control::Continue
-    })
+    Ok(
+      if self.held
+        || self
+          .snapshots
+          .as_ref()
+          .is_some_and(|snapshots| snapshots.capturing())
+      {
+        Control::Pause
+      } else {
+        Control::Continue
+      },
+    )
   }
 }
 

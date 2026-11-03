@@ -1,4 +1,5 @@
 mod install;
+mod jobs;
 mod status;
 pub use install::Installation;
 pub use status::Status;
@@ -28,12 +29,15 @@ pub struct Owner {
   pending: BTreeMap<String, Operation>,
   installations: BTreeMap<String, install::Operation>,
   generation: u64,
+  jobs: BTreeMap<String, jobs::Link>,
+  jobs_due: std::time::Instant,
 }
 
 enum Request {
   Transition(Transition),
   Status(Query),
   Install(install::RequestInstall),
+  Guest(jobs::Query),
 }
 
 struct Query {
@@ -66,6 +70,8 @@ pub fn channel() -> (Client, Owner) {
       pending: BTreeMap::new(),
       installations: BTreeMap::new(),
       generation: 0,
+      jobs: BTreeMap::new(),
+      jobs_due: std::time::Instant::now(),
     },
   )
 }
@@ -136,7 +142,10 @@ impl Owner {
   }
 
   pub fn active(&self) -> bool {
-    !self.pending.is_empty() || !self.installations.is_empty()
+    !self.pending.is_empty()
+      || !self.installations.is_empty()
+      || !self.jobs.is_empty()
+      || self.machines.values().any(super::bootstrap::active)
   }
 
   pub fn insert(&mut self, id: &str, vm: Vm) -> anyhow::Result<()> {
@@ -145,13 +154,49 @@ impl Owner {
       !self.machines.contains_key(id),
       "VZ identity is already owned"
     );
-    self.generation = self
-      .generation
-      .checked_add(1)
-      .context("VZ generation exhausted")?;
+    let generation = self.next_generation()?;
+    ensure!(
+      vm.guest_boot
+        .as_ref()
+        .is_none_or(|boot| boot.machine == id && boot.generation == generation),
+      "Private boot identity or generation does not match admission"
+    );
+    self.generation = generation;
     vm.generation.set(self.generation);
     self.machines.insert(id.into(), vm);
     Ok(())
+  }
+
+  pub fn next_generation(&self) -> anyhow::Result<u64> {
+    self
+      .generation
+      .checked_add(1)
+      .context("VZ generation exhausted")
+  }
+
+  pub fn requires_replacement(&self, id: &str) -> anyhow::Result<bool> {
+    let vm = self.machines.get(id).context("VZ machine is not owned")?;
+    Ok(vm.guest_boot.is_some() && vm.started.get())
+  }
+
+  pub fn commands(
+    &self,
+    id: &str,
+    policy: u64,
+    check: Check,
+  ) -> anyhow::Result<crate::guest::Connection<super::socket::Listener>> {
+    check()?;
+    let vm = self.machines.get(id).context("VZ machine is not owned")?;
+    let material = vm
+      .guest_material
+      .as_ref()
+      .context("This VM has no owned guest credentials")?;
+    crate::guest::connect_borrowed(
+      self.guest_socket(id, check)?,
+      material,
+      policy,
+      std::time::Instant::now(),
+    )
   }
 
   pub fn state(&self, id: &str) -> anyhow::Result<objc2_virtualization::VZVirtualMachineState> {
@@ -171,6 +216,40 @@ impl Owner {
     );
     let vm = self.machines.get(id).context("VZ machine is not owned")?;
     super::socket::listen(vm, check)
+  }
+
+  /// command clients and their socket stay on the VM queue.
+  /// the check must retain the original runtime and policy generations.
+  ///
+  /// ```compile_fail
+  /// fn move_commands(client: machine::guest::Connection<machine::vz::socket::Listener>) {
+  ///   std::thread::spawn(move || drop(client));
+  /// }
+  /// ```
+  pub fn guest_commands(
+    &self,
+    id: &str,
+    material: model::guest::wire::auth::Material,
+    policy: u64,
+    check: Check,
+  ) -> anyhow::Result<crate::guest::Connection<super::socket::Listener>> {
+    ensure!(
+      material.boot.machine == id && material.boot.guest == model::GuestOs::Linux,
+      "Guest command material does not match the owned Linux VM"
+    );
+    let vm = self.machines.get(id).context("VZ machine is not owned")?;
+    ensure!(
+      vm.guest_boot
+        .as_ref()
+        .is_none_or(|boot| boot == &material.boot),
+      "Guest command generation does not match the private boot channel"
+    );
+    crate::guest::connect(
+      self.guest_socket(id, check)?,
+      material,
+      policy,
+      std::time::Instant::now(),
+    )
   }
 
   pub fn installer(&self, id: &str) -> anyhow::Result<bool> {
@@ -207,7 +286,10 @@ impl Owner {
       !vm.displaying.get(),
       "Close the VM display before retiring ownership"
     );
-    ensure!(!vm.listening.get(), "Close the guest transport before retiring ownership");
+    ensure!(
+      !vm.listening.get(),
+      "Close the guest transport before retiring ownership"
+    );
     Ok(())
   }
 
@@ -218,7 +300,11 @@ impl Owner {
   }
 
   pub fn tick(&mut self) {
+    for vm in self.machines.values() {
+      super::bootstrap::tick(vm);
+    }
     self.tick_installations();
+    self.tick_jobs();
     let mut finished = Vec::new();
     for (id, operation) in &self.pending {
       match super::poll(&operation.pending) {
@@ -254,6 +340,10 @@ impl Owner {
           }
           continue;
         }
+        Request::Guest(query) => {
+          self.guest_request(query);
+          continue;
+        }
       };
       if request.send.is_closed() {
         continue;
@@ -273,6 +363,9 @@ impl Owner {
           !self.pending.contains_key(&request.id) && !self.installations.contains_key(&request.id),
           "Another VZ operation is active"
         );
+        if matches!(request.action, Action::Stop | Action::Pause) {
+          self.jobs.remove(&request.id);
+        }
         super::scoped_transition(vm, request.action, request.check.clone())
       })();
       match result {

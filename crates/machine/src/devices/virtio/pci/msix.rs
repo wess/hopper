@@ -1,8 +1,10 @@
 use anyhow::ensure;
+pub mod wire;
 
 pub const SIZE: u64 = 0x1000;
 pub const PENDING: u64 = 0x800;
 
+#[derive(Clone)]
 pub struct State {
   entries: Vec<[u32; 4]>,
   pending: u64,

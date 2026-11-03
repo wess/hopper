@@ -1,7 +1,9 @@
 //! Polled PL011 console for early firmware boot diagnostics.
 
 use std::collections::VecDeque;
+pub mod wire;
 
+#[derive(Clone)]
 pub struct Console {
   pub control: u32,
   line: u32,

@@ -38,6 +38,7 @@ echo "[bundle] $app_name $version"
 
 echo "[bundle] cargo build --profile $profile -p app -p mcp -p machine --locked"
 cargo build --profile "$profile" -p app -p mcp -p machine --locked
+bash scripts/build/guest.sh
 
 mkdir -p dist
 stage="$(mktemp -d dist/.hopper.XXXXXX)"
@@ -45,6 +46,11 @@ trap 'rm -rf "$stage"' EXIT
 app="$stage/$app_name.app"
 contents="$app/Contents"
 mkdir -p "$contents/MacOS" "$contents/Resources"
+cp LICENSE "$contents/Resources/LICENSE"
+mkdir -p "$contents/Resources/licenses"
+cp assets/licenses/sha2asm.txt "$contents/Resources/licenses/sha2asm.txt"
+cp -R native/build/guesttools "$contents/Resources/guesttools"
+python3 scripts/build/guestmanifest.py --verify "$contents/Resources/guesttools"
 
 [ -x native/build/lima/bin/limactl ] || scripts/build/lima.sh
 [ -f native/build/docker ] || scripts/build/docker.sh

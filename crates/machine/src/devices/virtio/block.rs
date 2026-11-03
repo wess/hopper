@@ -7,12 +7,17 @@ use std::{
   path::Path,
 };
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub mod snapshot;
+
 pub struct Disk {
   file: File,
   sectors: u64,
   readonly: bool,
   id: [u8; 20],
   writeback: bool,
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  _temporary: Option<tempfile::TempDir>,
 }
 
 pub fn open(path: &Path, readonly: bool, id: [u8; 20]) -> anyhow::Result<Disk> {
@@ -39,11 +44,23 @@ pub fn attach(file: File, readonly: bool, id: [u8; 20]) -> anyhow::Result<Disk> 
     readonly,
     id,
     writeback: false,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    _temporary: None,
   })
+}
+
+pub(crate) fn identity(disk: &Disk) -> [u8; 20] {
+  disk.id
 }
 
 pub fn capacity(disk: &Disk) -> u64 {
   disk.sectors
+}
+
+impl Drop for Disk {
+  fn drop(&mut self) {
+    let _ = fs2::FileExt::unlock(&self.file);
+  }
 }
 pub fn readonly(disk: &Disk) -> bool {
   disk.readonly

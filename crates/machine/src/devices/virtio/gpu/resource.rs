@@ -1,11 +1,41 @@
 use crate::dma::Span;
+use std::sync::Arc;
 
+#[derive(Clone)]
 pub(super) struct Resource {
   pub width: u32,
   pub height: u32,
   pub format: u32,
-  pub pixels: Vec<u8>,
-  pub backing: Vec<Span>,
+  pub pixels: Arc<Vec<u8>>,
+  pub backing: Arc<Vec<Span>>,
+}
+
+fn copy(bytes: &[u8]) -> Result<Vec<u8>, u32> {
+  let mut copied = Vec::new();
+  copied
+    .try_reserve_exact(bytes.len())
+    .map_err(|_| super::EXHAUSTED)?;
+  copied.extend_from_slice(bytes);
+  Ok(copied)
+}
+
+pub(super) fn writable(pixels: &mut Arc<Vec<u8>>) -> Result<&mut Vec<u8>, u32> {
+  if Arc::get_mut(pixels).is_none() {
+    *pixels = Arc::new(copy(pixels)?);
+  }
+  Arc::get_mut(pixels).ok_or(super::EXHAUSTED)
+}
+
+pub(super) fn writable_frame(frame: &mut Arc<super::Frame>) -> Result<&mut super::Frame, u32> {
+  if Arc::get_mut(frame).is_none() {
+    *frame = Arc::new(super::Frame {
+      width: frame.width,
+      height: frame.height,
+      rgba: copy(&frame.rgba)?,
+      generation: frame.generation,
+    });
+  }
+  Arc::get_mut(frame).ok_or(super::EXHAUSTED)
 }
 
 #[derive(Clone, Copy)]

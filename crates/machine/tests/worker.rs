@@ -91,6 +91,7 @@ fn invalid_hardware_does_not_create_persistent_state() {
       id: 1,
       command: Command::Start {
         boot: Boot {
+          machine_id: "01010101-0101-0101-0101-010101010101".into(),
           firmware: firmware.to_string_lossy().into(),
           variables: variables.to_string_lossy().into(),
           store: store.to_string_lossy().into(),
@@ -128,6 +129,7 @@ fn legacy_disk_headers_are_rejected_without_modifying_the_image() {
       id: 1,
       command: Command::Start {
         boot: Boot {
+          machine_id: "01010101-0101-0101-0101-010101010101".into(),
           firmware: firmware.to_string_lossy().into(),
           variables: variables.to_string_lossy().into(),
           store: temporary.path().join("store").to_string_lossy().into(),
@@ -152,4 +154,43 @@ fn legacy_disk_headers_are_rejected_without_modifying_the_image() {
     .open(disk)
     .unwrap();
   fs2::FileExt::try_lock_exclusive(&file).unwrap();
+}
+
+#[test]
+fn invalid_or_missing_identity_rejects_before_opening_boot_files() {
+  for identity in [
+    None,
+    Some(""),
+    Some("00000000-0000-0000-0000-000000000000"),
+    Some("A1010101-0101-0101-0101-010101010101"),
+    Some("01010101010101010101010101010101"),
+  ] {
+    let mut request = serde_json::json!({
+      "id": 1,
+      "command": { "type": "start", "boot": {
+        "firmware": "/missing/firmware", "variables": "/missing/variables",
+        "store": "/missing/store", "bootMedia": null, "installer": null,
+        "disk": null, "diskId": "hopper00000000000001", "memory": 268435456,
+        "cpus": 1, "timeoutMs": 1000
+      }}
+    });
+    if let Some(identity) = identity {
+      request["command"]["boot"]["machineId"] = identity.into();
+    }
+    let mut child = worker();
+    child
+      .stdin
+      .as_mut()
+      .unwrap()
+      .write_all(&ipc::encode(&request, &[]).unwrap())
+      .unwrap();
+    failure(
+      child,
+      if identity.is_none() {
+        "missing field `machineId`"
+      } else {
+        "Invalid native VM identity"
+      },
+    );
+  }
 }

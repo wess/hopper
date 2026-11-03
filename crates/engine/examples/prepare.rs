@@ -15,7 +15,7 @@ use tokio::sync::watch;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
   let args: Vec<_> = std::env::args().skip(1).collect();
-  ensure!(matches!(args.len(), 1 | 5), "Provide an installer, optionally followed by drivers root, license, WIM helper and image helper");
+  ensure!(matches!(args.len(), 1 | 7), "Provide an installer, optionally followed by drivers root, license, WIM helper, image helper, ARM64 finish helper and project notice");
   // diagnostic credentials are held only in memory and never touch the OS keychain.
   keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
   let root = tempfile::tempdir()?;
@@ -52,6 +52,8 @@ async fn main() -> anyhow::Result<()> {
         archive: "/usr/bin/tar".into(),
         wim: args[3].clone().into(),
         image: args[4].clone().into(),
+        finish: args[5].clone().into(),
+        notice: args[6].clone().into(),
       },
       mount: "/usr/sbin/diskutil".into(),
       drivers: args[1].clone().into(),

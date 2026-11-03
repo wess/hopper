@@ -20,7 +20,7 @@ impl Fixture {
   fn new() -> Self {
     let source = source::Fixture::new("normal");
     let root = source.root.path().join("windows");
-    for folder in ["bin", "lib", "licenses"] {
+    for folder in ["bin", "lib", "licenses", "guest"] {
       std::fs::create_dir_all(root.join(folder)).unwrap();
     }
     for name in ["wimlib-imagex", "mkisofs"] {
@@ -31,6 +31,8 @@ impl Fixture {
     std::fs::write(root.join("licenses/virtio.txt"), b"synthetic license").unwrap();
     std::fs::write(root.join("licenses/packages.json"), b"{}").unwrap();
     let input = source.input();
+    std::fs::copy(&source.tools.finish, root.join("guest/hopperfinish.exe")).unwrap();
+    std::fs::copy(&source.tools.notice, root.join("licenses/hopper.txt")).unwrap();
     fn copy(from: &Path, to: &Path) {
       std::fs::create_dir(to).unwrap();
       for entry in from.read_dir().unwrap() {
@@ -96,6 +98,22 @@ fn native_windows_assets_are_coherent_for_app_and_sidecars() {
   assert_eq!(tools.drivers, f.root.join("drivers"));
   assert_eq!(tools.mount, Path::new("/usr/sbin/diskutil"));
   assert!(f.source.root.path().exists());
+}
+
+#[test]
+fn installer_helper_architecture_and_project_notice_are_checked_after_manifest_refresh() {
+  let f = Fixture::new();
+  let helper = f.root.join("guest/hopperfinish.exe");
+  let original = std::fs::read(&helper).unwrap();
+  let mut bytes = original.clone();
+  bytes[68..70].copy_from_slice(&0x8664u16.to_le_bytes());
+  std::fs::write(&helper, bytes).unwrap();
+  f.manifest();
+  assert!(assets::verify(&f.root).is_err());
+  std::fs::write(&helper, original).unwrap();
+  std::fs::write(f.root.join("licenses/hopper.txt"), b"wrong license").unwrap();
+  f.manifest();
+  assert!(assets::verify(&f.root).is_err());
 }
 
 #[test]

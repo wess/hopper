@@ -1,5 +1,6 @@
 use crate::dma::{Memory, Span};
 use anyhow::{ensure, Context};
+pub mod snapshot;
 use std::{
   collections::BTreeSet,
   sync::atomic::{fence, Ordering},

@@ -1,5 +1,6 @@
 mod audio;
 mod auxiliary;
+pub mod bootstrap;
 mod config;
 mod console;
 mod display;
@@ -77,6 +78,9 @@ pub struct Vm {
   started: Cell<bool>,
   stop_requested: Rc<Cell<bool>>,
   generation: Cell<u64>,
+  guest_boot: Option<model::guest::wire::auth::Boot>,
+  guest_material: Option<model::guest::wire::auth::Material>,
+  boot_delivery: RefCell<Option<bootstrap::Delivery>>,
 }
 
 #[derive(Clone, Copy)]
@@ -129,6 +133,9 @@ fn configured(
     started: Cell::new(false),
     stop_requested: Rc::new(Cell::new(false)),
     generation: Cell::new(0),
+    guest_boot: None,
+    guest_material: None,
+    boot_delivery: RefCell::new(None),
   }
 }
 
@@ -179,6 +186,10 @@ fn scoped_transition(
     "Install macOS before starting its hardware"
   );
   if matches!(action, Action::Start) {
+    ensure!(
+      vm.guest_boot.is_none() || !vm.started.get(),
+      "Private boot input has been used; prepare new owned hardware before restarting"
+    );
     for directory in &*vm.shares {
       directory.validate()?;
     }

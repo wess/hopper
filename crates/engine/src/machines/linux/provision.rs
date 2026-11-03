@@ -6,6 +6,9 @@ use sha_crypt::{sha512_simple, Sha512Params};
 use store::guests::Credentials;
 use uuid::Uuid;
 
+mod tools;
+pub use tools::with_tools;
+
 pub struct Plan {
   pub user_data: String,
   pub meta_data: String,

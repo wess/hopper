@@ -44,6 +44,15 @@ def verify(app):
   entitlement(contents / 'MacOS/sidecars/hoppervm', 'com.apple.security.hypervisor')
   entitlement(resources / 'lima/bin/limactl', 'com.apple.security.virtualization')
   run(sys.executable, 'scripts/build/windowsmanifest.py', '--verify', str(resources / 'windows'))
+  run(sys.executable, 'scripts/build/guestmanifest.py', '--verify', str(resources / 'guesttools'))
+  license = resources / 'LICENSE'
+  if (license.is_symlink() or not license.is_file()
+      or license.read_bytes() != pathlib.Path('LICENSE').read_bytes()):
+    raise ValueError('Missing or mismatched project license')
+  notice = resources / 'licenses' / 'sha2asm.txt'
+  if (notice.is_symlink() or not notice.is_file()
+      or notice.read_bytes() != pathlib.Path('assets/licenses/sha2asm.txt').read_bytes()):
+    raise ValueError('Missing or mismatched SHA-2 assembly license')
   for name in ['windows.fd', 'variables.fd', 'manifest.json', 'revision.txt', 'license.txt']:
     if not (resources / 'firmware' / name).is_file():
       raise ValueError(f'Missing owned firmware: {name}')

@@ -8,6 +8,7 @@ import urllib.request
 
 import bottles
 import windowsmanifest as manifest
+import windowsfinish
 
 
 def drivers(package, stage):
@@ -83,6 +84,7 @@ def main(destination, package=None):
       package = root / 'drivers.rpm'
       download(package)
     drivers(pathlib.Path(package), stage)
+    windowsfinish.build(stage)
     subprocess.check_call([str(stage / 'bin/wimlib-imagex'), '--version'])
     subprocess.check_call([str(stage / 'bin/mkisofs'), '--version'])
     manifest.write(stage)

@@ -52,7 +52,7 @@ pub fn read(input: &Input) -> [u8; 136] {
       size = 1;
     }
     (0x12, 0 | 1) if input.kind == Kind::Tablet => {
-      data[4..8].copy_from_slice(&65535u32.to_le_bytes());
+      data[4..8].copy_from_slice(&32767u32.to_le_bytes());
       size = 20;
     }
     _ => {}

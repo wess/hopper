@@ -3,6 +3,9 @@ mod optical;
 mod transport;
 pub use transport::execute;
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub mod snapshot;
+
 use anyhow::ensure;
 use std::{fs::File, path::Path};
 
@@ -22,10 +25,19 @@ pub struct Optical {
   missing: Option<[u8; 8]>,
   control: Option<(u32, u32, [u8; 8])>,
   transfer: Option<(u64, u64)>,
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  _temporary: Option<tempfile::TempDir>,
+}
+
+pub(crate) fn capacity(media: &Optical) -> u64 {
+  media.sectors
 }
 
 pub fn open(path: &Path) -> anyhow::Result<Optical> {
-  let file = File::open(path)?;
+  attach(File::open(path)?)
+}
+
+fn attach(file: File) -> anyhow::Result<Optical> {
   let metadata = file.metadata()?;
   ensure!(
     metadata.is_file() && metadata.len() > 0 && metadata.len().is_multiple_of(SECTOR),
@@ -44,6 +56,8 @@ pub fn open(path: &Path) -> anyhow::Result<Optical> {
     missing: None,
     control: None,
     transfer: None,
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    _temporary: None,
   })
 }
 

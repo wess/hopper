@@ -71,6 +71,8 @@ pub fn verify(root: &Path) -> anyhow::Result<Tools> {
     "bin/mkisofs",
     "licenses/virtio.txt",
     "licenses/packages.json",
+    "guest/hopperfinish.exe",
+    "licenses/hopper.txt",
   ]
   .into_iter()
   .map(str::to_owned)
@@ -112,7 +114,10 @@ pub fn verify(root: &Path) -> anyhow::Result<Tools> {
       "Unexpected Windows preparation executable"
     );
     ensure!(
-      code || name.starts_with("drivers/") || name.starts_with("licenses/"),
+      code
+        || name.starts_with("drivers/")
+        || name.starts_with("licenses/")
+        || name == "guest/hopperfinish.exe",
       "Unexpected Windows asset location"
     );
     ensure!(
@@ -139,11 +144,20 @@ pub fn verify(root: &Path) -> anyhow::Result<Tools> {
       files::validate(name, &bytes)?;
     }
   }
+  let finish = files::read(&root.join("guest/hopperfinish.exe"), 1024 * 1024)?;
+  files::validate("hopperfinish.exe", &finish)?;
+  ensure!(
+    files::read(&root.join("licenses/hopper.txt"), 64 * 1024)?
+      == include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE")),
+    "Bundled installer helper license does not match this build"
+  );
   Ok(Tools {
     media: setup::Tools {
       archive: "/usr/bin/tar".into(),
       wim: root.join("bin/wimlib-imagex"),
       image: root.join("bin/mkisofs"),
+      finish: root.join("guest/hopperfinish.exe"),
+      notice: root.join("licenses/hopper.txt"),
     },
     mount: "/usr/sbin/diskutil".into(),
     drivers: root.join("drivers"),

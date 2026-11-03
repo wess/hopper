@@ -1,12 +1,13 @@
 use super::{
   affinity, check, create_cpu, enter, ffi, get, paced, registers, set, CpuFactory, Exit,
 };
-use crate::psci::power;
+use crate::psci::{power, Reply};
+pub mod recovery;
 use anyhow::{ensure, Context};
 use std::{
   sync::{
     atomic::{AtomicBool, Ordering},
-    mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError},
+    mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError},
     Arc, Mutex,
   },
   time::{Duration, Instant},
@@ -40,6 +41,9 @@ pub struct Config<'vm> {
   pub stop: Arc<AtomicBool>,
   pub power: Arc<Mutex<power::Power>>,
   pub pause: Option<Arc<crate::pause::Pause>>,
+  pub capture: Option<Arc<super::state::group::Group>>,
+  pub pmu: Option<super::pmu::Token<'vm>>,
+  pub recovery: Option<recovery::Recovery<'vm>>,
 }
 
 #[derive(Debug, Default)]
@@ -77,32 +81,64 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
   });
   let controls = controls.into_iter().collect::<anyhow::Result<Vec<_>>>()?;
   config.ready.send(())?;
-  let interval = Duration::from_millis(20);
-  loop {
-    if !checkpoint(&config)? {
+  let mut resumed = if let Some(recovery) = &config.recovery {
+    if !recovery.prepare(
+      &mut cpu,
+      config.affinity,
+      &config.stop,
+      config.pmu.context("Missing PMU recovery mapping")?,
+    )? {
       return Ok(stats);
     }
-    let boot = match config.boot.recv_timeout(interval) {
-      Ok(boot) => boot,
-      Err(RecvTimeoutError::Timeout) => continue,
-      Err(RecvTimeoutError::Disconnected) => return Ok(stats),
-    };
-    for &(register, value) in &controls {
-      check(
-        unsafe { ffi::hv_vcpu_set_sys_reg(cpu.id, register, value) },
-        "Restore CPU boot control",
-      )?;
-    }
-    enter(&mut cpu, boot.entry)?;
-    set(&mut cpu, 0, boot.context)?;
-    power::started(
+    power::call(
       &mut *config
         .power
         .lock()
         .map_err(|_| anyhow::anyhow!("CPU power lock poisoned"))?,
-      config.index,
-    )?;
-    stats.starts += 1;
+      0,
+      0xc4000004,
+      [config.affinity, 0, 0],
+    ) == Reply::Value(0)
+  } else {
+    false
+  };
+  if resumed {
+    stats.starts = 1;
+  }
+  let interval = Duration::from_millis(20);
+  loop {
+    if !std::mem::take(&mut resumed) {
+      let boot = match config.boot.try_recv() {
+        Ok(boot) => boot,
+        Err(TryRecvError::Empty) => {
+          if !checkpoint(&config, &mut cpu)? {
+            return Ok(stats);
+          }
+          match config.boot.recv_timeout(interval) {
+            Ok(boot) => boot,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => return Ok(stats),
+          }
+        }
+        Err(TryRecvError::Disconnected) => return Ok(stats),
+      };
+      for &(register, value) in &controls {
+        check(
+          unsafe { ffi::hv_vcpu_set_sys_reg(cpu.id, register, value) },
+          "Restore CPU boot control",
+        )?;
+      }
+      enter(&mut cpu, boot.entry)?;
+      set(&mut cpu, 0, boot.context)?;
+      power::started(
+        &mut *config
+          .power
+          .lock()
+          .map_err(|_| anyhow::anyhow!("CPU power lock poisoned"))?,
+        config.index,
+      )?;
+      stats.starts += 1;
+    }
     let off = paced(
       &mut cpu,
       config.timeout,
@@ -110,7 +146,7 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
       |cpu| -> anyhow::Result<bool> {
         let started = Instant::now();
         loop {
-          if !checkpoint(&config)? {
+          if !checkpoint(&config, cpu)? {
             return Ok(false);
           }
           let exit = super::run(cpu)?;
@@ -125,8 +161,9 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
             registers: before.clone(),
             reply,
           };
+          // finish this trap before acknowledging pause; the device owner drains replies.
           loop {
-            if !checkpoint(&config)? {
+            if config.stop.load(Ordering::Acquire) {
               return Ok(false);
             }
             ensure!(
@@ -152,7 +189,7 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
           }
           stats.traps += 1;
           loop {
-            if !checkpoint(&config)? {
+            if config.stop.load(Ordering::Acquire) {
               return Ok(false);
             }
             ensure!(
@@ -191,9 +228,19 @@ pub fn serve(config: Config<'_>) -> anyhow::Result<Stats> {
   }
 }
 
-fn checkpoint(config: &Config<'_>) -> anyhow::Result<bool> {
+fn checkpoint(config: &Config<'_>, cpu: &mut super::Cpu<'_>) -> anyhow::Result<bool> {
   match &config.pause {
-    Some(pause) => crate::pause::checkpoint(pause, &config.stop),
+    Some(pause) => crate::pause::checkpoint_with(pause, &config.stop, |generation| {
+      if let Some(group) = &config.capture {
+        group.record(
+          cpu,
+          config.index,
+          generation,
+          config.pmu.context("Missing PMU capture mapping")?,
+        )?;
+      }
+      Ok(())
+    }),
     None => Ok(!config.stop.load(Ordering::Acquire)),
   }
 }

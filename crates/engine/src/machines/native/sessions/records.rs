@@ -9,6 +9,8 @@ use model::{
   CreateMachine, GuestOs, Machine, MachineStatus,
 };
 use std::path::Path;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod recovery;
 
 impl Sessions {
   pub fn create_windows(&self, request: CreateMachine) -> anyhow::Result<Machine> {
@@ -130,6 +132,19 @@ impl Sessions {
       } else {
         current.as_ref().map(progress)
       };
+      #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+      let (state, progress) = if !busy && !foreign {
+        match recovery::status(manager, &machine.id, current.as_ref(), &hardware) {
+          Some(recovery) => (
+            recovery.state.unwrap_or(state),
+            Some(recovery.progress.into()),
+          ),
+          None => (state, progress),
+        }
+      } else {
+        (state, progress)
+      };
+      manager.machine(&machine.id, actor)?;
       rows.push(MachineStatus {
         machine,
         state: state.into(),
@@ -159,7 +174,7 @@ fn progress(installation: &Installation) -> String {
 fn setup(status: SetupStatus) -> String {
   match status {
     SetupStatus::Waiting {} => "Waiting for Windows setup".into(),
-    SetupStatus::Deployed {} => "Windows installed".into(),
+    SetupStatus::Deployed {} => "Finishing Windows installation".into(),
     SetupStatus::Invalid {} => {
       "Windows setup returned invalid progress; the disk is retained".into()
     }

@@ -17,6 +17,8 @@ pub struct Tools {
   pub archive: PathBuf,
   pub wim: PathBuf,
   pub image: PathBuf,
+  pub finish: PathBuf,
+  pub notice: PathBuf,
 }
 
 pub struct Input<'a> {
@@ -38,7 +40,7 @@ pub enum Phase {
   Building,
 }
 
-const BOOTSTRAP: &str = "@echo off\r\ntitle Hopper native Windows deployment\r\nwpeinit\r\nif errorlevel 1 goto failed\r\ndrvload X:\\hopper\\vioserial\\vioser.inf\r\nif errorlevel 1 goto failed\r\nfor /L %%I in (1,1,10) do (\r\n  cmd /c exit 0\r\n  >\\\\.\\org.hopper.setup echo HOPPERSETUP/1 phase 0\r\n  if not errorlevel 1 goto connected\r\n  ping 127.0.0.1 -n 2 >nul\r\n)\r\ngoto failed\r\n:connected\r\nset HOPPER_SETUP_PORT=\\\\.\\org.hopper.setup\r\ncall X:\\hopper\\deploy.cmd\r\nif errorlevel 1 goto failed\r\necho Hopper image prepared. Stop the VM and boot from its new disk.\r\ngoto finished\r\n:failed\r\necho Hopper deployment stopped. The VM has not been marked ready.\r\n:finished\r\ncmd /k\r\n";
+const BOOTSTRAP: &str = "@echo off\r\ntitle Hopper native Windows deployment\r\nwpeinit\r\nif errorlevel 1 goto failed\r\ndrvload X:\\hopper\\vioserial\\vioser.inf\r\nif errorlevel 1 goto failed\r\nfor /L %%I in (1,1,10) do (\r\n  cmd /c exit 0\r\n  >\\\\.\\org.hopper.setup echo HOPPERSETUP/1 phase 0\r\n  if not errorlevel 1 goto connected\r\n  ping 127.0.0.1 -n 2 >nul\r\n)\r\ngoto failed\r\n:connected\r\nset HOPPER_SETUP_PORT=\\\\.\\org.hopper.setup\r\nif not exist X:\\hopper\\hopperfinish.exe goto failed\r\ncall X:\\hopper\\deploy.cmd\r\nif errorlevel 1 goto failed\r\necho Hopper image prepared. Waiting for clean shutdown acknowledgement.\r\nX:\\hopper\\hopperfinish.exe\r\nif errorlevel 1 goto failed\r\nwpeutil shutdown\r\ngoto failed\r\n:failed\r\necho Hopper deployment stopped. The VM has not been marked ready.\r\n:finished\r\ncmd /k\r\n";
 
 pub async fn build(
   input: &Input<'_>,
@@ -114,6 +116,15 @@ pub async fn build(
   }
   progress(Phase::Drivers);
   let hashes = files::drivers(input.drivers, input.license, &payload)?;
+  let finish = files::read(&tools.finish, 1024 * 1024)?;
+  files::validate("hopperfinish.exe", &finish)?;
+  let notice = files::read(&tools.notice, 64 * 1024)?;
+  ensure!(
+    notice == include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE")),
+    "Installer helper license does not match this build"
+  );
+  files::write(&payload.join("hopperfinish.exe"), &finish)?;
+  files::write(&payload.join("hopperlicense.txt"), &notice)?;
   files::write(&payload.join("drivers.cmd"), BOOTSTRAP.as_bytes())?;
   let shell = root.join("winpeshl.ini");
   files::write(
@@ -202,6 +213,8 @@ pub async fn build(
     "vmId": input.vm_id, "size": size, "sha256": format!("{:x}", digest.finalize()), "driverSha256": hashes,
     "containsGuestCredentials": true, "detachBeforeFirstBoot": true,
     "installerSha256": installer_hash, "planSha256": plan_hash(input.plan),
+    "finishSha256": format!("{:x}", Sha256::digest(&finish)),
+    "noticeSha256": format!("{:x}", Sha256::digest(&notice)),
   }))?;
   files::write(&publication.join("deployment.json"), &manifest)?;
   std::fs::File::open(&publication)?.sync_all()?;
@@ -215,9 +228,23 @@ pub(crate) async fn verify_source(
   output: &Path,
   installer: &Path,
   plan: &Plan,
+  tools: &Tools,
 ) -> anyhow::Result<()> {
   let bytes = files::read(&output.with_extension("json"), 1024 * 1024)?;
   let metadata: serde_json::Value = serde_json::from_slice(&bytes)?;
+  let finish = files::read(&tools.finish, 1024 * 1024)?;
+  files::validate("hopperfinish.exe", &finish)?;
+  let notice = files::read(&tools.notice, 64 * 1024)?;
+  ensure!(
+    notice == include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE")),
+    "Installer helper license does not match this build"
+  );
+  ensure!(
+    metadata["finishSha256"].as_str() == Some(format!("{:x}", Sha256::digest(&finish)).as_str())
+      && metadata["noticeSha256"].as_str()
+        == Some(format!("{:x}", Sha256::digest(&notice)).as_str()),
+    "Existing setup bundle uses different installer helper assets; preserve it for recovery"
+  );
   ensure!(
     metadata["planSha256"].as_str() == Some(plan_hash(plan).as_str()),
     "Existing setup bundle uses a different deployment layout; preserve it for recovery"
@@ -232,6 +259,8 @@ pub(crate) async fn verify_source(
 
 fn plan_hash(plan: &Plan) -> String {
   let mut hash = Sha256::new();
+  hash.update((BOOTSTRAP.len() as u64).to_le_bytes());
+  hash.update(BOOTSTRAP);
   hash.update((plan.partitions.len() as u64).to_le_bytes());
   hash.update(&plan.partitions);
   hash.update(&plan.commands);

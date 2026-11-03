@@ -60,6 +60,7 @@ impl Fixture {
 
   pub fn boot(&self, mode: &str) -> Boot {
     Boot {
+      machine_id: ID.into(),
       firmware: String::new(),
       variables: String::new(),
       store: self.probe().to_string_lossy().into(),

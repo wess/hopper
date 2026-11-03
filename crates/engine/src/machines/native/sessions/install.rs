@@ -148,23 +148,50 @@ impl Sessions {
           installation::save(&manager, &id, next.clone())?;
         }
         progress.send_replace(Phase::Installing(setup));
-        if !matches!(next, Installation::Deployed {}) || paused {
+        if !matches!(
+          next,
+          Installation::Setup {
+            status: SetupStatus::Deployed {}
+          } | Installation::Deployed {}
+        ) || paused
+        {
           return Ok(
             matches!(
               next,
               Installation::Setup {
-                status: SetupStatus::Waiting {} | SetupStatus::Active { .. }
+                status: SetupStatus::Waiting {}
+                  | SetupStatus::Active { .. }
+                  | SetupStatus::Deployed {}
               } | Installation::Deployed {}
             )
             .then_some(epoch),
           );
         }
-        let stopped = super::super::request(&active.client, Command::Stop {}).await?;
+        let stopped = super::super::request(&active.client, Command::FinishDeployment {}).await?;
         ensure!(
-          matches!(stopped, Reply::Stopped { .. }),
-          "Installer worker did not stop"
+          matches!(stopped, Reply::Accepted {}),
+          "Installer worker did not accept clean shutdown"
         );
+        let mut state = active.client.state.clone();
+        tokio::time::timeout(Duration::from_secs(120), async {
+          loop {
+            match state.borrow_and_update().clone() {
+              super::super::State::Stopped(model::native::StopReason::Shutdown) => return Ok(()),
+              super::super::State::Stopped(_) | super::super::State::Failed(_) => {
+                anyhow::bail!("Installer did not complete a clean guest shutdown");
+              }
+              _ => {}
+            }
+            state
+              .changed()
+              .await
+              .context("Installer shutdown observation ended")?;
+          }
+        })
+        .await
+        .context("Installer clean shutdown timed out")??;
         owner::finished(active).await?;
+        installation::save(&manager, &id, Installation::Deployed {})?;
         owner::retire(&slot, super::super::state(&active.client));
         session.take();
         super::reboot::start(&manager, &id, &assets, &progress, &slot, &mut session)

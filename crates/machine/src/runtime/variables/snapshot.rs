@@ -1,19 +1,16 @@
-use super::{directory, file, private, SIZE};
+use super::{Root, SIZE};
 use anyhow::ensure;
 use sha2::{Digest, Sha256};
 use std::{
   io::{Read, Write},
-  path::Path,
   sync::atomic::{AtomicU64, Ordering},
 };
 
 const MAGIC: &[u8; 8] = b"HOPBANK1";
 static NEXT: AtomicU64 = AtomicU64::new(0);
 
-pub(super) fn read(root: &Path) -> anyhow::Result<(Vec<u8>, u64)> {
-  let path = root.join("bank");
-  private(&path, false)?;
-  let file = file(&path, false)?;
+pub(super) fn read(root: &Root) -> anyhow::Result<(Vec<u8>, u64)> {
+  let file = root.file("bank", false)?;
   ensure!(
     file.metadata()?.len() == (SIZE + 48) as u64,
     "Invalid variable bank size"
@@ -34,14 +31,14 @@ pub(super) fn read(root: &Path) -> anyhow::Result<(Vec<u8>, u64)> {
   ))
 }
 
-pub(super) fn write(root: &Path, bank: &[u8], sequence: u64) -> anyhow::Result<()> {
+pub(super) fn write(root: &Root, bank: &[u8], sequence: u64) -> anyhow::Result<()> {
   ensure!(bank.len() == SIZE, "Invalid variable bank size");
-  let path = root.join(format!(
+  let path = format!(
     "pending.{}.{}",
     std::process::id(),
     NEXT.fetch_add(1, Ordering::Relaxed)
-  ));
-  let mut output = file(&path, true)?;
+  );
+  let mut output = root.file(&path, true)?;
   let result = (|| -> anyhow::Result<()> {
     let mut checksum = Sha256::new();
     checksum.update(MAGIC);
@@ -52,12 +49,12 @@ pub(super) fn write(root: &Path, bank: &[u8], sequence: u64) -> anyhow::Result<(
     output.write_all(bank)?;
     output.write_all(&checksum.finalize())?;
     output.sync_all()?;
-    std::fs::rename(&path, root.join("bank"))?;
-    directory(root)?;
+    root.replace(&path, "bank")?;
+    root.sync()?;
     Ok(())
   })();
   if result.is_err() {
-    let _ = std::fs::remove_file(path);
+    root.remove(&path);
   }
   result
 }

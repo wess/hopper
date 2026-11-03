@@ -29,3 +29,11 @@ tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dev-dependencies]
+machine = { path = "../machine" }
+engine = { workspace = true }
+store = { workspace = true }
+fs2 = "0.4"
+objc2-foundation = "0.3"
+sha2 = "0.10"

@@ -5,7 +5,7 @@ use crate::{
 };
 use anyhow::{ensure, Context};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Cursor {
   pub x: u32,
   pub y: u32,

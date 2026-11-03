@@ -40,10 +40,21 @@ def contents(root):
   if not 1 <= len(files) <= 256:
     raise ValueError('Invalid Windows asset count')
   required = {'bin/wimlib-imagex', 'bin/mkisofs', 'licenses/virtio.txt', 'licenses/packages.json'}
+  required.update({'guest/hopperfinish.exe', 'licenses/hopper.txt'})
   required.update(f'drivers/{group}/w11/ARM64/{name}'
                   for group, names in DRIVERS.items() for name in names)
   if not required <= files.keys():
     raise ValueError('Incomplete Windows asset package')
+  helper = root / 'guest/hopperfinish.exe'
+  if not 70 <= helper.stat().st_size <= 1 << 20:
+    raise ValueError('Invalid Windows installer helper size')
+  data = helper.read_bytes()
+  offset = int.from_bytes(data[60:64], 'little')
+  if data[:2] != b'MZ' or data[offset:offset + 6] != b'PE\0\0\x64\xaa':
+    raise ValueError('Windows installer helper is not ARM64')
+  notice = root / 'licenses/hopper.txt'
+  if notice.stat().st_size > 64 << 10 or notice.read_bytes() != (pathlib.Path(__file__).resolve().parents[2] / 'LICENSE').read_bytes():
+    raise ValueError('Windows installer helper project notice mismatch')
   return {'version': 1, 'driverPackage': {'url': URL, 'sha256': SHA256}, 'files': files}
 
 

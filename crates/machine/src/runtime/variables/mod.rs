@@ -1,21 +1,27 @@
 mod journal;
+mod root;
+use root::Root;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod restore;
 mod snapshot;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) use restore::matches;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub use restore::{from_snapshot, from_snapshot_at};
 
 use anyhow::{ensure, Context};
 use fs2::FileExt;
-#[cfg(unix)]
-use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::{
-  fs::{File, OpenOptions},
+  fs::File,
   io::{Seek, SeekFrom, Write},
-  path::{Path, PathBuf},
+  path::Path,
 };
 
 pub const SIZE: usize = 0x4000000;
 const COMPACT: u64 = 4 * 1024 * 1024;
 
 pub struct Variables {
-  root: PathBuf,
+  root: Root,
   _lock: File,
   log: File,
   bank: Vec<u8>,
@@ -23,48 +29,15 @@ pub struct Variables {
   sequence: u64,
 }
 
-fn private(path: &Path, directory: bool) -> anyhow::Result<()> {
-  let metadata = std::fs::symlink_metadata(path)?;
-  ensure!(
-    if directory {
-      metadata.is_dir()
-    } else {
-      metadata.is_file()
-    },
-    "Invalid variable store path"
-  );
-  #[cfg(unix)]
-  ensure!(
-    metadata.permissions().mode() & 0o777 == if directory { 0o700 } else { 0o600 },
-    "Variable store must have private permissions"
-  );
-  Ok(())
-}
-
-fn file(path: &Path, create: bool) -> anyhow::Result<File> {
-  if !create {
-    private(path, false)?;
-  }
-  let mut options = OpenOptions::new();
-  options.read(true).write(true).create_new(create);
-  #[cfg(unix)]
-  options.mode(0o600);
-  options
-    .open(path)
-    .context("Open private variable store file")
-}
-
-fn guard(root: &Path) -> anyhow::Result<File> {
-  private(root, true)?;
-  let path = root.join("lock");
-  let lock = match file(&path, true) {
+fn guard(root: &Root) -> anyhow::Result<File> {
+  let lock = match root.file("lock", true) {
     Ok(file) => file,
     Err(error)
       if error
         .downcast_ref::<std::io::Error>()
         .is_some_and(|error| error.kind() == std::io::ErrorKind::AlreadyExists) =>
     {
-      file(&path, false)?
+      root.file("lock", false)?
     }
     Err(error) => return Err(error),
   };
@@ -74,33 +47,24 @@ fn guard(root: &Path) -> anyhow::Result<File> {
   Ok(lock)
 }
 
-fn directory(root: &Path) -> anyhow::Result<()> {
-  #[cfg(unix)]
-  File::open(root)?.sync_all()?;
-  let _ = root;
-  Ok(())
-}
-
 pub fn create(root: &Path, template: &[u8]) -> anyhow::Result<Variables> {
   ensure!(
     !template.is_empty() && template.len() <= SIZE,
     "Invalid variable template size"
   );
-  let mut builder = std::fs::DirBuilder::new();
-  #[cfg(unix)]
-  builder.mode(0o700);
-  builder
-    .create(root)
-    .context("Create new private variable store")?;
-  let lock = guard(root)?;
+  create_inner(Root::create(root)?, template)
+}
+
+fn create_inner(root: Root, template: &[u8]) -> anyhow::Result<Variables> {
+  let lock = guard(&root)?;
   let mut bank = vec![0xff; SIZE];
   bank[..template.len()].copy_from_slice(template);
-  snapshot::write(root, &bank, 0)?;
-  let log = file(&root.join("journal"), true)?;
+  snapshot::write(&root, &bank, 0)?;
+  let log = root.file("journal", true)?;
   log.sync_all()?;
-  directory(root)?;
+  root.sync()?;
   Ok(Variables {
-    root: root.into(),
+    root,
     _lock: lock,
     log,
     bank,
@@ -110,10 +74,14 @@ pub fn create(root: &Path, template: &[u8]) -> anyhow::Result<Variables> {
 }
 
 pub fn open(root: &Path) -> anyhow::Result<Variables> {
-  let lock = guard(root)?;
-  let (mut bank, mut sequence) = snapshot::read(root)?;
+  open_inner(Root::open(root)?)
+}
+
+fn open_inner(root: Root) -> anyhow::Result<Variables> {
+  let lock = guard(&root)?;
+  let (mut bank, mut sequence) = snapshot::read(&root)?;
   let saved = sequence;
-  let mut log = file(&root.join("journal"), false)?;
+  let mut log = root.file("journal", false)?;
   let retained = journal::replay(&mut log, &mut bank, &mut sequence)?;
   if retained < log.metadata()?.len() {
     log.set_len(retained)?;
@@ -121,14 +89,14 @@ pub fn open(root: &Path) -> anyhow::Result<Variables> {
   }
   if retained > 0 {
     if sequence != saved {
-      snapshot::write(root, &bank, sequence)?;
+      snapshot::write(&root, &bank, sequence)?;
     }
     log.set_len(0)?;
     log.sync_all()?;
   }
   log.seek(SeekFrom::End(0))?;
   Ok(Variables {
-    root: root.into(),
+    root,
     _lock: lock,
     log,
     bank,
@@ -171,4 +139,31 @@ pub fn commit(store: &mut Variables, offset: usize, bytes: &[u8]) -> anyhow::Res
     store.poisoned = true;
   }
   result.context("Persist guest variable change")
+}
+
+/// Exclusively create the fixed variables child of a caller-owned private stage.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn create_at(parent: &File, template: &[u8]) -> anyhow::Result<Variables> {
+  ensure!(
+    !template.is_empty() && template.len() <= SIZE,
+    "Invalid variable template size"
+  );
+  create_inner(Root::child(parent, true)?, template)
+}
+
+/// Open and retain the fixed variables child through a pinned private parent.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn open_at(parent: &File) -> anyhow::Result<Variables> {
+  open_inner(Root::child(parent, false)?)
+}
+
+impl Drop for Variables {
+  fn drop(&mut self) {
+    let _ = FileExt::unlock(&self._lock);
+  }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(crate) fn directory(store: &Variables) -> anyhow::Result<File> {
+  Ok(store.root.directory.try_clone()?)
 }

@@ -2,6 +2,7 @@ use super::{encode, header_length, payload_size};
 use anyhow::ensure;
 use model::native::{Request, Response};
 use std::io::{ErrorKind, Read, Write};
+use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub struct Stream {
@@ -55,9 +56,14 @@ impl Stream {
 
   pub fn flush(&mut self, writer: &mut impl Write) -> anyhow::Result<usize> {
     let before = self.written;
-    let limit = (self.written + 64 * 1024).min(self.output.len());
-    while self.written < limit {
-      match writer.write(&self.output[self.written..limit]) {
+    let limit = (self.written + 4 * 1024 * 1024).min(self.output.len());
+    let since = Instant::now();
+    for _ in 0..256 {
+      if self.written == limit || since.elapsed() >= Duration::from_millis(2) {
+        break;
+      }
+      let end = (self.written + 64 * 1024).min(limit);
+      match writer.write(&self.output[self.written..end]) {
         Ok(0) => anyhow::bail!("Native parent stopped receiving"),
         Ok(length) => self.written += length,
         Err(error) if error.kind() == ErrorKind::WouldBlock => break,

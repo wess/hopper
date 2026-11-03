@@ -4,6 +4,8 @@ use anyhow::ensure;
 use vm_fdt::FdtWriter;
 
 pub const RAM: u64 = 0x40000000;
+pub const RTC: u64 = 0x09010000;
+pub const RTC_IRQ: u32 = 34;
 pub const UART: u64 = 0x09000000;
 pub const DISTRIBUTOR: u64 = 0x08000000;
 pub const REDISTRIBUTOR: u64 = 0x0a000000;
@@ -139,6 +141,16 @@ pub fn tree(topology: &Topology) -> anyhow::Result<Vec<u8>> {
   fdt.property_array_u32("clocks", &[2, 2])?;
   fdt.property_string_list("clock-names", vec!["uartclk".into(), "apb_pclk".into()])?;
   fdt.end_node(uart)?;
+  let rtc = fdt.begin_node("rtc@9010000")?;
+  fdt.property_string_list(
+    "compatible",
+    vec!["arm,pl031".into(), "arm,primecell".into()],
+  )?;
+  fdt.property_array_u64("reg", &[RTC, 0x1000])?;
+  fdt.property_array_u32("clocks", &[2])?;
+  fdt.property_string("clock-names", "apb_pclk")?;
+  fdt.property_array_u32("interrupts", &[0, RTC_IRQ - 32, 4])?;
+  fdt.end_node(rtc)?;
   let flash = fdt.begin_node("flash@0")?;
   fdt.property_string("compatible", "cfi-flash")?;
   fdt.property_array_u64("reg", &[0, 0x4000000, 0x4000000, 0x4000000])?;

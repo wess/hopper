@@ -1,0 +1,19 @@
+[package]
+name = "guest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+model = { path = "../model" }
+zeroize = "1"
+serde_json = { workspace = true }
+sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

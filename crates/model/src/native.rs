@@ -1,4 +1,5 @@
 pub mod keyboard;
+pub mod snapshot;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +16,39 @@ pub enum Command {
   Start {
     boot: Boot,
   },
+  StartGeneration {
+    boot: Boot,
+    restore: Restore,
+  },
+  StartRestored {
+    boot: Boot,
+    restore: Restore,
+  },
+  RestoreResume {
+    restore: Restore,
+  },
+  RestorePause {
+    restore: Restore,
+  },
   Capture {},
+  SnapshotStart {
+    #[serde(rename = "snapshotId")]
+    snapshot_id: String,
+    #[serde(rename = "policyGeneration")]
+    policy_generation: u64,
+  },
+  SnapshotPoll {
+    #[serde(rename = "snapshotId")]
+    snapshot_id: String,
+    #[serde(rename = "policyGeneration")]
+    policy_generation: u64,
+  },
+  SnapshotCancel {
+    #[serde(rename = "snapshotId")]
+    snapshot_id: String,
+    #[serde(rename = "policyGeneration")]
+    policy_generation: u64,
+  },
   Status {},
   Pause {},
   Resume {},
@@ -24,12 +57,23 @@ pub enum Command {
     events: Vec<InputEvent>,
   },
   Release {},
+  /// private installer acknowledgement; never exposed through agent control.
+  FinishDeployment {},
   Stop {},
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Restore {
+  pub snapshot_id: String,
+  pub generation_id: String,
+  pub policy_generation: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Boot {
+  pub machine_id: String,
   pub firmware: String,
   pub variables: String,
   pub store: String,
@@ -70,7 +114,28 @@ pub struct Response {
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Result {
   /// native hardware is allocated; this does not imply guest desktop readiness.
-  Started {},
+  Started {
+    #[serde(rename = "machineId")]
+    machine_id: String,
+    configuration: [u8; 32],
+  },
+  GenerationStarted {
+    #[serde(rename = "machineId")]
+    machine_id: String,
+    configuration: [u8; 32],
+    restore: Restore,
+  },
+  Restored {
+    #[serde(rename = "machineId")]
+    machine_id: String,
+    configuration: [u8; 32],
+    restore: Restore,
+  },
+  Snapshot {
+    #[serde(rename = "snapshotId")]
+    snapshot_id: String,
+    status: snapshot::Status,
+  },
   Paused {},
   Running {},
   Accepted {},
@@ -142,4 +207,10 @@ pub enum SetupPhase {
   Provision,
   Recovery,
   Boot,
+}
+
+/// Native boot requests carry the canonical persisted VM identity, never a path-derived guess.
+pub fn machine_identity(id: &str) -> Option<[u8; 16]> {
+  let identity = uuid::Uuid::parse_str(id).ok()?;
+  (!identity.is_nil() && identity.to_string() == id).then(|| *identity.as_bytes())
 }

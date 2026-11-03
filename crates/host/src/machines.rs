@@ -1,10 +1,27 @@
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod mac;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod snapshots;
 
 use crate::{Host, MachineActor};
 use model::{CreateMachine, Machine, MachineStatus};
 
 impl Host {
+  #[cfg(unix)]
+  pub async fn request_guest_job(
+    &self,
+    id: &str,
+    policy: u64,
+    action: model::guest::wire::Action,
+  ) -> anyhow::Result<model::guest::wire::Outcome> {
+    ::engine::machines::native::sessions::remote::jobs::request_scoped(
+      &self.machines(),
+      id,
+      policy,
+      action,
+    )
+    .await
+  }
   #[cfg(unix)]
   pub async fn native_machine_lifecycle(
     &self,
@@ -131,7 +148,11 @@ impl Host {
     ::engine::machines::vz::sharing::folders(&self.machines(), id)
   }
 
-  pub fn add_virtual_machine_folder(&self, id: &str, folder: model::MachineFolder) -> anyhow::Result<()> {
+  pub fn add_virtual_machine_folder(
+    &self,
+    id: &str,
+    folder: model::MachineFolder,
+  ) -> anyhow::Result<()> {
     ::engine::machines::vz::sharing::add(&self.machines(), id, folder)
   }
 
@@ -139,7 +160,12 @@ impl Host {
     ::engine::machines::vz::sharing::remove(&self.machines(), id, name)
   }
 
-  pub fn set_virtual_machine_folder_read_only(&self, id: &str, name: &str, read_only: bool) -> anyhow::Result<()> {
+  pub fn set_virtual_machine_folder_read_only(
+    &self,
+    id: &str,
+    name: &str,
+    read_only: bool,
+  ) -> anyhow::Result<()> {
     ::engine::machines::vz::sharing::set_read_only(&self.machines(), id, name, read_only)
   }
 
@@ -150,6 +176,9 @@ impl Host {
       .map_err(|_| anyhow::anyhow!("VZ service lock failed"))?;
     anyhow::ensure!(service.is_none(), "VZ ownership is already connected");
     let (client, owner) = ::engine::machines::vz::channel();
+    self
+      .native_machines()
+      .connect_virtual_agents(client.clone())?;
     *service = Some(::engine::machines::vz::Service::new(
       self.machines(),
       client,
@@ -170,6 +199,20 @@ impl Host {
       .clone()
       .ok_or_else(|| anyhow::anyhow!("VZ ownership is not connected"))?;
     service.transition(id, actor, action).await
+  }
+
+  pub async fn virtual_guest_request(
+    &self,
+    id: &str,
+    action: model::guest::wire::Action,
+  ) -> anyhow::Result<model::guest::wire::Outcome> {
+    let service = self
+      .virtual_machines
+      .lock()
+      .map_err(|_| anyhow::anyhow!("VZ service lock failed"))?
+      .clone()
+      .ok_or_else(|| anyhow::anyhow!("VZ ownership is not connected"))?;
+    service.guest_request(id, action).await
   }
 }
 

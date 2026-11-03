@@ -11,6 +11,7 @@ fn fixture(mode: &str) -> (TempDir, Boot) {
   std::fs::write(&helper, include_str!("native/worker.py")).unwrap();
   std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
   let boot = Boot {
+    machine_id: "01010101-0101-0101-0101-010101010101".into(),
     firmware: String::new(),
     variables: String::new(),
     store: root.path().to_string_lossy().into(),
@@ -80,6 +81,7 @@ async fn terminal(client: &mut Client) -> State {
 #[tokio::test]
 async fn fragmented_frames_and_pause_state_round_trip() {
   let (root, client) = launch("normal").await;
+  assert_eq!(native::configuration(&client), [7; 32]);
   let frame = native::capture(&client).await.unwrap();
   assert_eq!((frame.width, frame.height, frame.generation), (1, 1, 7));
   assert_eq!(frame.rgba, [1, 2, 3, 255]);
@@ -87,6 +89,7 @@ async fn fragmented_frames_and_pause_state_round_trip() {
   assert_eq!(native::state(&client), State::Paused);
   native::request(&client, Command::Resume {}).await.unwrap();
   assert_eq!(native::state(&client), State::Running);
+  assert_eq!(native::configuration(&client.clone()), [7; 32]);
   native::request(&client, Command::Stop {}).await.unwrap();
   assert_eq!(
     native::state(&client),
@@ -174,7 +177,14 @@ async fn rejected_commands_do_not_poison_the_session() {
 
 #[tokio::test]
 async fn invalid_startup_reaps_the_worker() {
-  for mode in ["startupreject", "startupwrong"] {
+  for mode in [
+    "startupreject",
+    "startupwrong",
+    "startupforeign",
+    "startupmissing",
+    "startupzero",
+    "startupconfigmissing",
+  ] {
     let (root, boot) = fixture(mode);
     assert!(native::launch(&root.path().join("worker"), boot)
       .await
@@ -192,4 +202,22 @@ async fn cancelled_startup_reaps_the_worker() {
   task.abort();
   assert!(matches!(task.await, Err(error) if error.is_cancelled()));
   exited(&root).await;
+}
+
+#[tokio::test]
+async fn invalid_vm_identity_rejects_before_spawning_a_worker() {
+  for identity in [
+    "",
+    "00000000-0000-0000-0000-000000000000",
+    "A1010101-0101-0101-0101-010101010101",
+  ] {
+    let (root, mut boot) = fixture("normal");
+    boot.machine_id = identity.into();
+    let error = native::launch(&root.path().join("worker"), boot)
+      .await
+      .err()
+      .unwrap();
+    assert!(error.to_string().contains("Invalid native VM identity"));
+    assert!(!root.path().join("pid").exists());
+  }
 }

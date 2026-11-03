@@ -3,6 +3,7 @@ use super::{
   Display, Frame, EXHAUSTED, INVALID, LIMIT, MISSING,
 };
 use crate::dma::{self, Memory, Span};
+use std::sync::Arc;
 
 pub(super) fn word(bytes: &[u8], offset: usize) -> u32 {
   u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
@@ -61,8 +62,8 @@ pub(super) fn execute(
           width,
           height,
           format,
-          pixels,
-          backing: Vec::new(),
+          pixels: Arc::new(pixels),
+          backing: Arc::new(Vec::new()),
         },
       );
       display.allocated += size;
@@ -100,12 +101,12 @@ pub(super) fn execute(
         rgba.try_reserve_exact(size).map_err(|_| EXHAUSTED)?;
         rgba.resize(size, 0);
         display.generation = display.generation.wrapping_add(1);
-        display.frame = Some(Frame {
+        display.frame = Some(Arc::new(Frame {
           width: area.width,
           height: area.height,
           rgba,
           generation: display.generation,
-        });
+        }));
         display.scanout = Some((id, area));
         flush(display, id, area)?;
       }
@@ -132,13 +133,14 @@ pub(super) fn execute(
       if end > dma::length(&resource.backing) {
         return Err(INVALID);
       }
+      let pixels = resource::writable(&mut resource.pixels)?;
       for y in 0..area.height as usize {
         let target = ((area.y as usize + y) * resource.width as usize + area.x as usize) * 4;
         dma::read(
           memory,
           &resource.backing,
           offset + y as u64 * stride,
-          &mut resource.pixels[target..target + row],
+          &mut pixels[target..target + row],
         )
         .map_err(|_| INVALID)?;
       }
@@ -164,7 +166,7 @@ pub(super) fn execute(
         }
         backing.push(Span { address, length });
       }
-      resource.backing = backing;
+      resource.backing = Arc::new(backing);
     }
     0x107 => {
       let data = bytes(memory, spans, 32)?;
@@ -172,8 +174,7 @@ pub(super) fn execute(
         .resources
         .get_mut(&word(&data, 24))
         .ok_or(MISSING)?
-        .backing
-        .clear();
+        .backing = Arc::new(Vec::new());
     }
     _ => return Err(0x1200),
   }
@@ -198,7 +199,7 @@ fn flush(display: &mut Display, id: u32, area: Rect) -> Result<(), u32> {
   if x >= right || y >= bottom {
     return Ok(());
   }
-  let frame = display.frame.as_mut().ok_or(INVALID)?;
+  let frame = resource::writable_frame(display.frame.as_mut().ok_or(INVALID)?)?;
   for row in y..bottom {
     for col in x..right {
       let source = (row as usize * resource.width as usize + col as usize) * 4;

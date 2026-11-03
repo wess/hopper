@@ -39,6 +39,9 @@ fn main() -> anyhow::Result<()> {
     let (ready, initialized) = mpsc::sync_channel(1);
     let config = hv::secondary::Config {
       pause: None,
+      capture: None,
+      pmu: None,
+      recovery: None,
       factory,
       index: 1,
       affinity: 1,

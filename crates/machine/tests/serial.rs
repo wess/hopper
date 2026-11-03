@@ -43,3 +43,32 @@ fn fifo_disabled_keeps_only_one_received_character() {
   assert!(!serial::receive(&mut console, b'B'));
   assert_eq!(serial::read(&mut console, 0), u32::from(b'A'));
 }
+
+#[test]
+fn captured_uart_keeps_configuration_and_receive_order_after_source_changes() {
+  let mut original = Console::default();
+  serial::write(&mut original, 0x30, 0x301);
+  serial::write(&mut original, 0x2c, 0x10);
+  serial::write(&mut original, 0x24, 0x1234);
+  serial::write(&mut original, 0x28, 0x21);
+  for byte in 0..16 {
+    assert!(serial::receive(&mut original, byte));
+  }
+  let captured = original.clone();
+  for _ in 0..16 {
+    serial::read(&mut original, 0);
+  }
+  serial::write(&mut original, 0x30, 0);
+  drop(original);
+  for _ in 0..2 {
+    let mut restored = captured.clone();
+    for (offset, value) in [(0x30, 0x301), (0x2c, 0x10), (0x24, 0x1234), (0x28, 0x21)] {
+      assert_eq!(serial::read(&mut restored, offset), value);
+    }
+    assert!(!serial::receive(&mut restored, 16));
+    for byte in 0..16 {
+      assert_eq!(serial::read(&mut restored, 0), byte);
+    }
+    assert_eq!(serial::read(&mut restored, 0x18), 0x90);
+  }
+}

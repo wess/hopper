@@ -29,7 +29,14 @@ pub fn enqueue(input: &mut Input, events: &[Event]) -> anyhow::Result<()> {
     events.iter().all(|event| valid(input, *event)),
     "Unsupported guest input event"
   );
-  input.pending.extend(events);
+  // keep the public normalized range; Windows absolute HID reports require signed 16-bit axes.
+  input.pending.extend(events.iter().map(|event| {
+    let mut event = *event;
+    if event.kind == 3 {
+      event.value = ((i64::from(event.value) * 32767 + 32767) / 65535) as i32;
+    }
+    event
+  }));
   Ok(())
 }
 

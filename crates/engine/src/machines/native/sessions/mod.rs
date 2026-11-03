@@ -7,6 +7,8 @@ use model::native::Boot;
 use std::{collections::HashMap, path::Path, sync::Arc};
 use tokio::sync::{watch, Mutex};
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod generation;
 mod guest;
 pub mod input;
 mod install;
@@ -15,6 +17,14 @@ mod reboot;
 mod records;
 #[cfg(unix)]
 pub mod remote;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod restoration;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod restore;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub use restoration::Restored;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod snapshot;
 use owner::{finished, Session};
 
 struct Slot {
@@ -27,6 +37,8 @@ struct Slot {
 struct Registry {
   manager: Machines,
   slots: Mutex<HashMap<String, Arc<Slot>>>,
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  virtual_agents: std::sync::Mutex<Option<crate::machines::vz::Service>>,
 }
 
 pub struct Sessions {
@@ -39,6 +51,8 @@ impl Sessions {
       inner: Arc::new(Registry {
         manager,
         slots: Mutex::new(HashMap::new()),
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        virtual_agents: std::sync::Mutex::new(None),
       }),
     }
   }
@@ -79,6 +93,10 @@ impl Sessions {
     assets: &super::assets::Assets,
     stage: super::config::Stage,
   ) -> anyhow::Result<()> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    if self.configured_generation(id, assets, stage).await? {
+      return Ok(());
+    }
     let manager = self.inner.manager.clone();
     let identity = id.to_owned();
     let configuration = assets.clone();
@@ -211,6 +229,10 @@ impl Sessions {
       let _operation = _operation;
       let prepared = async {
         let boot = prepare.await?;
+        ensure!(
+          boot.machine_id == identity,
+          "Native boot configuration belongs to a different VM"
+        );
         ensure!(
           !result.is_closed(),
           "Native startup caller was cancelled; prepared data retained"

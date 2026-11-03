@@ -2,7 +2,7 @@ use super::{variables, Reason};
 use crate::{
   arm, debug,
   devices::{
-    flash, pci as config, serial,
+    flash, pci as config, rtc, serial,
     virtio::{bus, pci},
   },
   hypervisor::{self as hv, registers as regs},
@@ -25,6 +25,7 @@ pub struct State<'a, 'vm> {
   pub cpus: u32,
   pub debug: Vec<debug::State>,
   pub console: serial::Console,
+  pub rtc: rtc::Clock,
   pub tail: Vec<u8>,
   pub enter: Option<Instant>,
   pub durable: Option<&'a mut variables::Variables>,
@@ -37,6 +38,11 @@ pub struct Action {
 }
 
 pub fn interrupts(state: &mut State<'_, '_>) -> anyhow::Result<()> {
+  hv::gic::signal(
+    state.gic,
+    platform::RTC_IRQ,
+    rtc::interrupt(&mut state.rtc, rtc::now()?),
+  )?;
   for (slot, device) in state.devices.iter_mut().enumerate() {
     if let Some(device) = device {
       hv::gic::signal(
@@ -116,6 +122,28 @@ pub fn dispatch(
             registers,
             access.register,
             serial::read(&mut state.console, offset).into(),
+          )?;
+        }
+      } else if (platform::RTC..platform::RTC + 0x1000).contains(&address) {
+        let offset = address - platform::RTC;
+        ensure!(
+          rtc::accepts(offset, access.bytes, access.write),
+          "Unsupported RTC access width {} at 0x{offset:x}",
+          access.bytes
+        );
+        let now = rtc::now()?;
+        if access.write {
+          rtc::write(
+            &mut state.rtc,
+            offset,
+            value(registers, access.register)? as u32,
+            now,
+          )?;
+        } else {
+          read(
+            registers,
+            access.register,
+            rtc::read(&mut state.rtc, offset, now)?.into(),
           )?;
         }
       } else if (platform::ECAM..platform::ECAM + config::ECAM_SIZE).contains(&address) {

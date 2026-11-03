@@ -92,6 +92,7 @@ fn focus_release_discards_queued_input_and_overflow_releases_before_viewer_drop(
         id,
         &helper,
         Boot {
+          machine_id: id.into(),
           firmware: String::new(),
           variables: String::new(),
           store: guest.to_string_lossy().into(),

@@ -51,6 +51,7 @@ fn main() -> anyhow::Result<()> {
       (1, Mode::Paused) => {
         let current = counts(ram)?;
         if held == [0; 2] {
+          eprintln!("Two-CPU pause callback latency: {:?}", since.elapsed());
           ensure!(
             current.iter().all(|value| *value > 0),
             "Both guest CPUs must be running"
@@ -91,6 +92,31 @@ fn main() -> anyhow::Result<()> {
   );
   drop(stopped);
   let idle = || bytes(&[0x14000000]);
+  let mut config = boot(idle());
+  config.cpus = 1;
+  let mut requested = None;
+  let mut samples = Vec::new();
+  let stopped = runtime::run(config, empty(), |_, _, mode| match mode {
+    Mode::Running if samples.len() == 10 => Ok(Control::Stop),
+    Mode::Running => {
+      ensure!(requested.is_none(), "Pause callback was skipped");
+      requested = Some(Instant::now());
+      Ok(Control::Pause)
+    }
+    Mode::Paused => {
+      let since = requested
+        .take()
+        .ok_or_else(|| anyhow::anyhow!("Unexpected paused callback"))?;
+      samples.push(since.elapsed());
+      Ok(Control::Continue)
+    }
+  })?;
+  ensure!(
+    samples.len() == 10 && stopped.reason == Reason::Stopped,
+    "Pause sampling did not finish"
+  );
+  eprintln!("Single-CPU pause callback latencies: {samples:?}");
+  drop(stopped);
   let error = runtime::run(boot(idle()), empty(), |_, _, mode| {
     if mode == Mode::Paused {
       anyhow::bail!("paused callback check");

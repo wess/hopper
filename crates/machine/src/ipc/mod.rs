@@ -6,6 +6,10 @@
 
 mod stream;
 pub use stream::{receive, send, Stream};
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+mod output;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub use output::Output;
 
 use anyhow::ensure;
 use model::native::{Response, Result};

@@ -89,7 +89,7 @@ pub(super) async fn prepare(
   let layout = inspect::layout(&contents, record.resources.disk_gib)?;
   let plan = deploy::prepare(&layout)?;
   if complete {
-    setup::verify_source(&paths.setup, installer, &plan).await?;
+    setup::verify_source(&paths.setup, installer, &plan, &tools.media).await?;
   }
   if !complete {
     progress.send_replace(Phase::Accounts);

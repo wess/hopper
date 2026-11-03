@@ -1,7 +1,8 @@
 use crate::arm::SystemAccess;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct State {
-  locked: bool,
+  pub(crate) locked: bool,
 }
 
 impl Default for State {

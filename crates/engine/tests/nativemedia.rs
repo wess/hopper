@@ -163,3 +163,37 @@ fn conversion_rejects_unbounded_or_ambiguous_source_image_counts() {
     assert!(convert::count(value).is_err());
   }
 }
+
+#[tokio::test]
+async fn failed_helper_drains_large_diagnostics_and_returns_a_bounded_tail() {
+  let f = source::Fixture::new();
+  std::fs::write(
+    &f.tools.wim,
+    r#"#!/usr/bin/env python3
+import sys
+sys.stderr.write("x" * (256 * 1024))
+sys.stderr.write("\nfatal media diagnostic\n")
+sys.stdout.write("bounded stdout")
+sys.exit(7)
+"#,
+  )
+  .unwrap();
+  let esd = f.root.path().join("source.esd");
+  std::fs::write(&esd, b"preserve original media").unwrap();
+  let destination = f.root.path().join("bundle");
+  cache::directory(&destination).unwrap();
+  let result = tokio::time::timeout(
+    std::time::Duration::from_secs(5),
+    convert::build(&esd, &destination.join("installer.iso"), &f.tools),
+  )
+  .await
+  .unwrap()
+  .unwrap_err();
+  let message = result.to_string();
+  assert!(message.contains("fatal media diagnostic"));
+  assert!(message.contains("earlier diagnostics truncated"));
+  assert!(message.contains("7"));
+  assert!(message.len() < 4300);
+  assert_eq!(std::fs::read(esd).unwrap(), b"preserve original media");
+  assert!(!destination.join("installer.iso").exists());
+}

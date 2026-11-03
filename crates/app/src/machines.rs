@@ -93,6 +93,14 @@ pub fn installer(id: &str, cx: &App) -> bool {
   cx.has_global::<Runtime>() && cx.global::<Runtime>().owner.installer(id).unwrap_or(false)
 }
 
+pub fn refresh_boot(id: &str, cx: &mut App) -> anyhow::Result<bool> {
+  if !cx.global::<Runtime>().owner.requires_replacement(id)? {
+    return Ok(false);
+  }
+  retire(id, cx)?;
+  Ok(true)
+}
+
 pub fn retire_installer(id: &str, cx: &mut App) -> anyhow::Result<()> {
   anyhow::ensure!(
     cx.global::<Runtime>().owner.installer(id)?,

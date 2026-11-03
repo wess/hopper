@@ -8,15 +8,15 @@ use std::path::Path;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
   let args: Vec<_> = std::env::args().skip(1).collect();
-  ensure!(args.len() == 6, "Provide installer ISO, extracted drivers root, license, WIM helper, image helper and a new output directory");
+  ensure!(args.len() == 8, "Provide installer ISO, extracted drivers root, license, WIM helper, image helper, ARM64 finish helper, project notice and a new output directory");
   let mut directory = std::fs::DirBuilder::new();
   #[cfg(unix)]
   {
     use std::os::unix::fs::DirBuilderExt;
     directory.mode(0o700);
   }
-  directory.create(&args[5])?;
-  let output = Path::new(&args[5]).join("deployment.iso");
+  directory.create(&args[7])?;
+  let output = Path::new(&args[7]).join("deployment.iso");
   let id = uuid::Uuid::new_v4().to_string();
   let plan = deploy::prepare(&deploy::Layout {
     disk_gib: 64,
@@ -39,6 +39,8 @@ async fn main() -> anyhow::Result<()> {
       archive: "/usr/bin/tar".into(),
       wim: args[3].clone().into(),
       image: args[4].clone().into(),
+      finish: args[5].clone().into(),
+      notice: args[6].clone().into(),
     },
     |phase| println!("{phase:?}"),
   )

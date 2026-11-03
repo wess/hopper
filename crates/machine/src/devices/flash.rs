@@ -3,6 +3,8 @@
 use anyhow::{ensure, Context};
 use std::ops::Range;
 
+pub mod snapshot;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
   Array,
@@ -11,6 +13,7 @@ enum Mode {
   Identity,
 }
 
+#[derive(Clone)]
 enum Pending {
   None,
   Word,

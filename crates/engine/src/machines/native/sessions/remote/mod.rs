@@ -1,8 +1,13 @@
 //! Same-user agent transport to the registry that owns native workers.
 
 pub mod control;
+pub mod jobs;
 mod path;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub mod restoration;
 mod server;
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub mod snapshots;
 mod wire;
 
 use super::Sessions;
@@ -24,7 +29,7 @@ struct Request {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 enum Operation {
   Status,
   Capture,
@@ -32,6 +37,18 @@ enum Operation {
   Pause,
   Resume,
   Stop,
+  Guest {
+    length: usize,
+  },
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  Snapshot {
+    id: String,
+    name: String,
+  },
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  Restore {
+    id: String,
+  },
 }
 
 #[derive(Clone, Copy)]
@@ -79,6 +96,17 @@ enum Reply {
   Owned {},
   Accepted {},
   Released {},
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  Snapshot {
+    id: String,
+  },
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  #[serde(rename_all = "camelCase")]
+  Restored {
+    snapshot_id: String,
+    rollback_id: String,
+    generation_id: String,
+  },
   State {
     state: Option<Status>,
   },
@@ -102,6 +130,23 @@ pub enum Status {
 }
 
 impl Sessions {
+  #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+  pub fn connect_virtual_agents(&self, client: crate::machines::vz::Client) -> anyhow::Result<()> {
+    let mut service = self
+      .inner
+      .virtual_agents
+      .lock()
+      .map_err(|_| anyhow::anyhow!("Virtual agent service lock failed"))?;
+    ensure!(
+      service.is_none(),
+      "Virtual agent service is already connected"
+    );
+    *service = Some(crate::machines::vz::Service::new(
+      self.inner.manager.clone(),
+      client,
+    ));
+    Ok(())
+  }
   pub fn serve_agents(&self) -> anyhow::Result<Server> {
     server::start(&self.inner)
   }

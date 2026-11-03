@@ -84,6 +84,7 @@ fn boot_paths_and_identity_follow_the_record_and_system_boot_detaches_media() {
   let f = Fixture::new();
   let paths = f.initialize();
   let boot = config::prepare(&f.manager, ID, &f.assets(), Stage::Deployment).unwrap();
+  assert_eq!(boot.machine_id, ID);
   assert_eq!(boot.disk.as_deref(), paths.disk.to_str());
   assert_eq!(boot.store, paths.variables.to_str().unwrap());
   assert_eq!(boot.boot_media.as_deref(), paths.setup.to_str());
@@ -101,6 +102,7 @@ fn boot_paths_and_identity_follow_the_record_and_system_boot_detaches_media() {
     .write_all(b"synthetic deployed disk")
     .unwrap();
   let system = config::prepare(&f.manager, ID, &f.assets(), Stage::System).unwrap();
+  assert_eq!(boot.machine_id, system.machine_id);
   assert_eq!(boot.disk_id, system.disk_id);
   assert!(system.boot_media.is_none() && system.installer.is_none());
   assert!(config::paths(&f.manager.root, &ID.to_uppercase()).is_err());

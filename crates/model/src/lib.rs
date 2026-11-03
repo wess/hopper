@@ -12,6 +12,7 @@
 pub mod compose;
 pub mod container;
 pub mod engine;
+pub mod guest;
 pub mod image;
 pub mod machine;
 pub mod migration;

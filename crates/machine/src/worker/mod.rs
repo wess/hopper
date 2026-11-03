@@ -1,5 +1,8 @@
 mod boot;
 mod poll;
+mod restore;
+mod snapshot;
+mod system;
 
 use anyhow::{ensure, Context};
 use machine::{ipc, runtime};
@@ -13,14 +16,15 @@ use std::{
 pub fn run() -> anyhow::Result<()> {
   let mut parent = poll::Parent {
     input: pipe(libc::STDIN_FILENO)?,
-    output: pipe(libc::STDOUT_FILENO)?,
+    output: ipc::Output::new(pipe(libc::STDOUT_FILENO)?)?,
     stream: ipc::Stream::default(),
     pending: None,
     held: false,
     stopping: None,
     input_since: None,
-    write_since: None,
     setup: machine::setup::Decoder::default(),
+    snapshots: None,
+    restore: None,
   };
   let deadline = Instant::now() + Duration::from_secs(10);
   let request = loop {
@@ -33,18 +37,49 @@ pub fn run() -> anyhow::Result<()> {
     );
     std::thread::sleep(Duration::from_millis(5));
   };
-  let Command::Start { boot: config } = request.command else {
-    anyhow::bail!("Native worker requires boot configuration first");
-  };
-  let (boot, devices, mut store) = boot::prepare(config)?;
-  let mut initialized = false;
-  let stopped = runtime::run_persistent(boot, devices, &mut store, |devices, ram, mode| {
-    if !initialized {
-      parent.reply(request.id, Reply::Started {}, &[])?;
-      initialized = true;
+  let config = match request.command {
+    Command::Start { boot } => boot,
+    Command::StartRestored { boot, restore } => {
+      return restore::run(parent, request.id, boot, restore)
     }
-    parent.poll(devices, ram, mode)
-  })?;
+    Command::StartGeneration { boot, restore } => {
+      return system::run(parent, request.id, boot, restore)
+    }
+    _ => {
+      anyhow::bail!("Native worker requires boot configuration first");
+    }
+  };
+  let machine_id = config.machine_id.clone();
+  let store_path = config.store.clone();
+  let boot::Prepared {
+    boot,
+    devices,
+    mut store,
+    configuration,
+  } = boot::prepare(config)?;
+  let captures = machine::hypervisor::state::group::create(boot.cpus as usize)?;
+  parent.snapshots = Some(snapshot::Snapshots::new(
+    &store_path,
+    &machine_id,
+    configuration,
+    captures.clone(),
+  )?);
+  let mut initialized = false;
+  let stopped =
+    runtime::run_persistent_captured(boot, devices, &mut store, captures, |devices, ram, mode| {
+      if !initialized {
+        parent.reply(
+          request.id,
+          Reply::Started {
+            machine_id: machine_id.clone(),
+            configuration,
+          },
+          &[],
+        )?;
+        initialized = true;
+      }
+      parent.poll(devices, ram, mode)
+    })?;
   ensure!(
     runtime::variables::bytes(&store) == stopped.variables,
     "Native firmware persistence differs from stopped guest"
@@ -56,8 +91,7 @@ pub fn run() -> anyhow::Result<()> {
   };
   // flush an earlier reply before announcing shutdown; id zero denotes a guest power event.
   drain(&mut parent)?;
-  ipc::send(
-    &mut parent.stream,
+  parent.output.send(
     &Response {
       id: parent.stopping.unwrap_or(0),
       result: Reply::Stopped { reason },
@@ -70,8 +104,7 @@ pub fn run() -> anyhow::Result<()> {
 
 fn drain(parent: &mut poll::Parent) -> anyhow::Result<()> {
   let deadline = Instant::now() + Duration::from_secs(5);
-  while parent.stream.pending() {
-    parent.stream.flush(&mut parent.output)?;
+  while parent.output.pending()? {
     ensure!(
       Instant::now() < deadline,
       "Native parent stopped receiving replies"

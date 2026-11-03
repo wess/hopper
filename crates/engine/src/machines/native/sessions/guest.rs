@@ -10,7 +10,17 @@ impl Sessions {
     ensure!(
       !matches!(
         command,
-        Command::Start { .. } | Command::Capture {} | Command::Stop {}
+        Command::Start { .. }
+          | Command::StartRestored { .. }
+          | Command::StartGeneration { .. }
+          | Command::RestoreResume { .. }
+          | Command::RestorePause { .. }
+          | Command::Capture {}
+          | Command::Stop {}
+          | Command::FinishDeployment {}
+          | Command::SnapshotStart { .. }
+          | Command::SnapshotPoll { .. }
+          | Command::SnapshotCancel { .. }
       ),
       "Use the dedicated native lifecycle or capture operation"
     );

@@ -24,6 +24,28 @@ pub(super) fn own(client: Client, lease: store::lock::Lease) -> Session {
   Session { client, released }
 }
 
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub(super) fn restored(
+  client: Client,
+  owner: std::sync::Weak<super::super::restore::Owner>,
+) -> Session {
+  let mut ended = client.ended.clone();
+  let (release, released) = watch::channel(false);
+  tokio::spawn(async move {
+    while !*ended.borrow_and_update() {
+      if ended.changed().await.is_err() {
+        return;
+      }
+    }
+    // the actor signals reaping before dropping its retained runtime/journal owner.
+    while owner.upgrade().is_some() {
+      tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+    release.send_replace(true);
+  });
+  Session { client, released }
+}
+
 pub(super) async fn started(
   manager: &crate::machines::Machines,
   id: &str,

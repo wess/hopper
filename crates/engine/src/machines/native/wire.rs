@@ -42,18 +42,84 @@ pub(super) fn validate(id: u64, command: &Command, response: &Response) -> anyho
     matches!(response.result, Reply::Rejected { .. })
       || matches!(
         (command, &response.result),
-        (Command::Start { .. }, Reply::Started {})
+        (Command::Start { .. }, Reply::Started { .. })
+          | (Command::StartRestored { .. }, Reply::Restored { .. })
+          | (
+            Command::StartGeneration { .. },
+            Reply::GenerationStarted { .. }
+          )
+          | (Command::RestoreResume { .. }, Reply::Running {})
+          | (Command::RestorePause { .. }, Reply::Paused {})
           | (Command::Capture {}, Reply::Frame { .. })
           | (Command::Status {}, Reply::Status { .. })
           | (Command::Pause {}, Reply::Paused {})
           | (Command::Resume {}, Reply::Running {})
           | (
-            Command::Input { .. } | Command::Release {},
+            Command::Input { .. } | Command::Release {} | Command::FinishDeployment {},
             Reply::Accepted {}
           )
+          | (
+            Command::SnapshotStart { .. } | Command::SnapshotCancel { .. },
+            Reply::Accepted {}
+          )
+          | (Command::SnapshotPoll { .. }, Reply::Snapshot { .. })
           | (Command::Stop {}, Reply::Stopped { .. })
       ),
     "Unexpected native reply type"
   );
+  if let (
+    Command::SnapshotPoll { snapshot_id, .. },
+    Reply::Snapshot {
+      snapshot_id: returned,
+      ..
+    },
+  ) = (command, &response.result)
+  {
+    ensure!(
+      snapshot_id == returned && model::native::machine_identity(returned).is_some(),
+      "Native snapshot reply identity differs"
+    );
+  }
+  if let (
+    Command::Start { boot },
+    Reply::Started {
+      machine_id,
+      configuration,
+    },
+  ) = (command, &response.result)
+  {
+    ensure!(
+      machine_id == &boot.machine_id && model::native::machine_identity(machine_id).is_some(),
+      "Native worker started a different VM identity"
+    );
+    ensure!(
+      *configuration != [0; 32],
+      "Native worker omitted hardware configuration"
+    );
+  }
+  if let (
+    Command::StartRestored { boot, restore } | Command::StartGeneration { boot, restore },
+    Reply::Restored {
+      machine_id,
+      configuration,
+      restore: returned,
+    }
+    | Reply::GenerationStarted {
+      machine_id,
+      configuration,
+      restore: returned,
+    },
+  ) = (command, &response.result)
+  {
+    ensure!(
+      machine_id == &boot.machine_id
+        && model::native::machine_identity(machine_id).is_some()
+        && restore == returned
+        && model::native::machine_identity(&returned.snapshot_id).is_some()
+        && model::native::machine_identity(&returned.generation_id).is_some()
+        && *configuration != [0; 32],
+      "Restored worker identity/policy/configuration differs"
+    );
+  }
   Ok(())
 }

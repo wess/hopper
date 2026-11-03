@@ -22,6 +22,7 @@ struct State {
   machine: Retained<VZVirtualMachine>,
   stopped: Rc<std::cell::Cell<bool>>,
   check: Check,
+  _ownership: std::sync::Arc<dyn Send + Sync>,
 }
 
 impl State {
@@ -89,7 +90,6 @@ pub struct Listener {
   device: Retained<VZVirtioSocketDevice>,
   state: Rc<State>,
   listening: Rc<std::cell::Cell<bool>>,
-  _ownership: std::sync::Arc<dyn Send + Sync>,
 }
 
 pub fn listen(vm: &Vm, check: Check) -> anyhow::Result<Listener> {
@@ -117,6 +117,7 @@ pub fn listen(vm: &Vm, check: Check) -> anyhow::Result<Listener> {
     machine: vm.machine.clone(),
     stopped: vm.stop_requested.clone(),
     check,
+    _ownership: super::hold(vm),
   });
   let delegate = Delegate::alloc(vm._main).set_ivars(state.clone());
   let delegate: Retained<Delegate> = unsafe { msg_send![super(delegate), init] };
@@ -132,7 +133,6 @@ pub fn listen(vm: &Vm, check: Check) -> anyhow::Result<Listener> {
     device,
     state,
     listening: vm.listening.clone(),
-    _ownership: super::hold(vm),
   })
 }
 
@@ -207,6 +207,28 @@ impl Listener {
       self.disconnect();
     }
     count
+  }
+}
+
+impl crate::guest::Transport for Listener {
+  fn check(&self) -> anyhow::Result<()> {
+    Listener::check(self)
+  }
+
+  fn connected(&self) -> anyhow::Result<bool> {
+    Listener::connected(self)
+  }
+
+  fn read(&self, bytes: &mut [u8]) -> anyhow::Result<Option<usize>> {
+    Listener::read(self, bytes)
+  }
+
+  fn write(&self, bytes: &[u8]) -> anyhow::Result<Option<usize>> {
+    Listener::write(self, bytes)
+  }
+
+  fn disconnect(&self) {
+    Listener::disconnect(self)
   }
 }
 

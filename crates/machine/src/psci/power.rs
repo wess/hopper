@@ -4,6 +4,8 @@ use std::ops::Range;
 
 const AFFINITY: u64 = 0xff00ffffff;
 
+pub mod snapshot;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
   On,

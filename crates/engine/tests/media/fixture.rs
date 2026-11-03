@@ -31,6 +31,8 @@ impl Fixture {
     )
     .unwrap();
     let tools = Tools {
+      finish: root.path().join("unusedfinish"),
+      notice: root.path().join("unusednotice"),
       archive: root.path().join("archive"),
       wim: root.path().join("wim"),
       image: root.path().join("image"),

@@ -17,12 +17,17 @@ serde_json = { workspace = true }
 vm-fdt = "0.3"
 fs2 = "0.4"
 sha2 = "0.10"
+zeroize = "1"
 
 [dev-dependencies]
 tempfile = { workspace = true }
 
+[build-dependencies]
+cc = "1"
+
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 libc = "0.2"
+sha2 = { version = "0.10", features = ["asm"] }
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication"] }

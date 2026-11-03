@@ -26,12 +26,16 @@ pub(crate) async fn run(
     .env("LC_ALL", "C")
     .stdin(Stdio::piped())
     .stdout(Stdio::piped())
-    .stderr(Stdio::null())
+    .stderr(Stdio::piped())
     .kill_on_drop(true)
     .spawn()
     .context("Launch Windows media helper")?;
   let mut stdin = child.stdin.take().context("Missing media helper input")?;
   let mut stdout = child.stdout.take().context("Missing media helper output")?;
+  let mut stderr = child
+    .stderr
+    .take()
+    .context("Missing media helper diagnostics")?;
   let result = tokio::time::timeout(Duration::from_secs(30 * 60), async {
     let writer = async {
       if let Some(bytes) = input {
@@ -70,8 +74,44 @@ pub(crate) async fn run(
       }
       Ok::<_, anyhow::Error>(bytes)
     };
-    let (_, bytes) = tokio::try_join!(writer, reader)?;
-    ensure!(child.wait().await?.success(), "Windows media helper failed");
+    let diagnostics = async {
+      let mut tail = Vec::with_capacity(4096);
+      let mut truncated = false;
+      let mut buffer = [0; 8192];
+      loop {
+        let read = stderr.read(&mut buffer).await?;
+        if read == 0 {
+          break;
+        }
+        truncated |= tail.len() + read > 4096;
+        if read >= 4096 {
+          tail.clear();
+          tail.extend_from_slice(&buffer[read - 4096..read]);
+        } else {
+          let discard = (tail.len() + read).saturating_sub(4096);
+          tail.drain(..discard);
+          tail.extend_from_slice(&buffer[..read]);
+        }
+      }
+      Ok::<_, anyhow::Error>((tail, truncated))
+    };
+    let (_, bytes, (diagnostics, truncated)) = tokio::try_join!(writer, reader, diagnostics)?;
+    let status = child.wait().await?;
+    if !status.success() {
+      let text: String = String::from_utf8_lossy(&diagnostics)
+        .chars()
+        .filter(|value| !value.is_control() || matches!(value, '\n' | '\t'))
+        .collect();
+      anyhow::bail!(
+        "Windows media helper failed ({status}): {}{}",
+        if truncated {
+          "[earlier diagnostics truncated] "
+        } else {
+          ""
+        },
+        text.trim()
+      );
+    }
     Ok::<_, anyhow::Error>(bytes)
   })
   .await

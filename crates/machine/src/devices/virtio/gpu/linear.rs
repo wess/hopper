@@ -1,27 +1,41 @@
 use super::{resource, Frame};
 use crate::dma::Memory;
 use anyhow::{ensure, Context};
+use std::sync::Arc;
 
 pub const BASE: u64 = 0x3800;
 pub const MAGIC: u32 = 0x48504642;
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Linear {
-  registers: [u32; 6],
-  layout: Option<Layout>,
-  pub frame: Option<Frame>,
+  pub(super) registers: [u32; 6],
+  pub(super) layout: Option<Layout>,
+  pub frame: Option<Arc<Frame>>,
 }
 
 #[derive(Clone, Copy)]
-struct Layout {
-  address: u64,
-  width: u32,
-  height: u32,
-  stride: u32,
+pub(super) struct Layout {
+  pub(super) address: u64,
+  pub(super) width: u32,
+  pub(super) height: u32,
+  pub(super) stride: u32,
 }
 
 pub(super) fn active(linear: &Linear) -> bool {
   linear.layout.is_some()
+}
+
+pub(super) fn validate(linear: &Linear, memory: &impl Memory) -> anyhow::Result<()> {
+  if let Some(layout) = linear.layout {
+    ensure!(
+      memory.contains(
+        layout.address,
+        layout.stride as usize * layout.height as usize * 4
+      ),
+      "Captured linear framebuffer exceeds restored RAM"
+    );
+  }
+  Ok(())
 }
 
 pub(super) fn disable(linear: &mut Linear) {
@@ -113,11 +127,11 @@ pub(super) fn refresh(linear: &mut Linear, memory: &impl Memory) -> anyhow::Resu
     .frame
     .as_ref()
     .map_or(1, |frame| frame.generation.wrapping_add(1));
-  linear.frame = Some(Frame {
+  linear.frame = Some(Arc::new(Frame {
     width: layout.width,
     height: layout.height,
     rgba,
     generation,
-  });
+  }));
   Ok(())
 }

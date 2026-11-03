@@ -2,6 +2,8 @@
 
 use anyhow::{ensure, Context};
 mod bus;
+mod configuration;
+pub mod wire;
 pub use bus::Bus;
 
 pub const ECAM_SIZE: u64 = 1 << 20;
@@ -15,6 +17,7 @@ pub fn interrupt(device: u8, pin: u8) -> anyhow::Result<u32> {
   Ok(FIRST_IRQ + (device as u32 + pin as u32 - 1) % 4)
 }
 
+#[derive(Clone)]
 struct Bar {
   slot: usize,
   size: u64,
@@ -23,6 +26,7 @@ struct Bar {
   probe: [bool; 2],
 }
 
+#[derive(Clone)]
 pub struct Function {
   config: [u8; 4096],
   bars: Vec<Bar>,
@@ -32,6 +36,28 @@ pub struct Function {
 }
 
 impl Function {
+  pub(crate) fn compatible(&self, other: &Self) -> bool {
+    self.capability == other.capability
+      && self.next_capability == other.next_capability
+      && self.msix == other.msix
+      && self.bars.len() == other.bars.len()
+      && self
+        .bars
+        .iter()
+        .zip(&other.bars)
+        .all(|(a, b)| a.slot == b.slot && a.size == b.size && a.wide == b.wide)
+      && self
+        .config
+        .iter()
+        .zip(&other.config)
+        .enumerate()
+        .all(|(offset, (a, b))| {
+          matches!(offset, 4..=7 | 0x3c)
+            || self.msix.is_some_and(|position| offset == position + 3)
+            || a == b
+        })
+  }
+
   pub fn new(vendor: u16, device: u16, class: u32, revision: u8) -> anyhow::Result<Self> {
     ensure!(
       vendor != 0xffff && class <= 0xffffff,

@@ -10,6 +10,7 @@ pub mod provision;
 pub mod records;
 pub mod seed;
 pub mod sharing;
+pub mod tools;
 
 use anyhow::ensure;
 use machine::vz::queue::Check;

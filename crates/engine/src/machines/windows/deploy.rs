@@ -159,9 +159,6 @@ if errorlevel 1 goto failed
 echo Hopper deployment: %phase%
 W:\Windows\System32\bcdboot W:\Windows /s S: /f UEFI
 if errorlevel 1 goto failed
-cmd /c exit 0
->"\\.\org.hopper.setup" echo HOPPERSETUP/1 deployed 11
-if errorlevel 1 goto failed
 echo Hopper deployment: image ready for first-boot provisioning
 exit /b 0
 :phase

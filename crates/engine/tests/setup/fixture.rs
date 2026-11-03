@@ -70,7 +70,14 @@ impl Fixture {
       archive: root.path().join("archive"),
       wim: root.path().join("wim"),
       image: root.path().join("image"),
+      finish: drivers.join("viostor/w11/ARM64/viostor.sys"),
+      notice: root.path().join("hopper.txt"),
     };
+    std::fs::write(
+      &tools.notice,
+      include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LICENSE")),
+    )
+    .unwrap();
     let plan = deploy::prepare(&deploy::Layout {
       disk_gib: 64,
       image_index: 3,

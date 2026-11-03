@@ -174,20 +174,58 @@ fn flush_yields_after_a_bounded_write_budget() {
   let response = Response {
     id: 1,
     result: Reply::Frame {
-      width: 256,
-      height: 256,
+      width: 2048,
+      height: 1024,
       generation: 1,
     },
   };
-  ipc::send(&mut stream, &response, &vec![0; 256 * 256 * 4]).unwrap();
+  ipc::send(&mut stream, &response, &vec![0; 2048 * 1024 * 4]).unwrap();
   let mut bytes = Vec::new();
-  assert_eq!(stream.flush(&mut bytes).unwrap(), 64 * 1024);
+  let written = stream.flush(&mut bytes).unwrap();
+  assert!(written > 0 && written <= 4 * 1024 * 1024);
   assert!(stream.pending());
   while stream.pending() {
     stream.flush(&mut bytes).unwrap();
   }
   assert_eq!(
     ipc::read_response(&mut Cursor::new(bytes)).unwrap().1.len(),
-    256 * 256 * 4
+    2048 * 1024 * 4
   );
+}
+
+#[test]
+fn unavailable_or_interrupted_writers_cannot_hold_the_cpu_owner() {
+  struct Unavailable {
+    calls: usize,
+    kind: ErrorKind,
+  }
+  impl Write for Unavailable {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+      self.calls += 1;
+      Err(self.kind.into())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+      Ok(())
+    }
+  }
+  for kind in [ErrorKind::WouldBlock, ErrorKind::Interrupted] {
+    let mut writer = Unavailable { calls: 0, kind };
+    let mut stream = Stream::default();
+    ipc::send(
+      &mut stream,
+      &Response {
+        id: 1,
+        result: Reply::Accepted {},
+      },
+      &[],
+    )
+    .unwrap();
+    assert_eq!(stream.flush(&mut writer).unwrap(), 0);
+    assert!((1..=256).contains(&writer.calls));
+    assert!(stream.pending());
+    let mut bytes = Vec::new();
+    stream.flush(&mut bytes).unwrap();
+    assert!(!stream.pending());
+    assert_eq!(ipc::read_response(&mut Cursor::new(bytes)).unwrap().0.id, 1);
+  }
 }

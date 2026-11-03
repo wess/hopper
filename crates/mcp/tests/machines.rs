@@ -83,12 +83,29 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
     "vm.snapshot",
     "vm.restore",
   ] {
-    let result = mcp::tools::call(&host, tool, &json!({"id":machine.id})).await;
-    assert_eq!(result["isError"], true, "{tool}: {result}");
-    assert!(
-      content(&result).contains("This native Windows operation"),
-      "{tool}: {result}"
-    );
+    let args = if tool == "vm.restore" {
+      json!({"id":machine.id,"snapshot":"02020202-0202-0202-0202-020202020202"})
+    } else {
+      json!({"id":machine.id,"name":"Before updates"})
+    };
+    let result = mcp::tools::call(
+      &host,
+      tool,
+      &args,
+    )
+    .await;
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) && tool == "vm.snapshots" {
+      assert_ne!(result["isError"], true, "{tool}: {result}");
+      assert_eq!(content(&result), "[]");
+    } else {
+      assert_eq!(result["isError"], true, "{tool}: {result}");
+      assert!(
+        (cfg!(all(target_os = "macos", target_arch = "aarch64"))
+          && matches!(tool, "vm.snapshot" | "vm.restore"))
+          || content(&result).contains("This native Windows operation"),
+        "{tool}: {result}"
+      );
+    }
     assert_eq!(std::fs::read(&disk).unwrap(), b"retained prior guest disk");
   }
   let missing = mcp::tools::call(&host, "vm.screenshot", &json!({"id":machine.id})).await;
@@ -121,6 +138,7 @@ async fn windows_tools_use_native_records_and_never_dispatch_to_the_previous_run
       &native.id,
       &worker,
       model::native::Boot {
+        machine_id: native.id.clone(),
         firmware: String::new(),
         variables: String::new(),
         store: probe.to_string_lossy().into(),

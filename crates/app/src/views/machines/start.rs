@@ -148,6 +148,20 @@ impl Machines {
       cx.notify();
       return;
     }
+    if !running && owned {
+      match crate::machines::refresh_boot(&id, cx) {
+        Ok(true) => {
+          self.prepare_virtual(id, name, cx);
+          cx.notify();
+          return;
+        }
+        Ok(false) => {}
+        Err(error) => {
+          self.finish_virtual(&id, &name, true, Err(error), cx);
+          return;
+        }
+      }
+    }
     bridge::run(
       cx,
       async move {
