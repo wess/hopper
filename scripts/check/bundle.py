@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
+import gzip
+import os
 import pathlib
 import plistlib
 import subprocess
 import sys
+import tempfile
 
 
 def run(*args):
@@ -43,6 +46,19 @@ def verify(app):
   entitlement(contents / 'MacOS/hopper', 'com.apple.security.virtualization')
   entitlement(contents / 'MacOS/sidecars/hoppervm', 'com.apple.security.hypervisor')
   entitlement(resources / 'lima/bin/limactl', 'com.apple.security.virtualization')
+  darwin_guest_archive = resources / 'lima/share/lima/lima-guestagent.Darwin-aarch64.gz'
+  with tempfile.NamedTemporaryFile() as darwin_guest:
+    with gzip.open(darwin_guest_archive, 'rb') as source:
+      darwin_guest.write(source.read())
+    darwin_guest.flush()
+    pathlib.Path(darwin_guest.name).chmod(0o755)
+    if b'arm64' not in run('lipo', '-archs', darwin_guest.name).split():
+      raise ValueError('Lima Darwin guest agent is not ARM64')
+    run('codesign', '--verify', '--strict', darwin_guest.name)
+    if os.environ.get('CODESIGN_IDENTITY', '-') != '-':
+      details = run('codesign', '-d', '--verbose=4', darwin_guest.name)
+      if b'runtime' not in details or b'Timestamp=' not in details:
+        raise ValueError('Lima Darwin guest agent lacks hardened runtime or timestamp')
   run(sys.executable, 'scripts/build/windowsmanifest.py', '--verify', str(resources / 'windows'))
   run(sys.executable, 'scripts/build/guestmanifest.py', '--verify', str(resources / 'guesttools'))
   license = resources / 'LICENSE'

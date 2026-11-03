@@ -146,8 +146,10 @@ PLIST
 # A real identity gets the hardened runtime (required for notarization);
 # ad-hoc signing does not support it.
 runtime_opts=()
+timestamp_opts=()
 if [ "$identity" != "-" ]; then
   runtime_opts=(--options runtime)
+  timestamp_opts=(--timestamp)
 fi
 
 echo "[bundle] codesign ($identity)"
@@ -156,18 +158,36 @@ while IFS= read -r sidecar; do
   chmod u+w "$sidecar"
   if [ "$(basename "$sidecar")" = hoppervm ]; then
     codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
+      ${timestamp_opts[@]+"${timestamp_opts[@]}"} \
       --entitlements assets/machine.entitlements --sign "$identity" "$sidecar"
   else
     codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
+      ${timestamp_opts[@]+"${timestamp_opts[@]}"} \
       --preserve-metadata=entitlements --sign "$identity" "$sidecar"
   fi
 done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/windows/bin" "$contents/Resources/windows/lib" -type f -perm -111)
+
+# Lima embeds its Darwin guest agent as a gzip resource. Apple's notary service
+# inspects that nested Mach-O, so it needs the same Developer ID, hardened
+# runtime and secure timestamp as the directly executable bundle contents.
+darwin_guest_archive="$contents/Resources/lima/share/lima/lima-guestagent.Darwin-aarch64.gz"
+if [ -f "$darwin_guest_archive" ]; then
+  darwin_guest="$stage/lima-guestagent.Darwin-aarch64"
+  gzip -dc "$darwin_guest_archive" > "$darwin_guest"
+  chmod 0755 "$darwin_guest"
+  codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
+    ${timestamp_opts[@]+"${timestamp_opts[@]}"} \
+    --sign "$identity" "$darwin_guest"
+  gzip -n -9c "$darwin_guest" > "$darwin_guest_archive"
+fi
 python3 scripts/build/windowsmanifest.py "$contents/Resources/windows"
 python3 scripts/build/windowsmanifest.py --verify "$contents/Resources/windows"
 codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
+  ${timestamp_opts[@]+"${timestamp_opts[@]}"} \
   --entitlements assets/hopper.entitlements \
   --sign "$identity" "$contents/MacOS/$bin_name"
 codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
+  ${timestamp_opts[@]+"${timestamp_opts[@]}"} \
   --entitlements assets/hopper.entitlements \
   --sign "$identity" "$app"
 
