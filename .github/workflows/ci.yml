@@ -16,7 +16,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
-          components: clippy
+          components: clippy, rust-docs
+          targets: aarch64-unknown-linux-musl
       - uses: Swatinem/rust-cache@v2
       - name: Test guest filesystem and contracts on Linux
         run: cargo test -p guest -p model --locked
@@ -36,9 +37,10 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check Linux guest job code
+      - name: Build and check Linux guest tools
         run: |
-          rustup target add aarch64-unknown-linux-musl
+          brew install lld
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$(brew --prefix lld)/bin/ld.lld" bash scripts/build/guest.sh
           cargo clippy -p guest --all-targets --target aarch64-unknown-linux-musl --locked -- -D warnings
 
       - name: Check deployment asset inputs
