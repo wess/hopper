@@ -16,8 +16,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
-          components: clippy, rust-docs
-          targets: aarch64-unknown-linux-musl
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - name: Test guest filesystem and contracts on Linux
         run: cargo test -p guest -p model --locked
@@ -33,7 +32,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
-          components: clippy
+          components: clippy, rust-docs
+          targets: aarch64-unknown-linux-musl
 
       - uses: Swatinem/rust-cache@v2
 
