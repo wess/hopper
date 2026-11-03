@@ -1,6 +1,9 @@
 //! Safe installation of Hopper's bundled Docker command-line tools.
 
 use model::{DockerCliSetupResult, DockerCliStatus};
+use serde_json::Value;
+use std::io::Write;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -64,6 +67,71 @@ fn run(docker: &Path, args: &[&str]) -> Result<(), String> {
     })
 }
 
+fn configure_credential_store(path: &Path) -> Result<bool, String> {
+    let mut config = if path.exists() {
+        if std::fs::symlink_metadata(path)
+            .map_err(|error| error.to_string())?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(format!(
+                "{} is a symlink and was left unchanged.",
+                path.display()
+            ));
+        }
+        serde_json::from_slice::<Value>(&std::fs::read(path).map_err(|error| error.to_string())?)
+            .map_err(|error| format!("Cannot read {}: {error}", path.display()))?
+    } else {
+        Value::Object(Default::default())
+    };
+    let object = config
+        .as_object_mut()
+        .ok_or_else(|| format!("{} must contain a JSON object.", path.display()))?;
+    match object.get("credsStore") {
+        Some(Value::String(store)) if store == "desktop" => {}
+        None => {}
+        _ => return Ok(false),
+    }
+    object.insert("credsStore".into(), Value::String("osxkeychain".into()));
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Docker configuration has no parent directory.".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let mut bytes = serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?;
+    bytes.push(b'\n');
+    let temporary = (0..100)
+        .find_map(|attempt| {
+            let candidate = parent.join(format!(
+                ".config.json.hopper-{}-{attempt}",
+                std::process::id()
+            ));
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&candidate)
+                .ok()?;
+            Some((candidate, file))
+        })
+        .ok_or_else(|| "Cannot create a private Docker configuration update.".to_string())?;
+    let (temporary_path, mut temporary_file) = temporary;
+    let publish = (|| -> Result<(), String> {
+        temporary_file
+            .write_all(&bytes)
+            .and_then(|()| temporary_file.sync_all())
+            .map_err(|error| error.to_string())?;
+        std::fs::rename(&temporary_path, path).map_err(|error| error.to_string())?;
+        std::fs::File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| error.to_string())
+    })();
+    if publish.is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
+    publish.map(|()| true)
+}
+
 pub fn configure(host: &str) -> DockerCliSetupResult {
     let result = (|| -> Result<DockerCliStatus, String> {
         let home = std::env::var_os("HOME")
@@ -72,6 +140,7 @@ pub fn configure(host: &str) -> DockerCliSetupResult {
         let docker = sidecar("docker")?;
         let compose = sidecar("compose")?;
         let buildx = sidecar("buildx")?;
+        let credential_helper = sidecar("docker-credential-osxkeychain")?;
         let bin = home.join(".local/bin");
         let plugins = home.join(".docker/cli-plugins");
         std::fs::create_dir_all(&bin).map_err(|error| error.to_string())?;
@@ -80,6 +149,11 @@ pub fn configure(host: &str) -> DockerCliSetupResult {
         install_link(&compose, &bin.join("docker-compose"))?;
         install_link(&compose, &plugins.join("docker-compose"))?;
         install_link(&buildx, &plugins.join("docker-buildx"))?;
+        install_link(
+            &credential_helper,
+            &bin.join("docker-credential-osxkeychain"),
+        )?;
+        configure_credential_store(&home.join(".docker/config.json"))?;
 
         let exists = Command::new(&docker)
             .args(["context", "inspect", "hopper"])
@@ -91,7 +165,13 @@ pub fn configure(host: &str) -> DockerCliSetupResult {
         if exists {
             run(
                 &docker,
-                &["context", "update", "hopper", "--docker", &format!("host={host}")],
+                &[
+                    "context",
+                    "update",
+                    "hopper",
+                    "--docker",
+                    &format!("host={host}"),
+                ],
             )?;
         } else {
             run(
@@ -113,7 +193,7 @@ pub fn configure(host: &str) -> DockerCliSetupResult {
             configured: true,
             host: host.to_string(),
             context: Some("hopper".into()),
-            detail: "Installed docker, Compose, and Buildx; the hopper context is active."
+            detail: "Installed docker, Compose, Buildx, and macOS Keychain credentials; the hopper context is active."
                 .into(),
             bundled: true,
         })
@@ -153,5 +233,32 @@ mod tests {
         std::os::unix::fs::symlink("/opt/homebrew/bin/docker", &foreign).unwrap();
         assert!(owned_sidecar(&ours));
         assert!(!owned_sidecar(&foreign));
+    }
+
+    #[test]
+    fn desktop_credentials_migrate_without_losing_registry_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(
+            &path,
+            br#"{"auths":{"registry.example":{"auth":"secret"}},"credsStore":"desktop"}"#,
+        )
+        .unwrap();
+        assert!(configure_credential_store(&path).unwrap());
+        let config: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(config["credsStore"], "osxkeychain");
+        assert_eq!(config["auths"]["registry.example"]["auth"], "secret");
+    }
+
+    #[test]
+    fn explicit_non_desktop_credential_store_is_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.json");
+        std::fs::write(&path, br#"{"credsStore":"custom"}"#).unwrap();
+        assert!(!configure_credential_store(&path).unwrap());
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            r#"{"credsStore":"custom"}"#
+        );
     }
 }

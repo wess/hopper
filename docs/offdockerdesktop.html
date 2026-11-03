@@ -71,8 +71,9 @@ for bind mounts and published ports are forwarded to <code>localhost</code>.</p>
 CI workloads continue when the window is closed.</p>
 <h2>3. Set up the Docker CLI</h2>
 <p>Under <strong>Settings → Docker CLI</strong>, click <strong>Install Docker CLI tools</strong>. Hopper
-installs its bundled Docker, Compose, and Buildx commands for your user and activates
-a Docker context named <code>hopper</code>.</p>
+installs its bundled Docker, Compose, and Buildx commands for your user, activates
+a Docker context named <code>hopper</code>, and migrates Docker Desktop's credential-store
+setting to the macOS Keychain helper so pulls and logins keep working after Desktop is removed.</p>
 <pre><code class="language-sh">docker version
 docker compose version
 docker buildx version

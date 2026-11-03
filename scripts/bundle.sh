@@ -49,6 +49,7 @@ mkdir -p "$contents/MacOS" "$contents/Resources"
 cp LICENSE "$contents/Resources/LICENSE"
 mkdir -p "$contents/Resources/licenses"
 cp assets/licenses/sha2asm.txt "$contents/Resources/licenses/sha2asm.txt"
+cp assets/licenses/docker-credential-helpers.txt "$contents/Resources/licenses/docker-credential-helpers.txt"
 cp -R native/build/guesttools "$contents/Resources/guesttools"
 python3 scripts/build/guestmanifest.py --verify "$contents/Resources/guesttools"
 
@@ -56,6 +57,7 @@ python3 scripts/build/guestmanifest.py --verify "$contents/Resources/guesttools"
 [ -f native/build/docker ] || scripts/build/docker.sh
 [ -f native/build/compose ] || scripts/build/compose.sh
 [ -f native/build/buildx ] || scripts/build/buildx.sh
+[ -f native/build/docker-credential-osxkeychain ] || scripts/build/credential-helper.sh
 [ -f native/build/windows/manifest.json ] || scripts/build/windows.sh
 [ -f native/build/firmware/manifest.json ] && \
   [ -f native/build/firmware/windows.fd ] && \
@@ -93,6 +95,13 @@ fi
 if [ -f native/build/buildx ]; then
   mkdir -p "$contents/MacOS/sidecars"
   cp native/build/buildx "$contents/MacOS/sidecars/buildx"
+fi
+
+# Keep Docker credentials in the user's macOS Keychain after Docker Desktop is
+# removed. Settings installs this beside the bundled Docker CLI.
+if [ -f native/build/docker-credential-osxkeychain ]; then
+  mkdir -p "$contents/MacOS/sidecars"
+  cp native/build/docker-credential-osxkeychain "$contents/MacOS/sidecars/docker-credential-osxkeychain"
 fi
 
 # The MCP server is part of the release, too. Keeping it beside the app gives

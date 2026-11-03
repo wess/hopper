@@ -123,6 +123,7 @@ jobs:
           set -euo pipefail
           scripts/build/compose.sh
           scripts/build/buildx.sh
+          scripts/build/credential-helper.sh
           scripts/build/lima.sh
           scripts/build/docker.sh
           scripts/build/windows.sh
@@ -181,6 +182,7 @@ jobs:
           test -x "$app/MacOS/sidecars/docker"
           test -x "$app/MacOS/sidecars/compose"
           test -x "$app/MacOS/sidecars/buildx"
+          test -x "$app/MacOS/sidecars/docker-credential-osxkeychain"
           test -x "$app/MacOS/sidecars/hoppervm"
           codesign --verify --strict "$app/MacOS/sidecars/hoppervm"
           codesign -d --entitlements - "$app/MacOS/sidecars/hoppervm" 2>/dev/null | grep -q com.apple.security.hypervisor

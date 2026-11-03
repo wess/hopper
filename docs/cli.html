@@ -79,7 +79,7 @@ container logs -f web
 equivalent — <code>--restart</code>, <code>--hostname</code>, <code>--network=none</code> — fail loudly rather
 than silently doing nothing, which is the right choice.</p>
 <h2>What the app bundles</h2>
-<p>The release ships the Docker CLI, Compose, and Buildx inside
+<p>The release ships the Docker CLI, Compose, Buildx, and Docker's macOS Keychain credential helper inside
 <code>Hopper.app</code>, because Docker Desktop's uninstaller takes <code>docker</code> with it.
 The Settings action creates user-owned symlinks in <code>~/.local/bin</code> and
 <code>~/.docker/cli-plugins</code>. Make sure <code>~/.local/bin</code> is on your shell's

@@ -35,6 +35,7 @@ def verify(app):
       raise ValueError(f'Forbidden runtime artifact: {path}')
   for relative in ['MacOS/hopper', 'MacOS/sidecars/hoppermcp', 'MacOS/sidecars/hoppervm',
                    'MacOS/sidecars/docker', 'MacOS/sidecars/compose', 'MacOS/sidecars/buildx',
+                   'MacOS/sidecars/docker-credential-osxkeychain',
                    'Resources/lima/bin/limactl', 'Resources/windows/bin/wimlib-imagex',
                    'Resources/windows/bin/mkisofs']:
     binary = contents / relative
@@ -69,6 +70,10 @@ def verify(app):
   if (notice.is_symlink() or not notice.is_file()
       or notice.read_bytes() != pathlib.Path('assets/licenses/sha2asm.txt').read_bytes()):
     raise ValueError('Missing or mismatched SHA-2 assembly license')
+  credential_notice = resources / 'licenses' / 'docker-credential-helpers.txt'
+  if (credential_notice.is_symlink() or not credential_notice.is_file()
+      or credential_notice.read_bytes() != pathlib.Path('assets/licenses/docker-credential-helpers.txt').read_bytes()):
+    raise ValueError('Missing or mismatched Docker credential helper license')
   for name in ['windows.fd', 'variables.fd', 'manifest.json', 'revision.txt', 'license.txt']:
     if not (resources / 'firmware' / name).is_file():
       raise ValueError(f'Missing owned firmware: {name}')
