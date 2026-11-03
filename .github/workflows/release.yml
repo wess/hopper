@@ -153,9 +153,22 @@ jobs:
 
       - name: Notarize
         run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/notary-submit.json"
           xcrun notarytool submit dist/Hopper.dmg \
             --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD" --wait
+            --password "$APPLE_APP_PASSWORD" --wait \
+            --output-format json > "$result"
+          cat "$result"
+          submission_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$result")"
+          status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$result")"
+          if [[ "$status" != "Accepted" ]]; then
+            xcrun notarytool log "$submission_id" \
+              --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" || true
+            echo "Notarization failed with status: $status" >&2
+            exit 1
+          fi
           xcrun stapler staple dist/Hopper.dmg
 
       - name: Verify bundle
