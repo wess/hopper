@@ -1,5 +1,6 @@
 //! Opt-in checks against Hopper's VM, including a graceful restart.
 
+use anyhow::Context;
 use docker::{archive, containers, exec, images, volumes, Client};
 use engine::{providers::vm::Vm, Provider};
 use model::{EngineResources, PortMapping, RunInput, VolumeMapping};
@@ -16,7 +17,8 @@ async fn docker_files_ports_and_volumes_survive_a_vm_restart() -> anyhow::Result
     let pulled = images::pull(&client, "vm-check", "busybox:1.37", |_| {}).await?;
     anyhow::ensure!(pulled.ok, "image pull failed: {:?}", pulled.error);
     let name = format!("hoppercheck{}", std::process::id());
-    let fixture = tempfile::tempdir_in(store::paths::root())?;
+    let home = std::env::var_os("HOME").context("HOME is unavailable")?;
+    let fixture = tempfile::tempdir_in(home)?;
     std::fs::write(fixture.path().join("index.html"), "hopper vm ready")?;
     volumes::create(&client, &name, None, &BTreeMap::new()).await?;
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
@@ -65,7 +67,7 @@ async fn docker_files_ports_and_volumes_survive_a_vm_restart() -> anyhow::Result
         .await?;
         anyhow::ensure!(
             code == 0 && output.contains("hopper vm ready"),
-            "exec or shared mount failed"
+            "exec or shared mount failed (exit {code}): {output}"
         );
         anyhow::ensure!(
             std::fs::read_to_string(fixture.path().join("fromguest"))?.trim() == "shared",

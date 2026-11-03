@@ -403,7 +403,7 @@ h2 em { font-style: normal; color: var(--muted); }
 .pager .next { text-align: right; margin-left: auto; }
 .pager span {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--dim);

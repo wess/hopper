@@ -23,6 +23,7 @@ reqwest = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tempfile = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # The macOS engine is driven by Apple's CLI, not by the Engine API client.

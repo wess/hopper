@@ -55,6 +55,7 @@ python3 scripts/build/guestmanifest.py --verify "$contents/Resources/guesttools"
 [ -x native/build/lima/bin/limactl ] || scripts/build/lima.sh
 [ -f native/build/docker ] || scripts/build/docker.sh
 [ -f native/build/compose ] || scripts/build/compose.sh
+[ -f native/build/buildx ] || scripts/build/buildx.sh
 [ -f native/build/windows/manifest.json ] || scripts/build/windows.sh
 [ -f native/build/firmware/manifest.json ] && \
   [ -f native/build/firmware/windows.fd ] && \
@@ -86,6 +87,12 @@ fi
 if [ -f native/build/docker ]; then
   mkdir -p "$contents/MacOS/sidecars"
   cp native/build/docker "$contents/MacOS/sidecars/docker"
+fi
+
+# Buildx is installed as a Docker CLI plugin by Settings → Docker CLI.
+if [ -f native/build/buildx ]; then
+  mkdir -p "$contents/MacOS/sidecars"
+  cp native/build/buildx "$contents/MacOS/sidecars/buildx"
 fi
 
 # The MCP server is part of the release, too. Keeping it beside the app gives

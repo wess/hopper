@@ -8,6 +8,8 @@
 #[cfg(target_os = "macos")]
 pub mod appleinstall;
 pub mod engine;
+#[cfg(target_os = "macos")]
+pub mod dockercli;
 pub mod facade;
 pub mod import;
 pub mod machines;

@@ -34,7 +34,7 @@ def verify(app):
     if path.name.lower().startswith(('qemu-', 'swtpm')):
       raise ValueError(f'Forbidden runtime artifact: {path}')
   for relative in ['MacOS/hopper', 'MacOS/sidecars/hoppermcp', 'MacOS/sidecars/hoppervm',
-                   'MacOS/sidecars/docker', 'MacOS/sidecars/compose',
+                   'MacOS/sidecars/docker', 'MacOS/sidecars/compose', 'MacOS/sidecars/buildx',
                    'Resources/lima/bin/limactl', 'Resources/windows/bin/wimlib-imagex',
                    'Resources/windows/bin/mkisofs']:
     binary = contents / relative

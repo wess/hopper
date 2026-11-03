@@ -73,6 +73,7 @@ pub struct Settings {
     busy: bool,
     notice: Option<String>,
     resource_notice: Option<Result<String, String>>,
+    cli_notice: Option<Result<String, String>>,
     cpus: Entity<NumberInput>,
     memory: Entity<NumberInput>,
     disk: Entity<NumberInput>,
@@ -126,6 +127,7 @@ impl Settings {
             busy: false,
             notice: None,
             resource_notice: None,
+            cli_notice: None,
             cpus,
             memory,
             disk,
@@ -197,6 +199,32 @@ impl Settings {
             }
         }
         cx.notify();
+    }
+
+    #[cfg(target_os = "macos")]
+    fn configure_docker_cli(&mut self, cx: &mut Context<Self>) {
+        let host = Arc::clone(&self.state.host);
+        let this = cx.entity().downgrade();
+        self.busy = true;
+        self.cli_notice = None;
+        cx.notify();
+        bridge::run(
+            cx,
+            async move { host.configure_docker_cli().await },
+            move |result, cx| {
+                if let Some(this) = this.upgrade() {
+                    this.update(cx, |this, cx| {
+                        this.busy = false;
+                        this.cli_notice = Some(if result.ok {
+                            Ok(result.detail)
+                        } else {
+                            Err(result.detail)
+                        });
+                        cx.notify();
+                    });
+                }
+            },
+        );
     }
 
     fn set_theme(&mut self, mode: ThemeMode, window: &mut Window, cx: &mut Context<Self>) {
@@ -646,17 +674,38 @@ impl Render for Settings {
                 )
         } else {
             let docker_host = self.state.host.client().endpoint().docker_host_value();
-            Stack::new()
+            let mut body = Stack::new()
                 .gap(Size::Xs)
                 .child(Text::new(format!("export DOCKER_HOST=\"{}\"", docker_host)).size(Size::Xs))
                 .child(
                     Text::new(
-                        "Use this in a shell when you want `docker` or `docker compose` to \
-                         target the engine Hopper is showing.",
+                        "Install Hopper's bundled Docker, Compose, and Buildx tools and activate \
+                         a Docker context that targets this engine.",
                     )
                     .size(Size::Xs)
                     .dimmed(),
-                )
+                );
+            #[cfg(target_os = "macos")]
+            {
+                body = body
+                    .child(
+                        Button::new("configure-docker-cli", "Install Docker CLI tools")
+                            .size(Size::Xs)
+                            .variant(Variant::Light)
+                            .color(ColorName::Blue)
+                            .disabled(self.busy)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.configure_docker_cli(cx)
+                            })),
+                    )
+                    .children(self.cli_notice.as_ref().map(|notice| match notice {
+                        Ok(message) => Text::new(message.clone()).size(Size::Xs).dimmed(),
+                        Err(message) => Text::new(message.clone())
+                            .size(Size::Xs)
+                            .color(guise::theme::theme(cx).color(ColorName::Red, 6)),
+                    }));
+            }
+            body
         };
 
         let theme_body = Stack::new()

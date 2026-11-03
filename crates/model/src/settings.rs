@@ -93,7 +93,7 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub autostart_engine: bool,
     /// Keep the engine running after the window closes.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub keep_engine_on_quit: bool,
     /// Reserved compatibility setting for a future opt-in socket bridge.
     /// The current app does not modify `/var/run/docker.sock`.
@@ -117,7 +117,7 @@ impl Default for Settings {
             daemon: DaemonConfig::default(),
             shared_paths: Vec::new(),
             autostart_engine: true,
-            keep_engine_on_quit: false,
+            keep_engine_on_quit: true,
             socket_compat: false,
             active_workspace: None,
         }
@@ -146,6 +146,8 @@ mod tests {
         assert_eq!(s, Settings::default());
         // A fresh install must autostart, or first run shows a dead engine.
         assert!(s.autostart_engine);
+        // CLI workloads should keep running when the desktop window closes.
+        assert!(s.keep_engine_on_quit);
     }
 
     #[test]

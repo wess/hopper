@@ -56,14 +56,18 @@
       <p class="lede-sm">Point docker and docker compose at the engine Hopper is running.</p>
 <p>Hopper is a GUI, not a replacement for your terminal. Both should talk to the
 same engine.</p>
-<h2>With an Engine API engine</h2>
-<p>Point <code>DOCKER_HOST</code> at whatever Hopper reports under <strong>Settings → Docker CLI</strong>:</p>
-<pre><code class="language-sh">export DOCKER_HOST="unix:///var/run/docker.sock"
+<h2>With Hopper Engine</h2>
+<p>Open <strong>Settings → Docker CLI</strong> and click <strong>Install Docker CLI tools</strong>.
+Hopper installs its bundled Docker, Compose, and Buildx tools under your user account,
+creates a context named <code>hopper</code>, and makes it active. Existing commands not owned
+by Hopper are never overwritten.</p>
+<pre><code class="language-sh">docker version
+docker compose version
+docker buildx version
+docker context show
 </code></pre>
-<p>Or make it permanent with a context:</p>
-<pre><code class="language-sh">docker context create hopper --docker "host=unix:///var/run/docker.sock"
-docker context use hopper
-</code></pre>
+<p>The context is preferable to a permanent <code>DOCKER_HOST</code>: it keeps the endpoint in
+Docker's normal configuration and remains easy to switch.</p>
 <h2>With Apple Containers</h2>
 <p>There is nothing to point <code>DOCKER_HOST</code> at — Apple publishes no Docker socket.
 Use Apple's own CLI, which is installed alongside the runtime:</p>
@@ -75,14 +79,11 @@ container logs -f web
 equivalent — <code>--restart</code>, <code>--hostname</code>, <code>--network=none</code> — fail loudly rather
 than silently doing nothing, which is the right choice.</p>
 <h2>What the app bundles</h2>
-<p>The release ships the Docker CLI and a standalone Compose binary inside
+<p>The release ships the Docker CLI, Compose, and Buildx inside
 <code>Hopper.app</code>, because Docker Desktop's uninstaller takes <code>docker</code> with it.
-Hopper uses those binaries internally for Compose compatibility; it does not
-modify your machine-wide <code>PATH</code>. If you want the bundled CLI in a shell, add
-the release's sidecar directory to your shell configuration: on macOS that is
-<code>/Applications/Hopper.app/Contents/MacOS/sidecars</code>, while the Linux and
-Windows archives contain <code>sidecars/</code> next to the Hopper executable. You can
-also use the CLI installed separately by your package manager.</p>
+The Settings action creates user-owned symlinks in <code>~/.local/bin</code> and
+<code>~/.docker/cli-plugins</code>. Make sure <code>~/.local/bin</code> is on your shell's
+<code>PATH</code> if your shell does not already include it.</p>
       <nav class="pager">
         <a class="prev" href="import.html"><span>Previous</span>Import from Docker</a>
         <a class="next" href="settings.html"><span>Next</span>Settings</a>

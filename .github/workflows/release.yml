@@ -118,10 +118,11 @@ jobs:
             fi
           done
 
-      - name: Fetch VM helper, Compose, and Docker CLI
+      - name: Fetch VM helper and Docker CLI tools
         run: |
           set -euo pipefail
           scripts/build/compose.sh
+          scripts/build/buildx.sh
           scripts/build/lima.sh
           scripts/build/docker.sh
           scripts/build/windows.sh
@@ -179,6 +180,7 @@ jobs:
           test -x "$app/MacOS/hopper" || { echo "FATAL: app binary missing"; exit 1; }
           test -x "$app/MacOS/sidecars/docker"
           test -x "$app/MacOS/sidecars/compose"
+          test -x "$app/MacOS/sidecars/buildx"
           test -x "$app/MacOS/sidecars/hoppervm"
           codesign --verify --strict "$app/MacOS/sidecars/hoppervm"
           codesign -d --entitlements - "$app/MacOS/sidecars/hoppervm" 2>/dev/null | grep -q com.apple.security.hypervisor

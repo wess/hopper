@@ -199,6 +199,27 @@ impl Host {
         self.engines.stop().await
     }
 
+    /// Install Hopper's Docker CLI tools for the current user and point them
+    /// at the active Engine API endpoint. Existing non-Hopper files are never
+    /// replaced.
+    #[cfg(target_os = "macos")]
+    pub async fn configure_docker_cli(&self) -> DockerCliSetupResult {
+        if self.runtime_kind() == RuntimeKind::Apple {
+            return DockerCliSetupResult {
+                detail: "Apple Containers does not publish a Docker-compatible socket.".into(),
+                ..Default::default()
+            };
+        }
+        let host = self.client.endpoint().docker_host_value();
+        match tokio::task::spawn_blocking(move || crate::dockercli::configure(&host)).await {
+            Ok(result) => result,
+            Err(error) => DockerCliSetupResult {
+                detail: format!("Docker CLI setup did not complete: {error}"),
+                ..Default::default()
+            },
+        }
+    }
+
     /// Reconcile host port forwarding for a backend that needs it.
     ///
     /// Docker-compatible daemons and Apple's runtime bind published ports
