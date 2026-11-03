@@ -1,6 +1,13 @@
 //! ABI definitions from the Apple silicon Hypervisor SDK headers.
 
 use std::ffi::c_void;
+use std::ptr::NonNull;
+use std::sync::OnceLock;
+
+const HV_UNSUPPORTED: i32 = 0xfae9400fu32 as i32;
+
+type GetSerror = unsafe extern "C" fn(u64, *mut bool) -> i32;
+type SetSerror = unsafe extern "C" fn(u64, bool) -> i32;
 
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
@@ -49,8 +56,6 @@ extern "C" {
   pub fn hv_vcpu_set_vtimer_mask(cpu: u64, value: bool) -> i32;
   pub fn hv_vcpu_get_vtimer_offset(cpu: u64, value: *mut u64) -> i32;
   pub fn hv_vcpu_set_vtimer_offset(cpu: u64, value: u64) -> i32;
-  pub fn hv_vcpu_get_serror(cpu: u64, value: *mut bool) -> i32;
-  pub fn hv_vcpu_set_serror(cpu: u64, value: bool) -> i32;
   pub fn hv_vcpu_set_trap_debug_reg_accesses(cpu: u64, value: bool) -> i32;
   pub fn hv_vcpu_get_trap_debug_exceptions(cpu: u64, value: *mut bool) -> i32;
   pub fn hv_vcpu_set_trap_debug_exceptions(cpu: u64, value: bool) -> i32;
@@ -77,6 +82,30 @@ extern "C" {
   pub fn hv_gic_set_state(data: *const c_void, size: usize) -> i32;
   pub fn hv_gic_get_icc_reg(cpu: u64, register: u16, value: *mut u64) -> i32;
   pub fn hv_gic_set_icc_reg(cpu: u64, register: u16, value: u64) -> i32;
+}
+
+pub unsafe fn hv_vcpu_get_serror(cpu: u64, value: *mut bool) -> i32 {
+  static FUNCTION: OnceLock<Option<GetSerror>> = OnceLock::new();
+  match *FUNCTION.get_or_init(|| symbol(c"hv_vcpu_get_serror").map(|address| unsafe {
+    std::mem::transmute::<*mut c_void, GetSerror>(address)
+  })) {
+    Some(function) => unsafe { function(cpu, value) },
+    None => HV_UNSUPPORTED,
+  }
+}
+
+pub unsafe fn hv_vcpu_set_serror(cpu: u64, value: bool) -> i32 {
+  static FUNCTION: OnceLock<Option<SetSerror>> = OnceLock::new();
+  match *FUNCTION.get_or_init(|| symbol(c"hv_vcpu_set_serror").map(|address| unsafe {
+    std::mem::transmute::<*mut c_void, SetSerror>(address)
+  })) {
+    Some(function) => unsafe { function(cpu, value) },
+    None => HV_UNSUPPORTED,
+  }
+}
+
+fn symbol(name: &std::ffi::CStr) -> Option<*mut c_void> {
+  NonNull::new(unsafe { libc::dlsym(libc::RTLD_DEFAULT, name.as_ptr()) }).map(NonNull::as_ptr)
 }
 
 extern "C" {
