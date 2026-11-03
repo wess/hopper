@@ -26,11 +26,22 @@ async fn until(mut ready: impl FnMut() -> bool) {
   .expect("worker gate timed out");
 }
 async fn gate(root: &Path, name: &str) {
-  until(|| root.join(name).exists()).await;
+  until(|| {
+    let path = root.join(name);
+    if name == "pid" {
+      return fs::read_to_string(path)
+        .ok()
+        .and_then(|value| value.trim().parse::<i32>().ok())
+        .is_some();
+    }
+    path.exists()
+  })
+  .await;
 }
 fn alive(root: &Path) -> bool {
   let pid: i32 = fs::read_to_string(root.join("pid"))
     .unwrap()
+    .trim()
     .parse()
     .unwrap();
   unsafe { libc::kill(pid, 0) == 0 }
