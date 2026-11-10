@@ -15,7 +15,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.16.0"
+version = "0.16.1"
 edition = "2021"
 license = "MIT"
 authors = ["Wess Cope <opensource@wess.io>"]
@@ -123,3 +123,6 @@ debug = "limited"
 
 [profile.release]
 lto = "thin"
+# one unit and no symbol table: a smaller binary that maps and starts faster
+codegen-units = 1
+strip = "symbols"

@@ -73,7 +73,7 @@ impl Containers {
                     }
                     Err(e) => Load::Failed(e.message),
                 };
-                signal.set(cx, next);
+                signal.set_if_changed(cx, next);
             },
         );
     }

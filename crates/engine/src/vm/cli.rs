@@ -35,11 +35,16 @@ pub fn locate() -> Option<PathBuf> {
         return executable(&path).then_some(path);
     }
     let exe = std::env::current_exe().ok()?;
-    let bundled = bundle_paths(&exe);
+    let bundled = bundle_paths(&exe).into_iter().find(|p| executable(p));
+    // A release build runs the helper it shipped with and nothing else: the
+    // helper boots a VM that mounts the home folder, so whatever happens to be
+    // first on PATH must not get that job.
+    if bundled.is_some() || !cfg!(debug_assertions) {
+        return bundled;
+    }
     let dev = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native/build/lima/bin/limactl");
-    bundled
+    [dev, PathBuf::from("/opt/homebrew/bin/limactl")]
         .into_iter()
-        .chain([dev, PathBuf::from("/opt/homebrew/bin/limactl")])
         .chain(std::env::var_os("PATH").into_iter().flat_map(|paths| {
             std::env::split_paths(&paths)
                 .map(|p| p.join("limactl"))
@@ -106,10 +111,14 @@ impl Cli {
     pub async fn run(&self, args: &[String], timeout: Duration) -> anyhow::Result<()> {
         tokio::fs::create_dir_all(&self.home).await?;
         let log_path = self.home.join("engine.log");
-        let log = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)?;
+        let mut log = std::fs::OpenOptions::new();
+        log.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            log.mode(0o600);
+        }
+        let log = log.open(&log_path)?;
         let mut child = self
             .command(args)
             .stdout(Stdio::from(log.try_clone()?))

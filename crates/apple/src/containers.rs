@@ -79,6 +79,13 @@ pub async fn logs(cli: &Cli, id: &str, tail: u32) -> Result<String> {
 ///
 /// Returns the container id, which for Apple's runtime is also its name.
 pub async fn run(cli: &Cli, input: &RunInput) -> Result<String> {
+    // the image is a bare argument; one that starts with a dash is a flag
+    if input.image.starts_with('-') {
+        return Err(DockerError::decode(format!(
+            "`{}` is not an image reference.",
+            input.image
+        )));
+    }
     let argv = run_args(input);
     let borrowed: Vec<&str> = argv.iter().map(String::as_str).collect();
     let out = cli.run(&borrowed).await?;

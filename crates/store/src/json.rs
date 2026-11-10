@@ -95,6 +95,7 @@ pub fn read_or_default<T: DeserializeOwned + Default>(path: &Path) -> T {
 pub fn write<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+        crate::paths::keep_private();
     }
     let text = serde_json::to_string_pretty(value)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -109,10 +110,14 @@ pub fn write<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
         NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
     ));
     let write_result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
         file.write_all(text.as_bytes())?;
         file.sync_all()
     })();

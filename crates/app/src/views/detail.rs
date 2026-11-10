@@ -167,7 +167,7 @@ impl Detail {
             // Files and Terminal drive their own lifecycles through entities.
             Tab::Files | Tab::Terminal => {}
             Tab::Logs => {
-                bridge::stream(
+                bridge::stream_while(
                     cx,
                     move |mut tx| async move {
                         let opts = LogOptions {
@@ -183,19 +183,24 @@ impl Detail {
                     },
                     {
                         move |(stream, text), cx| {
-                            let _ = entity.update(cx, |this: &mut Self, cx| {
-                                if this.generation == generation {
-                                    this.append(stream, text);
-                                    cx.notify();
-                                }
-                            });
+                            // a dropped pane or a newer generation ends the follow
+                            entity
+                                .update(cx, |this: &mut Self, cx| {
+                                    let current = this.generation == generation;
+                                    if current {
+                                        this.append(stream, text);
+                                        cx.notify();
+                                    }
+                                    current
+                                })
+                                .unwrap_or(false)
                         }
                     },
                     |_| {},
                 );
             }
             Tab::Stats => {
-                bridge::stream(
+                bridge::stream_while(
                     cx,
                     move |mut tx| async move {
                         let _ = host
@@ -204,12 +209,16 @@ impl Detail {
                     },
                     {
                         move |sample, cx| {
-                            let _ = entity.update(cx, |this: &mut Self, cx| {
-                                if this.generation == generation {
-                                    this.stats = Some(sample);
-                                    cx.notify();
-                                }
-                            });
+                            entity
+                                .update(cx, |this: &mut Self, cx| {
+                                    let current = this.generation == generation;
+                                    if current {
+                                        this.stats = Some(sample);
+                                        cx.notify();
+                                    }
+                                    current
+                                })
+                                .unwrap_or(false)
                         }
                     },
                     |_| {},

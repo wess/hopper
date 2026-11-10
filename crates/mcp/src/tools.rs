@@ -81,6 +81,20 @@ fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|s| !s.is_empty())
 }
 
+/// Whether `id` is shaped like a container id or name.
+///
+/// The value becomes a path segment of an Engine API request, or an argument
+/// to Apple's CLI. Unchecked, `prune?` turns `docker.start` into a prune of
+/// every stopped container, and `--all` turns a stop into a stop of everything.
+/// The client asking is a model acting on text it read somewhere, so the id is
+/// held to what the engines themselves allow in a name.
+pub fn container_ref(id: &str) -> bool {
+    let mut chars = id.chars();
+    chars.next().is_some_and(|c| c.is_ascii_alphanumeric())
+        && id.len() <= 255
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
 /// Run one tool call, returning its MCP result payload.
 pub async fn call(host: &Arc<Host>, name: &str, args: &Value) -> Value {
     use crate::protocol::{error_result, text_result};
@@ -88,9 +102,14 @@ pub async fn call(host: &Arc<Host>, name: &str, args: &Value) -> Value {
     // A tool that acts on a container is useless without one, and the daemon's
     // error for an empty id is unhelpful, so it is caught here.
     let need_container = || -> Result<String, Value> {
-        arg_str(args, "container")
-            .map(str::to_string)
-            .ok_or_else(|| error_result("This tool needs a `container` id or name."))
+        let id = arg_str(args, "container")
+            .ok_or_else(|| error_result("This tool needs a `container` id or name."))?;
+        if !container_ref(id) {
+            return Err(error_result(
+                "`container` must be a container id or name: letters, digits, `_`, `.` and `-`.",
+            ));
+        }
+        Ok(id.to_string())
     };
 
     match name {
@@ -237,6 +256,17 @@ pub async fn call(host: &Arc<Host>, name: &str, args: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_container_ref_cannot_steer_the_request() {
+        for ok in ["web", "stack-web-1", "d63f3b6c8d04", "my_app.v2"] {
+            assert!(container_ref(ok), "{ok}");
+        }
+        // each of these reaches a different endpoint or flag if let through
+        for bad in ["prune?", "x/kill?", "x/json?", "--all", "-f", "a b", "../x", ""] {
+            assert!(!container_ref(bad), "{bad}");
+        }
+    }
 
     fn tool_names() -> Vec<String> {
         catalogue()["tools"]
