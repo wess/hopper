@@ -90,7 +90,7 @@ pub async fn run(host: Arc<Host>) -> anyhow::Result<()> {
                     let response=match result {
                         Ok(Ok(result))=>protocol::ok(id,result),
                         Ok(Err((code,message)))=>protocol::err(id,code,message),
-                        Err(_)=>protocol::err(id,-32800,"Request cancelled. Check the VM status before retrying a lifecycle operation."),
+                        Err(_)=>protocol::err(id,-32800,"Request cancelled."),
                     };
                     (key,response)
                 }));

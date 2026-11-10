@@ -9,20 +9,6 @@ permissions:
   contents: read
 
 jobs:
-  linux-guest:
-    name: Linux guest filesystem operations
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Test guest filesystem and contracts on Linux
-        run: cargo test -p guest -p model --locked
-      - name: Lint native Linux guest code
-        run: cargo clippy -p guest --all-targets --locked -- -D warnings
-
   check:
     name: macOS Apple silicon
     runs-on: macos-26
@@ -32,23 +18,9 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.99.0
         with:
-          components: clippy, rust-docs
-          targets: aarch64-unknown-linux-musl
+          components: clippy
 
       - uses: Swatinem/rust-cache@v2
-
-      - name: Build and check Linux guest tools
-        run: |
-          brew install lld
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$(brew --prefix lld)/bin/ld.lld" bash scripts/build/guest.sh
-          cargo clippy -p guest --all-targets --target aarch64-unknown-linux-musl --locked -- -D warnings
-
-      - name: Check deployment asset inputs
-        run: |
-          python3 scripts/tests/windowsprobe.py
-          python3 scripts/tests/windowsassets.py
-          python3 scripts/tests/guestassets.py
-          python3 scripts/tests/guestlicenses.py
 
       - name: Test workspace
         # Every crate runs even after one fails, so a platform-specific break
@@ -60,59 +32,3 @@ jobs:
 
       - name: Release build workspace
         run: cargo build --workspace --release --locked
-
-  firmware:
-    name: Native ARM64 firmware
-    runs-on: macos-26
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@1.99.0
-        with:
-          components: rust-docs
-
-      - name: Install firmware build tools
-        run: brew install llvm lld acpica
-
-      - name: Build and verify Windows installer helper
-        run: python3 scripts/tests/windowsfinish.py
-
-      - name: Build and verify Linux guest package
-        run: |
-          rustup target add aarch64-unknown-linux-musl
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER="$(brew --prefix lld)/bin/ld.lld" bash scripts/build/guest.sh
-          cargo test -p engine --test linuxassets --locked -- --include-ignored
-
-      - name: Decode ARM64 hardware tables
-        run: |
-          for cpus in 1 256; do
-            tables="$RUNNER_TEMP/hopperacpi$cpus"
-            cargo run -p machine --example acpi --locked -- "$tables" "$cpus"
-            iasl -we -d "$tables/"*.dat
-            iasl -we -p "$tables/roundtrip" -tc "$tables/dsdt.dsl"
-            python3 scripts/check/acpi.py "$tables/dsdt.dat"
-          done
-          tables="$RUNNER_TEMP/hopperacpimsi"
-          cargo run -p machine --example acpi --locked -- "$tables" 1 --msi
-          iasl -we -d "$tables/"*.dat
-          iasl -we -p "$tables/roundtrip" -tc "$tables/dsdt.dsl"
-          python3 scripts/check/acpi.py "$tables/dsdt.dat" --msi
-
-      - name: Build pinned firmware
-        run: |
-          scripts/build/firmware.sh > firmware.log 2>&1 || {
-            tail -n 50 firmware.log
-            exit 1
-          }
-          cat native/build/firmware/manifest.json
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nativefirmware
-          path: |
-            native/build/firmware/windows.fd
-            native/build/firmware/variables.fd
-            native/build/firmware/manifest.json
-            native/build/firmware/licenses
-          if-no-files-found: error

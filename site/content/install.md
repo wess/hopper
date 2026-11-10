@@ -44,7 +44,6 @@ Three entitlements, and no more:
   import stages on disk
 - `network.client` and `network.server` — registry pulls and published ports
 
-Notably **not** `com.apple.security.virtualization`. Hopper used to run a Linux
-VM of its own and needed it; Apple's runtime does its own virtualizing under its
-own privileged helpers, so the entitlement is gone and the release build asserts
-it has not come back.
+Notably **not** `com.apple.security.virtualization`. Hopper Engine's Linux VM
+runs in a separate bundled helper that carries that entitlement itself, so the app
+does not need it and the release build asserts it has not come back.

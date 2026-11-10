@@ -6,8 +6,8 @@
 # CODESIGN_IDENTITY when set (a real Developer ID for a notarizable build),
 # otherwise ad-hoc ("-") so it still runs locally.
 #
-# Lima owns the container engine; Hopper owns desktop VZ machines and its
-# native Windows worker. Sign each executable with its required entitlements.
+# Lima owns the container engine's VM and carries its own virtualization
+# entitlement, so the app itself needs none.
 #
 # Usage: scripts/bundle.sh
 set -euo pipefail
@@ -36,9 +36,8 @@ version="$(sed -n 's/^version = "\([0-9][^"]*\)".*/\1/p' Cargo.toml | head -1)"
 [ -n "$version" ] || { echo "error: could not read version from Cargo.toml" >&2; exit 1; }
 echo "[bundle] $app_name $version"
 
-echo "[bundle] cargo build --profile $profile -p app -p mcp -p machine --locked"
-cargo build --profile "$profile" -p app -p mcp -p machine --locked
-bash scripts/build/guest.sh
+echo "[bundle] cargo build --profile $profile -p app -p mcp --locked"
+cargo build --profile "$profile" -p app -p mcp --locked
 
 mkdir -p dist
 stage="$(mktemp -d dist/.hopper.XXXXXX)"
@@ -48,27 +47,13 @@ contents="$app/Contents"
 mkdir -p "$contents/MacOS" "$contents/Resources"
 cp LICENSE "$contents/Resources/LICENSE"
 mkdir -p "$contents/Resources/licenses"
-cp assets/licenses/sha2asm.txt "$contents/Resources/licenses/sha2asm.txt"
 cp assets/licenses/docker-credential-helpers.txt "$contents/Resources/licenses/docker-credential-helpers.txt"
-cp -R native/build/guesttools "$contents/Resources/guesttools"
-python3 scripts/build/guestmanifest.py --verify "$contents/Resources/guesttools"
 
 [ -x native/build/lima/bin/limactl ] || scripts/build/lima.sh
 [ -f native/build/docker ] || scripts/build/docker.sh
 [ -f native/build/compose ] || scripts/build/compose.sh
 [ -f native/build/buildx ] || scripts/build/buildx.sh
 [ -f native/build/docker-credential-osxkeychain ] || scripts/build/credential-helper.sh
-[ -f native/build/windows/manifest.json ] || scripts/build/windows.sh
-[ -f native/build/firmware/manifest.json ] && \
-  [ -f native/build/firmware/windows.fd ] && \
-  [ -f native/build/firmware/variables.fd ] && \
-  [ -d native/build/firmware/licenses ] || scripts/build/firmware.sh
-mkdir -p "$contents/Resources/firmware"
-for artifact in windows.fd variables.fd manifest.json revision.txt license.txt; do
-  cp "native/build/firmware/$artifact" "$contents/Resources/firmware/$artifact"
-done
-cp -R native/build/firmware/licenses "$contents/Resources/firmware/licenses"
-cp -R native/build/windows "$contents/Resources/windows"
 mkdir -p "$contents/Resources/lima/bin" "$contents/Resources/lima/share/doc/lima"
 cp native/build/lima/bin/limactl "$contents/Resources/lima/bin/limactl"
 cp -R native/build/lima/share/lima "$contents/Resources/lima/share/"
@@ -108,7 +93,6 @@ fi
 # agent clients a stable executable path without requiring a global install.
 mkdir -p "$contents/MacOS/sidecars"
 cp "$target_dir/hoppermcp" "$contents/MacOS/sidecars/hoppermcp"
-cp "$target_dir/hoppervm" "$contents/MacOS/sidecars/hoppervm"
 
 # Never let a stale sidecar from another checkout or host architecture make it
 # into a signed app. Universal binaries pass when they contain arm64.
@@ -125,7 +109,7 @@ if [ -d "$contents/MacOS/sidecars" ]; then
       echo "error: sidecar $sidecar does not contain host architecture $required_arch (has: ${arches:-unknown})" >&2
       exit 1
     }
-  done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/windows/bin" "$contents/Resources/windows/lib" -type f -perm -111)
+  done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" -type f -perm -111)
 fi
 
 cat > "$contents/Info.plist" << PLIST
@@ -172,16 +156,10 @@ echo "[bundle] codesign ($identity)"
 while IFS= read -r sidecar; do
   [ -e "$sidecar" ] || continue
   chmod u+w "$sidecar"
-  if [ "$(basename "$sidecar")" = hoppervm ]; then
-    codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
-      ${timestamp_opts[@]+"${timestamp_opts[@]}"} \
-      --entitlements assets/machine.entitlements --sign "$identity" "$sidecar"
-  else
-    codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
-      ${timestamp_opts[@]+"${timestamp_opts[@]}"} \
-      --preserve-metadata=entitlements --sign "$identity" "$sidecar"
-  fi
-done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" "$contents/Resources/windows/bin" "$contents/Resources/windows/lib" -type f -perm -111)
+  codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
+    ${timestamp_opts[@]+"${timestamp_opts[@]}"} \
+    --preserve-metadata=entitlements --sign "$identity" "$sidecar"
+done < <(find "$contents/MacOS/sidecars" "$contents/Resources/lima/bin" -type f -perm -111)
 
 # Lima embeds its Darwin guest agent as a gzip resource. Apple's notary service
 # inspects that nested Mach-O, so it needs the same Developer ID, hardened
@@ -196,8 +174,6 @@ if [ -f "$darwin_guest_archive" ]; then
     --sign "$identity" "$darwin_guest"
   gzip -n -9c "$darwin_guest" > "$darwin_guest_archive"
 fi
-python3 scripts/build/windowsmanifest.py "$contents/Resources/windows"
-python3 scripts/build/windowsmanifest.py --verify "$contents/Resources/windows"
 codesign --force ${runtime_opts[@]+"${runtime_opts[@]}"} \
   ${timestamp_opts[@]+"${timestamp_opts[@]}"} \
   --entitlements assets/hopper.entitlements \

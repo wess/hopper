@@ -14,7 +14,6 @@ use model::{Container, EngineStatus, Image, Network, Settings, Volume};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Route {
     Dashboard,
-    Machines,
     Containers,
     Images,
     Registry,
@@ -29,7 +28,6 @@ impl Route {
     pub fn label(&self) -> &'static str {
         match self {
             Route::Dashboard => "Dashboard",
-            Route::Machines => "Virtual machines",
             Route::Containers => "Containers",
             Route::Images => "Images",
             Route::Registry => "Registry",
@@ -44,7 +42,6 @@ impl Route {
     pub fn icon(&self) -> IconName {
         match self {
             Route::Dashboard => IconName::LayoutDashboard,
-            Route::Machines => IconName::Monitor,
             Route::Containers => IconName::Box,
             Route::Images => IconName::Layers,
             Route::Registry => IconName::PackageSearch,
@@ -64,7 +61,6 @@ impl Route {
     pub fn supported(&self, caps: &model::EngineCapabilities) -> bool {
         match self {
             Route::Stacks => caps.compose,
-            Route::Machines => cfg!(all(target_os = "macos", target_arch = "aarch64")),
             _ => true,
         }
     }
@@ -86,10 +82,9 @@ impl Route {
     }
 
     /// Sidebar order.
-    pub fn all() -> [Route; 10] {
+    pub fn all() -> [Route; 9] {
         [
             Route::Dashboard,
-            Route::Machines,
             Route::Containers,
             Route::Images,
             Route::Registry,
@@ -234,11 +229,7 @@ mod route_tests {
     #[test]
     fn an_engine_api_engine_shows_every_route() {
         let caps = model::EngineCapabilities::engine_api();
-        assert_eq!(
-            Route::available(&caps).len(),
-            Route::all().len()
-                - usize::from(!cfg!(all(target_os = "macos", target_arch = "aarch64")))
-        );
+        assert_eq!(Route::available(&caps).len(), Route::all().len());
     }
 
     #[test]
@@ -252,11 +243,7 @@ mod route_tests {
         // Import especially: it is how you get your Docker world onto this
         // engine in the first place.
         assert!(routes.contains(&Route::Import));
-        assert_eq!(
-            routes.len(),
-            Route::all().len()
-                - usize::from(!cfg!(all(target_os = "macos", target_arch = "aarch64")))
-        );
+        assert_eq!(routes.len(), Route::all().len());
     }
 
     #[test]

@@ -75,15 +75,15 @@ without complaint. If you want to confirm that yourself:</p>
 Hopper can also attach to Docker Desktop, Podman, Colima, Rancher Desktop, Apple
 Containers, or a remote daemon from a supported Mac.</p>
 <h2>Hopper asks for very little</h2>
-<p>The signed app uses the entitlements required for its features:</p>
+<p>Three entitlements, and no more:</p>
 <ul>
 <li><code>files.user-selected.read-write</code> — bind-mounted directories, and the tars an
 import stages on disk</li>
 <li><code>network.client</code> and <code>network.server</code> — registry pulls and published ports</li>
-<li><code>com.apple.security.virtualization</code> — Hopper Engine and native virtual machines</li>
 </ul>
-<p>The release is code-signed, notarized, and its bundled VM helpers are independently
-checked for the matching virtualization entitlements during release.</p>
+<p>Notably <strong>not</strong> <code>com.apple.security.virtualization</code>. Hopper Engine's Linux VM
+runs in a separate bundled helper that carries that entitlement itself, so the app
+does not need it and the release build asserts it has not come back.</p>
       <nav class="pager">
         <span></span>
         <a class="next" href="engines.html"><span>Next</span>Engines</a>

@@ -1,1 +1,0 @@
-SUBSYSTEM=="virtio-ports", ATTR{name}=="hopper.boot", OWNER="root", GROUP="root", MODE="0600", TAG-="uaccess", TAG-="seat"
