@@ -29,7 +29,8 @@ fn parse_ports(raw: &str) -> Vec<PortMapping> {
                 Some((m, p)) => (m.trim(), Some(p.trim().to_lowercase())),
                 None => (part, None),
             };
-            let (host, container) = mapping.split_once(':')?;
+            // the last colon, so `127.0.0.1:8080:80` keeps its interface
+            let (host, container) = mapping.rsplit_once(':')?;
             let (host, container) = (host.trim(), container.trim());
             if host.is_empty() || container.is_empty() {
                 return None;
@@ -221,6 +222,13 @@ impl Render for RunDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_interface_stays_with_the_host_port() {
+        let p = parse_ports("127.0.0.1:8080:80");
+        assert_eq!(p[0].host, "127.0.0.1:8080");
+        assert_eq!(p[0].container, "80");
+    }
 
     #[test]
     fn ports_parse_host_and_container() {

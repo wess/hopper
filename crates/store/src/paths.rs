@@ -50,7 +50,31 @@ pub fn log_file() -> PathBuf {
 pub fn ensure_root() -> std::io::Result<PathBuf> {
     let dir = root();
     std::fs::create_dir_all(&dir)?;
+    keep_private();
     Ok(dir)
+}
+
+/// Close the root to other accounts on this Mac.
+///
+/// It holds settings, engine logs, staged import archives and the engine's
+/// Docker socket, and it used to be created with whatever the umask allowed.
+/// Called on launch as well as on write, so a directory made by an older
+/// build is tightened too. Best effort: a root on a filesystem without modes
+/// is no reason to refuse to start.
+pub fn keep_private() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = root();
+        if dir.is_dir() {
+            let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+        }
+        for file in [settings_file(), workspaces_file()] {
+            if file.is_file() {
+                let _ = std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
 }
 
 #[cfg(test)]

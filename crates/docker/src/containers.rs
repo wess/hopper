@@ -316,6 +316,21 @@ fn host_config_limits(limits: &ResourceLimits) -> Map<String, Value> {
     m
 }
 
+/// Split a published address into the interface and the port.
+///
+/// Compose and the run dialog both allow `127.0.0.1:5432`, and the daemon wants
+/// the two apart: sent whole as `HostPort` it is refused, which took the one
+/// form that keeps a service off the network and made it the one that fails.
+fn host_binding(host: &str) -> (Option<&str>, &str) {
+    match host.rsplit_once(':') {
+        Some((ip, port)) => {
+            let ip = ip.trim_start_matches('[').trim_end_matches(']');
+            ((!ip.is_empty()).then_some(ip), port)
+        }
+        None => (None, host),
+    }
+}
+
 /// The create body for a run request. Split out from [`run`] so it can be
 /// asserted on without a daemon.
 pub fn create_body(input: &RunInput) -> Value {
@@ -328,8 +343,16 @@ pub fn create_body(input: &RunInput) -> Value {
         let mut binding = Map::new();
         // An empty host port asks Docker to pick a free one, which is what the
         // dialog's blank field should mean.
-        binding.insert("HostPort".into(), json!(p.host));
-        bindings.insert(key, json!([binding]));
+        let (ip, port) = host_binding(&p.host);
+        if let Some(ip) = ip {
+            binding.insert("HostIp".into(), json!(ip));
+        }
+        binding.insert("HostPort".into(), json!(port));
+        // the same container port can be published more than once
+        match bindings.entry(key).or_insert_with(|| json!([])) {
+            Value::Array(list) => list.push(Value::Object(binding)),
+            _ => unreachable!("bindings only ever holds arrays"),
+        }
     }
 
     let binds: Vec<String> = input
@@ -535,6 +558,28 @@ mod tests {
     #[test]
     fn command_splitting_handles_escapes() {
         assert_eq!(split_command(r"echo a\ b"), ["echo", "a b"]);
+    }
+
+    #[test]
+    fn a_published_address_is_split_into_interface_and_port() {
+        let port = |host: &str| PortMapping {
+            host: host.into(),
+            container: "5432".into(),
+            proto: None,
+        };
+        let body = create_body(&RunInput {
+            image: "postgres".into(),
+            ports: vec![port("127.0.0.1:5432"), port("[::1]:5433"), port("5434")],
+            ..Default::default()
+        });
+        let bound = &body["HostConfig"]["PortBindings"]["5432/tcp"];
+        assert_eq!(bound[0]["HostIp"], "127.0.0.1");
+        assert_eq!(bound[0]["HostPort"], "5432");
+        assert_eq!(bound[1]["HostIp"], "::1");
+        assert_eq!(bound[1]["HostPort"], "5433");
+        // no interface named: left to the daemon, and not overwritten by the others
+        assert!(bound[2].get("HostIp").is_none());
+        assert_eq!(bound[2]["HostPort"], "5434");
     }
 
     #[test]

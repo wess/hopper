@@ -17,6 +17,8 @@ use crate::views;
 use host::Host;
 
 const EVENT_REFRESH_DEBOUNCE: Duration = Duration::from_millis(500);
+const ENGINE_POLL: Duration = Duration::from_secs(3);
+const ENGINE_POLL_BACKGROUND: Duration = Duration::from_secs(15);
 
 pub struct Root {
     state: AppState,
@@ -172,11 +174,24 @@ impl Root {
                 let _ = tx.send(host.poll_engine().await);
             }));
             if let Ok(status) = rx.await {
-                if cx.update(|cx| state.engine.set(cx, status)).is_err() {
+                // an unchanged status must not repaint the window every tick
+                if cx
+                    .update(|cx| state.engine.set_if_changed(cx, status))
+                    .is_err()
+                {
                     return;
                 }
             }
-            cx.background_executor().timer(Duration::from_secs(3)).await;
+            cx.background_executor().timer(ENGINE_POLL).await;
+            // Nobody is looking while another app is in front, so stretch the
+            // gap — but check every second, so coming back is current at once.
+            let mut waited = ENGINE_POLL;
+            while waited < ENGINE_POLL_BACKGROUND
+                && !cx.update(|cx| cx.active_window().is_some()).unwrap_or(true)
+            {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                waited += Duration::from_secs(1);
+            }
         })
         .detach();
     }
@@ -207,6 +222,13 @@ impl Root {
                             // newly selected engine.
                             if event_host.selection_generation() != generation {
                                 return false;
+                            }
+                            // A healthcheck is an exec every few seconds, for
+                            // as long as the container lives. It changes no
+                            // list; the `health_status` event that follows a
+                            // real change still gets through.
+                            if event.action.starts_with("exec_") {
+                                return true;
                             }
                             // A closed receiver means the app is gone.
                             events.try_send(event).is_ok()

@@ -45,6 +45,7 @@ pub struct Host {
 
 impl Host {
     pub fn new(client: Client) -> Arc<Self> {
+        store::paths::keep_private();
         let mut settings = store::load_settings();
         // Older or hand-edited settings must not create an invalid VM on the
         // first start after an upgrade.

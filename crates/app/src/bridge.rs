@@ -33,7 +33,10 @@ pub(crate) fn abort_on_drop(task: tokio::task::JoinHandle<()>) -> AbortOnDrop {
 pub fn runtime() -> &'static Runtime {
     static RT: OnceLock<Runtime> = OnceLock::new();
     RT.get_or_init(|| {
+        // Everything here waits on a socket or a child process, so a worker
+        // per core only adds idle threads and their stacks.
         tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
             .enable_all()
             .build()
             .expect("build tokio runtime")
@@ -75,13 +78,39 @@ pub fn stream<T, Fut>(
     T: Send + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
+    stream_while(
+        cx,
+        producer,
+        move |item, cx| {
+            on_item(item, cx);
+            true
+        },
+        on_done,
+    );
+}
+
+/// [`stream`], for a producer that never finishes by itself — a log follow, a
+/// stats feed. `on_item` returns whether the view still wants the stream;
+/// `false` drops the receiver and aborts the producer, which closes the
+/// connection. Without that a follow outlives the pane that opened it and the
+/// daemon keeps feeding a view nobody can see.
+pub fn stream_while<T, Fut>(
+    cx: &mut App,
+    producer: impl FnOnce(mpsc::Sender<T>) -> Fut + Send + 'static,
+    mut on_item: impl FnMut(T, &mut App) -> bool + 'static,
+    on_done: impl FnOnce(&mut App) + 'static,
+) where
+    T: Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
     let (tx, mut rx) = mpsc::channel(512);
     let task = runtime().spawn(producer(tx));
     cx.spawn(async move |cx| {
         let _task = AbortOnDrop(task);
         while let Some(item) = rx.next().await {
-            if cx.update(|cx| on_item(item, cx)).is_err() {
-                return;
+            match cx.update(|cx| on_item(item, cx)) {
+                Ok(true) => {}
+                Ok(false) | Err(_) => return,
             }
         }
         let _ = cx.update(|cx| on_done(cx));

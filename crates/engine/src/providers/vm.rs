@@ -177,6 +177,11 @@ impl Provider for Vm {
             return self.status(EngineState::Starting, *self.phase.read().unwrap())
                 .detail("First startup downloads Linux and installs Docker. Later starts reuse the same disk.");
         }
+        // A socket that answers is the whole answer. Asking the helper too
+        // spawns a process on every status tick, for as long as Hopper runs.
+        if self.probe().ping().await.is_ok() {
+            return self.status(EngineState::Connected, "Docker is running in Hopper's Linux VM.");
+        }
         let cli = match self.cli() {
             Ok(cli) => cli,
             Err(error) => {
@@ -186,11 +191,9 @@ impl Provider for Vm {
             }
         };
         match cli.instance().await {
-            Ok(Some(instance)) if instance.status == "Running" => match self.probe().ping().await {
-                Ok(_) => self.status(EngineState::Connected, "Docker is running in Hopper's Linux VM."),
-                Err(error) => self.status(EngineState::Unreachable, "The VM is running, but Docker isn't responding.")
-                    .detail(format!("Retry to restart the VM without deleting its disk. {}", error.message)),
-            },
+            Ok(Some(instance)) if instance.status == "Running" => self
+                .status(EngineState::Unreachable, "The VM is running, but Docker isn't responding.")
+                .detail("Retry to restart the VM without deleting its disk."),
             Ok(Some(instance)) if instance.status != "Stopped" => self.status(EngineState::Unreachable, "Hopper's Linux VM needs recovery.")
                 .detail(format!("VM state: {}. See {}", instance.status, self.home.join("engine.log").display())),
             Ok(_) => self.status(EngineState::Stopped, "Hopper's Linux VM is stopped.")

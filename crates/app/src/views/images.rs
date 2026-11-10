@@ -51,7 +51,7 @@ impl Images {
                 if check_host.selection_generation() != request_generation {
                     return;
                 }
-                signal.set(
+                signal.set_if_changed(
                     cx,
                     match result {
                         Ok(list) => Load::Ready(list),
