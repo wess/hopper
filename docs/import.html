@@ -6,7 +6,7 @@
   <title>Import from Docker — Hopper</title>
   <meta name="description" content="Copy images, networks and containers out of Docker Desktop into whichever engine Hopper runs.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -54,8 +54,9 @@
     <article class="docs-body">
       <h1>Import from Docker</h1>
       <p class="lede-sm">Copy images, networks and containers out of Docker Desktop into whichever engine Hopper runs.</p>
-<p>Hopper's pitch on macOS is that you stop running Docker Desktop, and that is only
-true if what you already have comes with you.</p>
+<p>Hopper Engine can replace Docker Desktop without making migration destructive.
+Run both temporarily, copy the workloads you need, restore data independently,
+and remove the old runtime only after the replacement has been verified.</p>
 <p><strong>Import</strong> scans for another engine, lists what it holds, and copies your
 selection across. <strong>Nothing is removed from the source.</strong> If the import goes
 wrong, Docker is exactly where it was.</p>
@@ -68,7 +69,8 @@ system socket:</p>
 <li><code>~/.rd/docker.sock</code></li>
 <li><code>/var/run/docker.sock</code></li>
 </ul>
-<p>Whichever engine Hopper is currently running is excluded, so it never offers to
+<p>The replacement flow can pin a specific installed application as the source.
+Whichever engine Hopper is currently running is excluded, so it never offers to
 copy an engine onto itself.</p>
 <h2>How it copies</h2>
 <p><strong>Images.</strong> Into an Engine API engine, a tar streams straight from <code>/images/get</code>
@@ -107,7 +109,7 @@ anything.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

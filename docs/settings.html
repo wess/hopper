@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Settings — Hopper</title>
-  <meta name="description" content="Engine selection and lifecycle, CLI integration, and appearance.">
+  <meta name="description" content="Engine choice, Hopper Engine resources, Docker configuration, CLI tools, and replacement safety.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -53,47 +53,47 @@
 
     <article class="docs-body">
       <h1>Settings</h1>
-      <p class="lede-sm">Engine selection and lifecycle, CLI integration, and appearance.</p>
+      <p class="lede-sm">Engine choice, Hopper Engine resources, Docker configuration, CLI tools, and replacement safety.</p>
 <h2>Engine</h2>
-<p>What the engine that is answering has to say for itself, and — when it is one
-Hopper manages — buttons to start and stop it. An engine that is not installed
-yet has nothing to start, so those buttons stay off and the install is offered
-below instead.</p>
+<p>The status panel names the selected provider and, for an engine Hopper manages,
+offers its supported lifecycle actions. Hopper Engine can be started and stopped
+here. External desktop runtimes remain under their own application's control.</p>
 <h2>Which engine</h2>
-<p><strong>Automatic</strong> is the default: Apple Containers on a supported Apple silicon Mac,
-Docker or Podman on Linux or Windows, and whatever is already running as the
-fallback. When nothing is running,
-automatic lands on the engine Hopper can supply rather than reporting a missing
-Docker — Docker is not a requirement on macOS.</p>
-<p>Pin one instead and Hopper stays on it. That includes an engine that is not
-installed yet: pinning the one you are moving <em>to</em> is the point, and its status
-then says what is left to do about it. A Mac without Apple's <code>container</code> is also
-offered the install here — reachable while Docker is still connected and
-working, which is the only moment someone happy on Docker Desktop would think
-to look.</p>
-<p><code>HOPPER_ENGINE</code> in the environment overrides the saved setting, which is handy
-for testing without changing what is saved.</p>
+<p><strong>Automatic</strong> prefers Hopper Engine on a supported Mac, the available Docker or
+Podman socket on Linux and Windows, and an existing compatible endpoint when one
+is already selected. Pinning a provider keeps that choice even while it is
+stopped, so an outage cannot silently redirect requests to another daemon.</p>
+<p><code>HOPPER_ENGINE</code> overrides the saved choice for testing and automation.</p>
+<h2>Hopper Engine resources</h2>
+<p>Set the private VM's CPU count, memory, and disk budget. File shares decide which
+host paths containers can bind-mount. Docker settings accept daemon JSON for
+advanced configuration. Stop and start Hopper Engine after changing VM, share,
+or daemon settings.</p>
+<p>The disk panel reports usage and can reclaim unused VM space. Idle suspend can
+stop an empty Hopper Engine after the configured delay; autostart controls
+whether Hopper starts it on launch.</p>
+<p>These controls appear only for Hopper Engine. Docker Desktop, Podman, Colima,
+and remote daemons own their resources elsewhere.</p>
+<h2>Coexist or replace</h2>
+<p>This section discovers other local container applications and keeps replacement
+explicit. You can continue using one, run it beside Hopper Engine, import its
+workloads, or review removal after backups and verification. Hopper shows
+destructive consequences and requires typed confirmation before opening the
+vendor removal command in Terminal.</p>
+<p>Switching engines and importing never uninstall anything.</p>
 <h2>Docker CLI</h2>
-<p>On an Engine API engine, the <code>DOCKER_HOST</code> line that points <code>docker</code> and
-<code>docker compose</code> at whatever Hopper is showing.</p>
-<p>On Apple Containers there is no such line. That runtime publishes no Docker
-socket, so <code>docker</code> cannot be pointed at it at all — Apple's own <code>container</code>
-command drives the same runtime Hopper is showing.</p>
+<p><strong>Install Docker CLI tools</strong> configures Hopper's bundled Docker, Compose,
+Buildx, and credential helper for the current user, then creates or updates the
+<code>hopper</code> Docker context for Hopper Engine's private socket. It can also repair
+links left behind when Docker Desktop was removed.</p>
+<p>Apple Containers publishes no Docker socket, so Docker CLI tools cannot target
+that optional backend.</p>
 <h2>Appearance</h2>
-<p>Dark and light, following the system by default.</p>
-<h2>What is not here any more</h2>
-<p>Hopper used to offer a <strong>Resources</strong> section — CPUs, memory, disk — and a
-<strong>File sharing</strong> list. Both belonged to the Linux VM it used to run.</p>
-<p>Apple sizes each container's VM when it runs it, and bind-mounts host paths
-directly, so a global budget has nothing to apply to and there is no share list
-to keep. Numbers that change nothing are worse than no numbers: they invite you
-to tune them and then wonder why nothing happened. Both sections are gone.</p>
+<p>Choose light, dark, or follow the system.</p>
 <h2>Where settings live</h2>
-<p>JSON under <code>~/.hopper/</code>, written atomically, with a corrupt file backed up
-rather than silently replaced. Credentials go to the OS keychain instead, one
-single-line JSON blob per key — the macOS keychain corrupts values containing a
-newline.</p>
-<p><code>HOPPER_DIR</code> overrides the root, which is what the test suite uses.</p>
+<p>JSON lives under <code>~/.hopper/</code> and is written atomically. A corrupt document is
+backed up instead of silently discarded. Credentials live in the OS keychain as
+single-line JSON values. <code>HOPPER_DIR</code> overrides the root for isolated testing.</p>
       <nav class="pager">
         <a class="prev" href="cli.html"><span>Previous</span>Docker CLI</a>
         <a class="next" href="firstcontainer.html"><span>Next</span>Run your first container</a>
@@ -103,7 +103,7 @@ newline.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

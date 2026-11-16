@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Run your first container — Hopper</title>
-  <meta name="description" content="From a fresh install to nginx serving on localhost, in about five minutes.">
+  <meta name="description" content="Start Hopper Engine and serve nginx on localhost.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -53,54 +53,39 @@
 
     <article class="docs-body">
       <h1>Run your first container</h1>
-      <p class="lede-sm">From a fresh install to nginx serving on localhost, in about five minutes.</p>
-<p>This assumes a Mac with nothing container-shaped on it yet.</p>
+      <p class="lede-sm">Start Hopper Engine and serve nginx on localhost.</p>
+<p>This walkthrough starts on an Apple silicon Mac with no container runtime.</p>
 <h2>1. Install Hopper</h2>
 <pre><code class="language-sh">brew install --cask wess/packages/hopper
 </code></pre>
-<p>Open it. The sidebar footer will say what it found.</p>
-<h2>2. Get an engine</h2>
-<p>On a clean Apple silicon Mac running macOS 26, Hopper will say:</p>
-<blockquote>
-<p><strong>Run containers natively on this Mac</strong>
-Apple Containers is not installed yet.</p>
-</blockquote>
-<p>Click <strong>Install Apple Containers</strong>. Hopper downloads the package Apple signed and
-hands it to the system installer; macOS asks for your password. Approve it.</p>
-<p>When it finishes, Hopper starts the services itself. The first start pulls a
-kernel image, so it takes a moment. The footer goes <strong>starting → connected</strong>.</p>
-<blockquote>
-<p>Already running Docker Desktop or Colima? Hopper will just connect to it and
-you can skip this step entirely.</p>
-</blockquote>
+<p>Open the app. Hopper selects its managed engine and shows its current state in
+the sidebar.</p>
+<h2>2. Start Hopper Engine</h2>
+<p>Click <strong>Start Hopper Engine</strong>. On the first run Hopper downloads the pinned Linux
+base, creates its private VM disk, starts Docker, and waits for the daemon. Keep
+the app open until the footer says <strong>Connected</strong>.</p>
+<p>Already running Docker Desktop, Colima, Rancher Desktop, or Podman? Hopper can
+attach to it instead. Select the engine under Settings.</p>
 <h2>3. Find an image</h2>
-<p>Go to <strong>Registry</strong> and search for <code>nginx</code>. This search hits Docker Hub over
-HTTP, so it works even before an engine is up.</p>
-<p>Click <strong>Run</strong> on the official nginx result.</p>
+<p>Open <strong>Registry</strong> and search for <code>nginx</code>. Registry search talks to the registry
+over HTTP, so it does not depend on daemon-side search.</p>
+<p>Choose the official nginx image and click <strong>Run</strong>.</p>
 <h2>4. Configure the run</h2>
-<p>The run dialog opens with the image filled in. Set:</p>
 <ul>
 <li><strong>Name</strong> — <code>web</code></li>
 <li><strong>Publish ports</strong> — <code>8080:80</code></li>
 </ul>
-<p>Leave the rest. Click <strong>Run</strong>.</p>
-<h2>5. See it</h2>
-<p>Go to <strong>Containers</strong>. <code>web</code> is there, <code>running</code>, showing <code>8080→80</code>.</p>
+<p>Leave the other fields at their defaults and click <strong>Run</strong>.</p>
+<h2>5. Verify it</h2>
+<p>The Containers view shows <code>web</code> as running with <code>8080→80</code>.</p>
 <pre><code class="language-sh">curl http://localhost:8080
 </code></pre>
-<p>You should get nginx's welcome page.</p>
-<p>Click the row. The detail pane opens with <strong>Logs</strong> streaming — you will see your
-own <code>curl</code> show up as an access log line.</p>
+<p>The nginx welcome page confirms port forwarding. Open the container detail pane
+to see the request in Logs, inspect live stats, browse files, or open a shell.</p>
 <h2>6. Clean up</h2>
-<p><strong>Stop</strong> on the row, then <strong>Delete</strong>.</p>
-<hr />
-<h2>What just happened</h2>
-<p>On Apple Containers, <code>web</code> is not a process sharing your kernel — it is its own
-lightweight virtual machine with its own network address, and macOS forwarded
-port 8080 to it. That is stronger isolation than a traditional container runtime
-gives you, for roughly the same startup cost.</p>
+<p>Stop the container, then remove it. The image remains available for another run.</p>
 <p><strong>Next:</strong> <a href="offdockerdesktop.html">Move off Docker Desktop</a> if you have an
-existing setup to bring across.</p>
+existing local environment to bring across.</p>
       <nav class="pager">
         <a class="prev" href="settings.html"><span>Previous</span>Settings</a>
         <a class="next" href="offdockerdesktop.html"><span>Next</span>Move off Docker Desktop</a>
@@ -110,7 +95,7 @@ existing setup to bring across.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

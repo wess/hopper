@@ -2,47 +2,45 @@
 title: Volumes and networks
 group: Use
 order: 3
-summary: Named volumes, bind mounts, and how Apple's networking differs.
+summary: Persistent data, host bind mounts, and container networking across Hopper's engines.
 ---
 
 ## Volumes
 
-Create, inspect, remove and prune. Sizes come from the engine's disk-usage report
-where it has one.
+Create, inspect, remove, and prune named volumes. Hopper Engine and other Engine
+API providers report usage through Docker's disk-usage endpoint. A volume
+outlives the container that mounts it; deleting a container does not delete its
+data.
 
-Two things about volumes on **Apple Containers** are worth knowing before they
-bite you:
+Imports recreate volume definitions but do not copy their contents. Back up and
+restore important data independently before starting a migrated workload.
 
-- **A named volume is a real ext4 filesystem**, so it arrives with a
-  `lost+found` directory in it. Postgres refuses to initialise into a non-empty
-  directory, so point `PGDATA` at a subdirectory:
+On the optional Apple Containers backend, a named volume is an ext4 filesystem
+and may contain `lost+found`. Point PostgreSQL at a subdirectory when needed:
 
-  ```yaml
-  environment:
-    PGDATA: /var/lib/postgresql/data/pgdata
-  ```
-
-- **Anonymous volumes are not removed with their container.** Docker cleans them
-  up on `--rm`; Apple does not. Prune them from this view.
+```yaml
+environment:
+  PGDATA: /var/lib/postgresql/data/pgdata
+```
 
 ## Bind mounts
 
-Apple's runtime bind-mounts host directories directly, so there is no share list
-to maintain — which is a simplification over the VM Hopper used to run, where a
-path outside the shared set silently showed the container an empty directory.
+Hopper Engine shares configured host paths with its private VM. Add a path under
+**Settings → Hopper Engine → File sharing**, restart the engine, then mount it
+into a container. A path outside the shared set cannot expose its files.
 
-Two caveats:
+Prefer named volumes for database storage and bind mounts for source trees,
+configuration, and files that need direct host editing.
 
-- only `ro` is honoured as a mount option
-- a bind mount performs worse than a named volume, so put databases on volumes
+Apple Containers bind-mounts host directories directly and accepts a smaller
+set of mount options. The UI reports unsupported options instead of dropping
+them silently.
 
 ## Networks
 
-Create, inspect, remove and prune. On macOS 26 Apple gives each container an
-address on its network, reachable from the host and from other containers on the
-same network, with DNS by container name. Separate networks are genuinely
-isolated from one another.
+Create, inspect, remove, and prune Docker networks. Hopper Engine supports the
+normal Engine API operations, including attaching or detaching a running
+container. Published ports are forwarded back to the Mac.
 
-Attaching a *running* container to a network is an Engine API feature. Apple
-attaches containers to their networks when it creates them, so Hopper refuses
-rather than pretending.
+Apple Containers attaches networks at container creation and cannot connect a
+running container afterward. Hopper hides or refuses that unsupported action.

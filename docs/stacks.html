@@ -6,7 +6,7 @@
   <title>Compose stacks — Hopper</title>
   <meta name="description" content="Reading a compose file and running it, on any engine, with no Compose binary installed.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -54,10 +54,11 @@
     <article class="docs-body">
       <h1>Compose stacks</h1>
       <p class="lede-sm">Reading a compose file and running it, on any engine, with no Compose binary installed.</p>
-<p>Hopper implements Compose rather than shelling out to it. It reads your
-<code>compose.yaml</code>, resolves every service down to a container, and creates them
-itself — so a stack comes up on <strong>Apple Containers with no Docker on the
-machine at all</strong>.</p>
+<p>Hopper implements Compose rather than requiring a system Compose installation.
+It reads your <code>compose.yaml</code>, resolves every service down to a container, and
+creates the resources itself. Hopper Engine therefore runs normal Compose stacks
+through its private Docker daemon, while the optional Apple backend uses the
+same planner within that runtime's capability limits.</p>
 <p>It also groups containers into projects using the <code>com.docker.compose.*</code> labels,
 which is what the real Compose CLI writes. Both directions work: a stack
 <code>docker compose up</code> started appears in Hopper, and a stack Hopper started
@@ -98,8 +99,9 @@ runs from the <code>image</code>.</li>
 <li><strong><code>healthcheck:</code>.</strong> Containers are created without one, on either engine. A
 <code>depends_on</code> with <code>condition: service_healthy</code> is honoured as ordering only —
 the service it names is started first, not waited on until healthy.</li>
-<li><strong>A second network.</strong> A container is created on one network; the others are
-named in the output.</li>
+<li><strong>Extra networks on a backend that cannot attach them.</strong> Engine API providers
+connect the container after creation; Apple reports the networks it could not
+attach.</li>
 <li><strong><code>deploy.replicas</code>.</strong> One container per service.</li>
 <li><strong><code>entrypoint:</code>.</strong> Containers get the image's own.</li>
 <li><strong>Port ranges</strong> like <code>8000-8010:8000-8010</code>.</li>
@@ -122,7 +124,7 @@ is the <code>name:</code> in the file, else the directory it sits in.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

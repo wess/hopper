@@ -32,9 +32,10 @@ spctl -a -t exec -vv /Applications/Hopper.app
 | **Architecture** | Apple silicon (arm64) |
 | **macOS** | 26 or later |
 
-Apple's container runtime needs macOS 26 for the vmnet APIs that give containers
-their own addresses. Hopper can also attach to Docker Desktop, Podman, Colima,
-Rancher Desktop, or a remote daemon from a supported Mac.
+Hopper Engine uses a bundled Lima helper and Apple's virtualization APIs to run
+its private Linux VM. The optional Apple Containers backend also requires macOS
+26. Hopper can attach to Docker Desktop, Podman, Colima, Rancher Desktop, or a
+remote daemon from a supported Mac.
 
 ## Hopper asks for very little
 
@@ -45,5 +46,5 @@ Three entitlements, and no more:
 - `network.client` and `network.server` — registry pulls and published ports
 
 Notably **not** `com.apple.security.virtualization`. Hopper Engine's Linux VM
-runs in a separate bundled helper that carries that entitlement itself, so the app
-does not need it and the release build asserts it has not come back.
+runs in a separate bundled helper that carries that entitlement itself, so the
+app does not need it and the release build asserts it has not come back.

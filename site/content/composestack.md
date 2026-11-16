@@ -5,8 +5,9 @@ order: 3
 summary: A web service and a database, brought up together from the Stacks view — on any engine.
 ---
 
-Hopper reads the compose file and runs the services itself, so this works on
-Apple Containers with no Docker and no Compose binary anywhere on the machine.
+Hopper reads the compose file and runs the services itself, so Hopper Engine
+needs no separate Compose installation. The same planner also works on the
+optional Apple backend within its documented capability limits.
 
 ## 1. A stack to run
 
@@ -31,10 +32,8 @@ volumes:
   pgdata:
 ```
 
-The `PGDATA` line is not decoration. A named volume can arrive with a
-`lost+found` in it, and Postgres refuses to initialise into a non-empty
-directory. Pointing at a subdirectory sidesteps it, and costs nothing when the
-volume is empty.
+The `PGDATA` subdirectory is portable across engines and also avoids the
+`lost+found` directory present on Apple-backed ext4 volumes.
 
 ## 2. Bring it up
 

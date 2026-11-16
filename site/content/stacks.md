@@ -5,10 +5,11 @@ order: 4
 summary: Reading a compose file and running it, on any engine, with no Compose binary installed.
 ---
 
-Hopper implements Compose rather than shelling out to it. It reads your
-`compose.yaml`, resolves every service down to a container, and creates them
-itself — so a stack comes up on **Apple Containers with no Docker on the
-machine at all**.
+Hopper implements Compose rather than requiring a system Compose installation.
+It reads your `compose.yaml`, resolves every service down to a container, and
+creates the resources itself. Hopper Engine therefore runs normal Compose stacks
+through its private Docker daemon, while the optional Apple backend uses the
+same planner within that runtime's capability limits.
 
 It also groups containers into projects using the `com.docker.compose.*` labels,
 which is what the real Compose CLI writes. Both directions work: a stack
@@ -61,8 +62,9 @@ silently dropped:
 - **`healthcheck:`.** Containers are created without one, on either engine. A
   `depends_on` with `condition: service_healthy` is honoured as ordering only —
   the service it names is started first, not waited on until healthy.
-- **A second network.** A container is created on one network; the others are
-  named in the output.
+- **Extra networks on a backend that cannot attach them.** Engine API providers
+  connect the container after creation; Apple reports the networks it could not
+  attach.
 - **`deploy.replicas`.** One container per service.
 - **`entrypoint:`.** Containers get the image's own.
 - **Port ranges** like `8000-8010:8000-8010`.

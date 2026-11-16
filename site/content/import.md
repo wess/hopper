@@ -5,8 +5,9 @@ order: 5
 summary: Copy images, networks and containers out of Docker Desktop into whichever engine Hopper runs.
 ---
 
-Hopper's pitch on macOS is that you stop running Docker Desktop, and that is only
-true if what you already have comes with you.
+Hopper Engine can replace Docker Desktop without making migration destructive.
+Run both temporarily, copy the workloads you need, restore data independently,
+and remove the old runtime only after the replacement has been verified.
 
 **Import** scans for another engine, lists what it holds, and copies your
 selection across. **Nothing is removed from the source.** If the import goes
@@ -22,6 +23,7 @@ system socket:
 - `~/.rd/docker.sock`
 - `/var/run/docker.sock`
 
+The replacement flow can pin a specific installed application as the source.
 Whichever engine Hopper is currently running is excluded, so it never offers to
 copy an engine onto itself.
 

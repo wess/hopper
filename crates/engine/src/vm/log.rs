@@ -45,6 +45,10 @@ impl Log {
         self.bytes += data.len() as u64;
         Ok(())
     }
+
+    pub async fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush().await
+    }
 }
 
 #[cfg(test)]

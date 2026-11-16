@@ -1,6 +1,7 @@
 use crate::facade::Host;
 #[cfg(target_os = "macos")]
 use crate::runtime::refuse;
+#[cfg(target_os = "macos")]
 use crate::runtime::Backend;
 use docker::networks;
 use model::*;

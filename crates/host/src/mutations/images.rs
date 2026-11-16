@@ -1,4 +1,5 @@
 use crate::facade::Host;
+#[cfg(target_os = "macos")]
 use crate::runtime::Backend;
 use docker::images;
 use model::*;

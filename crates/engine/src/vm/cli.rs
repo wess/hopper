@@ -202,6 +202,9 @@ async fn pump(
             result.extend_from_slice(&chunk[..count]);
         }
     }
+    if let Some(log) = &log {
+        log.lock().await.flush().await?;
+    }
     Ok(result)
 }
 

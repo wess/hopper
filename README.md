@@ -4,6 +4,9 @@ A native desktop app for running and managing containers — a Docker Desktop
 replacement written in Rust. The UI is [gpui](https://github.com/zed-industries/zed)
 + [guise](https://github.com/wess/guise); the async layer is Tokio.
 
+[Website and documentation](https://wess.github.io/hopper/) ·
+[Latest release](https://github.com/wess/hopper/releases/latest)
+
 Hopper currently targets **Apple silicon Macs running macOS 26 or later**. Its
 engine is a persistent Linux VM running Docker, managed through a bundled
 [Lima](https://lima-vm.io/) Virtualization.framework helper. Hopper creates,
@@ -35,9 +38,13 @@ Compose, Buildx and the Keychain credential helper.
   protected).
 - **Stacks** — compose projects reconstructed from container labels, so they
   appear with no compose CLI and start/stop label-driven.
-- **Settings** — choose Automatic, Hopper Engine, Apple Containers, Docker, Podman, Colima,
-  Rancher Desktop, or an existing endpoint; control lifecycle, appearance,
-  VM CPU/memory/disk resources, and Docker CLI integration.
+- **Settings** — choose Automatic, Hopper Engine, Apple Containers, Docker,
+  Podman, Colima, Rancher Desktop, or an existing endpoint; control lifecycle,
+  appearance, VM CPU/memory/disk resources, file sharing, Docker daemon JSON,
+  idle suspension, and Docker CLI integration.
+- **Coexist or replace** — discover other local runtimes, start Hopper Engine
+  beside them, import first, and open an explicit removal review only after
+  independent backups and typed confirmation.
 - **Migration** — scan a source engine (Docker Desktop / Colima / Rancher) and
   copy images, networks, and container configuration into Hopper's engine;
   named volumes referenced by recreated containers are created as needed,
@@ -93,6 +100,7 @@ crates/
   host      the async service facade the UI calls
   mcp       the stdio MCP server (hoppermcp)
   app       the gpui + guise application (hopperdev / hopper)
+  site      the documentation site's static generator
 ```
 
 The async Docker layer runs on a Tokio runtime; gpui has its own executor. The

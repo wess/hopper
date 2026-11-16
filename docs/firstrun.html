@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>First run — Hopper</title>
-  <meta name="description" content="What happens when you open Hopper, and what to do if no engine answers.">
+  <meta name="description" content="What Hopper selects, how Hopper Engine starts, and what each engine state means.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -53,44 +53,43 @@
 
     <article class="docs-body">
       <h1>First run</h1>
-      <p class="lede-sm">What happens when you open Hopper, and what to do if no engine answers.</p>
-<p>On launch Hopper picks an engine, points itself at it, and starts polling. The
-status footer in the sidebar tells you where it got to.</p>
-<h2>If Apple Containers is not installed</h2>
-<p>You get an offer rather than an error:</p>
-<blockquote>
-<p><strong>Run containers natively on this Mac</strong>
-Apple Containers is not installed yet.
-<em>Hopper can download Apple's signed installer for you; macOS will ask you to
-approve it.</em></p>
-</blockquote>
-<p>Clicking <strong>Install Apple Containers</strong> resolves Apple's current release, downloads
-the signed <code>.pkg</code>, and opens it. macOS takes over from there and asks for your
-administrator password — Hopper never asks for it and never elevates.</p>
-<p>Once the package is in, Hopper starts the services itself. That first start
-fetches a kernel image, so give it a moment.</p>
-<h2>If you already run Docker</h2>
-<p>Nothing to do. Hopper finds the socket and connects, and the footer says which
-daemon answered — <code>Connected to Docker 29.7.2.</code> or similar.</p>
-<p>You can still switch to Apple Containers later, and
-<a href="import.html">Import from Docker</a> will bring your images across when you do.</p>
-<h2>The states you might see</h2>
-<table><thead><tr><th>State</th><th>What it means</th></tr></thead><tbody>
-<tr><td><strong>connected</strong></td><td>An engine answered. Everything works.</td></tr>
-<tr><td><strong>starting</strong></td><td>Hopper is bringing the engine up, or the first probe is in flight.</td></tr>
-<tr><td><strong>stopped</strong></td><td>The engine is installed but not running. There is a Start button.</td></tr>
-<tr><td><strong>not installed</strong></td><td>No engine here, and one can be offered or installed.</td></tr>
-<tr><td><strong>needs permission</strong></td><td>The socket exists but Hopper is not allowed to open it. On Linux, usually the <code>docker</code> group.</td></tr>
-<tr><td><strong>unreachable</strong></td><td>Something is listening but not answering properly.</td></tr>
-<tr><td><strong>unsupported</strong></td><td>This engine cannot run on this machine — for example Apple Containers on an Intel Mac or before macOS 26.</td></tr>
+      <p class="lede-sm">What Hopper selects, how Hopper Engine starts, and what each engine state means.</p>
+<p>On launch Hopper selects an engine, resolves its endpoint, and starts polling.
+The sidebar footer names the provider and its current state.</p>
+<h2>On a clean Mac</h2>
+<p>Hopper offers its managed engine instead of reporting that Docker is missing.
+Choose <strong>Start Hopper Engine</strong>. The first start:</p>
+<ol>
+<li>verifies the bundled Lima helper and templates;</li>
+<li>downloads the pinned Linux base when it is not cached;</li>
+<li>creates Hopper's private VM disk under <code>~/.hopper/engine/lima</code>;</li>
+<li>applies CPU, memory, file-share, and Docker daemon settings;</li>
+<li>starts the VM and waits for Docker to answer its private socket.</li>
+</ol>
+<p>The footer moves through preparation, VM startup, and Docker readiness. A booted
+VM with an unhealthy daemon is not shown as connected.</p>
+<h2>If another engine is already running</h2>
+<p>Automatic selection can attach to Docker Desktop, Colima, Rancher Desktop,
+Podman, or an explicit <code>DOCKER_HOST</code>. Open <strong>Settings → Coexist or replace</strong> to
+keep using it, switch to Hopper Engine, import its workloads, or review removal
+after independent backups and replacement verification.</p>
+<p>Hopper never removes another runtime merely because you switched engines or
+finished an import.</p>
+<h2>The states</h2>
+<table><thead><tr><th>State</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><strong>connected</strong></td><td>The selected engine answered and is ready.</td></tr>
+<tr><td><strong>starting</strong></td><td>Provisioning, boot, or a Docker readiness check is in flight.</td></tr>
+<tr><td><strong>stopped</strong></td><td>The engine exists but is not running. Managed engines offer Start.</td></tr>
+<tr><td><strong>not installed</strong></td><td>The selected external runtime is absent, or an optional backend can be installed.</td></tr>
+<tr><td><strong>needs permission</strong></td><td>The endpoint exists but Hopper cannot open it.</td></tr>
+<tr><td><strong>unreachable</strong></td><td>The endpoint exists but the engine did not answer correctly.</td></tr>
+<tr><td><strong>unsupported</strong></td><td>This provider cannot run on the current hardware or build.</td></tr>
 </tbody></table>
-<p>Only the states Hopper can actually act on offer a button. A stopped engine that
-Hopper manages gets <strong>Start</strong>; a missing Docker does not, because starting it is
-not Hopper's to do.</p>
+<p>Only states Hopper can act on get a lifecycle button. Hopper can start and stop
+Hopper Engine; it does not launch or kill somebody else's desktop runtime.</p>
 <h2>Autostart</h2>
-<p>On by default: if the selected engine is one Hopper manages and it is not
-running, Hopper starts it in the background. Turn it off under
-<strong>Settings → Engine</strong>.</p>
+<p>Autostart is enabled by default for Hopper Engine. Turn it off under
+<strong>Settings → Engine</strong> if you want the VM to remain stopped until requested.</p>
       <nav class="pager">
         <a class="prev" href="engines.html"><span>Previous</span>Engines</a>
         <a class="next" href="containers.html"><span>Next</span>Containers</a>
@@ -100,7 +99,7 @@ running, Hopper starts it in the background. Turn it off under
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

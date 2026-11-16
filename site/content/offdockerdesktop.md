@@ -2,103 +2,87 @@
 title: Move off Docker Desktop
 group: Tutorials
 order: 2
-summary: Bring your images and containers across, then uninstall the thing you were paying for.
+summary: Import into Hopper Engine, verify the replacement, then remove Docker Desktop safely.
 ---
 
-You have Docker Desktop with real work in it. On a supported Apple silicon Mac,
-this moves that work onto Apple's
-runtime and gets Docker Desktop off the machine.
+Hopper Engine is a private Docker environment owned by Hopper. You can run it
+beside Docker Desktop while you move, so the source stays intact until the new
+workloads have been verified.
 
-Read the whole thing before starting — there is one step that needs manual work.
+## 1. Take stock and back up data
 
-## 1. Take stock
+Keep Docker Desktop running. In **Settings → Coexist or replace**, Hopper lists
+the local runtimes it finds and explains the cost of running both.
 
-With Docker Desktop still running, open Hopper. It will connect to it — the
-footer says `Connected to Docker …`.
+Review `docker ps -a`, `docker images`, `docker volume ls`, and any databases or
+named volumes you care about. Back those volumes up independently. Hopper's
+import deliberately does not copy volume contents.
 
-Note what you actually need. `docker ps -a`, `docker images`, `docker volume ls`.
-Most people find half of it is scratch.
+## 2. Start Hopper Engine
 
-## 2. Install Apple Containers
+Choose Hopper Engine and start it. First startup downloads the pinned Linux base,
+creates the private VM, starts Docker, and waits for the daemon to answer.
 
-**Settings → Engine**, or the first-run panel. Install it, but **do not switch
-yet** — you want Docker running as the import source.
+Starting Hopper Engine does not stop, change, or remove Docker Desktop. Both can
+run at once, though they use extra memory and published ports may conflict.
 
 ## 3. Import
 
-Go to **Import** and click **Look for Docker**.
+Open **Import**, select Docker Desktop as the source, and choose the images,
+containers, networks, and volume definitions you need. Images stream directly
+between the two Engine API endpoints. Containers are recreated from their
+configuration; their writable layers are scratch and do not move.
 
-Hopper finds Docker Desktop's socket, lists everything it holds, and preselects
-all of it. Untick what you do not want — this is the moment to leave the scratch
-behind.
+The source is pinned for the duration of the run and nothing is deleted there.
+One failed item is reported without abandoning everything else.
 
-Click **Import**. Images stream out of Docker, land on disk as tars, and load
-into Apple's runtime. Containers are recreated from their configuration.
+## 4. Restore volume data
 
-**Nothing is removed from Docker.** If this goes wrong, you have lost time, not
-work.
-
-## 4. Deal with volumes by hand
-
-Hopper will tell you, per volume:
-
-> Volume contents are not copied yet.
-
-This is the manual step. For each volume with data you care about, the shape is:
-tar it out of Docker, create the volume on the new engine, tar it back in.
+Create each destination volume and restore its independent backup before
+starting the container that owns it. One portable pattern is:
 
 ```sh
-# out of Docker
-docker run --rm -v pgdata:/data -v "$PWD":/backup alpine \
+# Save from Docker Desktop.
+docker --context desktop-linux run --rm \
+  -v pgdata:/data -v "$PWD":/backup alpine \
   tar czf /backup/pgdata.tgz -C /data .
 
-# into Apple Containers
-container volume create pgdata
-container run --rm --volume pgdata:/data --volume "$PWD":/backup alpine \
+# Restore through Hopper Engine after installing its Docker CLI context.
+docker --context hopper volume create pgdata
+docker --context hopper run --rm \
+  -v pgdata:/data -v "$PWD":/backup alpine \
   tar xzf /backup/pgdata.tgz -C /data
 ```
 
-If that volume is a Postgres data directory, read the
-[volumes page](volumes.html) first — Apple's named volumes contain a
-`lost+found`, and Postgres refuses to initialise into a non-empty directory.
+Use the real source context and volume names from your machine. Database-native
+backup and restore tools are safer than filesystem copies for a live database.
 
-## 5. Switch
+## 5. Verify the replacement
 
-**Settings → Engine → Apple Containers**. The footer reconnects, and your
-imported containers are in the list.
+Start the imported workloads on Hopper Engine. Verify ports, logs, healthchecks,
+bind-mount paths, data, and any tools that mount the Docker socket. The Hopper
+Docker context points normal `docker`, Compose, and Engine API tools at the
+private socket.
 
-Check the things that matter: do they start, do their ports answer, does the data
-look right.
+## 6. Review removal
 
-## 6. Then, and only then
+Only after independent backups and replacement verification, return to
+**Settings → Coexist or replace**. Hopper shows the exact vendor uninstaller,
+its destructive effects, and requires the application name as confirmation. It
+opens the review in Terminal; it never removes another runtime merely because
+you switched engines or completed an import.
 
-```sh
-/Applications/Docker.app/Contents/MacOS/uninstall
-```
+After Docker Desktop is gone, use **Settings → Docker CLI → Install Docker CLI
+tools** to repair command links and select the Hopper context if necessary.
 
-Docker Desktop's uninstaller takes its `docker` CLI with it. On Apple's runtime,
-use `container` from the terminal. Hopper bundles a separate Docker CLI for
-Docker-compatible engines, but it does not put that binary on your `PATH` or
-make Apple's runtime answer `docker` commands.
+## Limits to check before removing anything
 
----
+- Volume contents do not move automatically.
+- A service with only `build:` cannot be built by Hopper; provide an `image:` or
+  build it elsewhere first.
+- Bind mounts must refer to paths shared with Hopper Engine.
+- Containers that depend on a specific desktop runtime or privileged host
+  integration need workload-specific testing.
+- Running both engines can conflict on published host ports.
 
-## Before you commit
-
-Some things do not survive the move, and it is better to know now:
-
-- **Building images.** Hopper does not build. A compose service with a `build:`
-  and no `image:` will not start, and there is no replacement for
-  `docker build` — see [Stacks](stacks.html). Compose stacks themselves do run:
-  Hopper reads the file and creates the containers itself.
-- **Healthchecks.** Neither engine gets one from Hopper, so a `depends_on` with
-  `condition: service_healthy` only orders the start.
-- **Anything that bind-mounts `/var/run/docker.sock`** — Portainer, Traefik's
-  Docker provider, most CI-in-a-container setups. Apple publishes no such socket.
-- **Containers needing `NET_ADMIN` or host kernel modules**, WireGuard being the
-  usual example. Each container is its own VM, so there is no host kernel to
-  reach into.
-- **x86-only images** need an explicit `--platform linux/amd64`.
-
-Some are missing Hopper features; others come from Apple's runtime. Check the
-workloads you depend on before deleting Docker Desktop data.
+The safe order is backup, import, restore, verify, and only then removal.

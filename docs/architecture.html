@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Architecture — Hopper</title>
-  <meta name="description" content="A Rust workspace layered bottom-up, with one Tokio-to-gpui seam.">
+  <meta name="description" content="A bottom-up Rust workspace with a gpui-free core and one Tokio-to-gpui seam.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -53,48 +53,45 @@
 
     <article class="docs-body">
       <h1>Architecture</h1>
-      <p class="lede-sm">A Rust workspace layered bottom-up, with one Tokio-to-gpui seam.</p>
+      <p class="lede-sm">A bottom-up Rust workspace with a gpui-free core and one Tokio-to-gpui seam.</p>
 <pre><code>crates/
-  model     shared domain types (the wire contract)
-  store     ~/.hopper/ JSON persistence + OS keychain
-  docker    Engine API client (hyper) + every domain module
-  apple     Apple Containers, driven through the `container` CLI
-  engine    provider abstraction; Apple / Docker-or-Podman / existing
-  migrate   Docker -&gt; Hopper import
-  host      the async service facade the UI calls
-  mcp       the stdio MCP server
-  app       the gpui + guise application
-  site      this documentation site's generator
+  model     shared domain types and wire contracts
+  store     ~/.hopper JSON persistence + OS keychain
+  docker    Engine API client, transports, streaming, exec, archives
+  apple     optional Apple Containers CLI adapter
+  engine    provider registry + Hopper's private Lima VM
+  compose   Compose parsing, interpolation, planning and naming
+  migrate   source discovery and Docker-to-Hopper import
+  host      async service facade and backend dispatch
+  mcp       stdio MCP server
+  app       gpui + guise desktop application
+  site      documentation generator
 </code></pre>
-<p>Each crate depends only on those below it, and the gpui-free core never imports
-gpui. The boundary is <code>app</code>.</p>
-<h2>Two engines, one enum</h2>
-<p>Hopper speaks to two kinds of engine: the Docker Engine API over its native
-transport, and
-Apple's runtime over its CLI. <code>host::runtime::Backend</code> picks between them.</p>
-<p>It is an <strong>enum, not a trait</strong>, and that is deliberate. The streaming calls take
-closures — <code>FnMut(LogLine) -&gt; bool</code> — which are not object-safe. Boxing every
-callback to pretend a trait works would buy nothing over a two-variant match.</p>
-<p><code>EngineCapabilities</code> carries what each backend can actually do, and the UI reads
-it: unavailable tabs are not drawn, unavailable routes leave the sidebar.</p>
+<p>Each crate depends only on layers below it. The core stays free of gpui; the UI
+boundary is <code>app</code>.</p>
+<h2>Providers and backends</h2>
+<p>On macOS, Hopper Engine provisions a private Lima VM under
+<code>~/.hopper/engine/lima</code>, starts rootful Docker inside it, publishes a private
+host socket, and waits for Docker readiness. The bundled helper owns Apple's
+Virtualization framework integration, file sharing, and port forwarding.</p>
+<p>Docker, Podman, Hopper Engine, and remote daemons all converge on <code>crates/docker</code>.
+Endpoints are resolved per request and API versions negotiate down for older
+daemons. Unix sockets, TCP/TLS, and Windows named pipes use the same client.</p>
+<p>Apple Containers is the second backend. <code>host::runtime::Backend</code> is an enum,
+not a trait, because streaming operations accept <code>FnMut</code> callbacks that are not
+object-safe. <code>EngineCapabilities</code> tells the UI which controls each backend can
+actually support.</p>
+<h2>Why Apple uses a CLI adapter</h2>
+<p>Apple's <code>container</code> talks to its apiserver over XPC and does not publish a
+Docker Engine API. <code>crates/apple</code> therefore drives the binary and maps its JSON
+onto Hopper's shared model. The decoder is deliberately liberal because Apple
+only promises output stability within a patch version.</p>
 <h2>The async seam</h2>
-<p>The Docker layer runs on a Tokio runtime; gpui has its own executor. They meet in
-exactly one place, <code>app::bridge</code>, which runs a future on Tokio and delivers the
-result on the gpui main thread through a runtime-agnostic oneshot.</p>
-<p>Streaming works the same way: a producer sends items down a channel, and the view
-that stops receiving is how a log follow gets cancelled. There is no separate
-abort registry to keep in sync.</p>
-<p>This mirrors the <a href="https://github.com/wess/tables">tables</a> architecture.</p>
-<h2>Why the CLI, not the API</h2>
-<p>Apple's <code>container</code> talks to <code>container-apiserver</code> over XPC and publishes no
-Docker Engine API. <a href="https://github.com/apple/container/issues/636">The request to expose one was closed as not
-planned</a>. So <code>crates/apple</code> drives
-the binary and maps its JSON onto the same <code>model</code> types the Engine API path
-produces — which is why no view knows which backend answered.</p>
-<p>That mapping is deliberately liberal: Apple promises stability only within a
-patch version, so every field is optional and anything structural Hopper does not
-need stays a <code>Value</code>. A field Apple renames should cost one column in a list, not
-the whole view.</p>
+<p>Docker work runs on Tokio while gpui owns the application thread. <code>app::bridge</code>
+is the single handoff: it runs a future on Tokio and delivers its result to gpui
+through a runtime-agnostic channel. Streaming views cancel by dropping their
+receivers, so logs, stats, and events do not need a separate abort registry.</p>
+<p>This layering follows the <a href="https://github.com/wess/tables">tables</a> architecture.</p>
       <nav class="pager">
         <a class="prev" href="mcp.html"><span>Previous</span>MCP server</a>
         <a class="next" href="troubleshooting.html"><span>Next</span>Troubleshooting</a>
@@ -104,7 +101,7 @@ the whole view.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Troubleshooting — Hopper</title>
-  <meta name="description" content="The failures people actually hit, and what they mean.">
+  <meta name="description" content="Diagnose Hopper Engine startup, socket selection, mounts, and optional backends.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -53,56 +53,65 @@
 
     <article class="docs-body">
       <h1>Troubleshooting</h1>
-      <p class="lede-sm">The failures people actually hit, and what they mean.</p>
-<h2>"Apple Containers can't run on this Mac"</h2>
-<p>It needs an Apple silicon Mac running macOS 26. The vmnet APIs that give containers their own addresses do not
-exist earlier. Use a Docker engine instead — Hopper still works as a client.</p>
-<h2>The engine says "stopped" and Start does nothing</h2>
-<p>Check what Apple's own services think:</p>
+      <p class="lede-sm">Diagnose Hopper Engine startup, socket selection, mounts, and optional backends.</p>
+<h2>Hopper Engine does not become connected</h2>
+<p>The VM being up is only half the check: Docker inside it must answer Hopper's
+private socket. Open <strong>Settings → Engine</strong> for the current phase and error, then
+stop and start Hopper Engine once. First startup can take longer while the Linux
+base is downloaded and provisioned.</p>
+<p>If you changed CPU, memory, file shares, or Docker daemon JSON, restart the
+engine to apply it. Invalid daemon JSON is rejected before it replaces the last
+working configuration.</p>
+<p>Hopper Engine data lives under <code>~/.hopper/engine/lima</code>. Do not delete that
+directory as a troubleshooting step: it contains the VM disk and container data.</p>
+<h2>A bind mount is empty or missing</h2>
+<p>Add its host path under <strong>Settings → Hopper Engine → File sharing</strong>, save, then
+restart Hopper Engine. The private VM cannot expose paths outside its configured
+shares.</p>
+<h2>A published port is already in use</h2>
+<p>Another container or a second local runtime may own the host port. Stop the
+conflicting workload or publish a different port. Docker Desktop and Hopper
+Engine can coexist, so check both while migrating.</p>
+<h2>Hopper connects to the wrong daemon</h2>
+<p>An explicit <code>HOPPER_ENGINE</code> overrides the saved choice, and <code>DOCKER_HOST</code> can
+select an existing endpoint. Remove the override or pin the provider under
+<strong>Settings → Which engine</strong>:</p>
+<pre><code class="language-sh">HOPPER_ENGINE=vm /Applications/Hopper.app/Contents/MacOS/hopper
+</code></pre>
+<p>Hopper keeps an unavailable explicit selection instead of falling through to an
+unrelated daemon.</p>
+<h2>Docker commands still target Docker Desktop</h2>
+<p>Use <strong>Settings → Docker CLI → Install Docker CLI tools</strong>. It repairs Hopper's
+bundled command links and creates or updates the <code>hopper</code> context. Confirm it:</p>
+<pre><code class="language-sh">docker context use hopper
+docker info
+</code></pre>
+<h2>Apple Containers cannot run on this Mac</h2>
+<p>The optional Apple backend needs Apple silicon and macOS 26. Use Hopper Engine
+or another Docker-compatible endpoint instead.</p>
+<p>If Apple's services are installed but stopped:</p>
 <pre><code class="language-sh">container system status
-container system start
+container system start --enable-kernel-install
 </code></pre>
-<p>If <code>system start</code> complains about a kernel, let it install one:</p>
-<pre><code class="language-sh">container system start --enable-kernel-install
-</code></pre>
-<p>Hopper always passes that flag, because the command otherwise prompts on stdin
-and Hopper has no terminal to answer with.</p>
-<h2>Postgres exits immediately on Apple Containers</h2>
-<p>Its data directory is not empty. Apple's named volumes are real ext4
-filesystems and arrive with a <code>lost+found</code>, which Postgres refuses to initialise
-into. Point <code>PGDATA</code> at a subdirectory:</p>
+<p>Hopper passes <code>--enable-kernel-install</code> because the plain command can prompt on
+stdin and the app has no terminal to answer.</p>
+<h2>PostgreSQL exits on Apple Containers</h2>
+<p>Apple named volumes may contain <code>lost+found</code>. Point PostgreSQL at a subdirectory:</p>
 <pre><code class="language-yaml">environment:
   PGDATA: /var/lib/postgresql/data/pgdata
 </code></pre>
-<h2>Something bind-mounts /var/run/docker.sock and fails</h2>
-<p>Portainer, Traefik's Docker provider, and most CI-in-a-container setups do this.
-Apple publishes no Docker socket, so there is nothing to mount. These need a
-Docker engine.</p>
-<h2>"no matching manifest for linux/arm64"</h2>
-<p>An x86-only image. Ask for it explicitly:</p>
-<pre><code class="language-sh">container run --platform linux/amd64 someimage
+<h2>Permission denied on a Linux socket</h2>
+<p>For Docker, add the user to the appropriate group and start a new login session:</p>
+<pre><code class="language-sh">sudo usermod -aG docker "$USER"
 </code></pre>
-<h2>The Stacks tab disappeared</h2>
-<p>You are on Apple Containers, which has no Compose. See <a href="stacks.html">Stacks</a>.</p>
-<h2>Permission denied on the socket (Linux)</h2>
-<p>You are not in the <code>docker</code> group:</p>
-<pre><code class="language-sh">sudo usermod -aG docker "$USER"   # then log out and back in
-</code></pre>
-<p>For rootless Podman, the socket needs starting:</p>
+<p>For rootless Podman, start its user socket:</p>
 <pre><code class="language-sh">systemctl --user start podman.socket
 </code></pre>
-<h2>Hopper connects to the wrong daemon</h2>
-<p><code>DOCKER_HOST</code> wins over everything when it is set. Unset it, or set
-<code>HOPPER_ENGINE</code> to pick a provider explicitly:</p>
-<pre><code class="language-sh">HOPPER_ENGINE=apple /Applications/Hopper.app/Contents/MacOS/hopper
-</code></pre>
-<h2>Checking the app is really notarized</h2>
+<h2>Verify notarization</h2>
 <pre><code class="language-sh">spctl -a -t exec -vv /Applications/Hopper.app
-# accepted / source=Notarized Developer ID
 </code></pre>
-<p>Checking the <code>.dmg</code> instead will report <em>no usable signature</em> even on a perfectly
-good release — the DMG is not codesigned, the ticket is stapled to it, and the
-signature lives on the app inside.</p>
+<p>Check the app, not the DMG. The signature lives on <code>Hopper.app</code>; the notarization
+ticket is stapled to the disk image.</p>
       <nav class="pager">
         <a class="prev" href="architecture.html"><span>Previous</span>Architecture</a>
         <a class="next" href="contributing.html"><span>Next</span>From source</a>
@@ -112,7 +121,7 @@ signature lives on the app inside.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

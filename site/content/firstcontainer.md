@@ -2,10 +2,10 @@
 title: Run your first container
 group: Tutorials
 order: 1
-summary: From a fresh install to nginx serving on localhost, in about five minutes.
+summary: Start Hopper Engine and serve nginx on localhost.
 ---
 
-This assumes a Mac with nothing container-shaped on it yet.
+This walkthrough starts on an Apple silicon Mac with no container runtime.
 
 ## 1. Install Hopper
 
@@ -13,65 +13,46 @@ This assumes a Mac with nothing container-shaped on it yet.
 brew install --cask wess/packages/hopper
 ```
 
-Open it. The sidebar footer will say what it found.
+Open the app. Hopper selects its managed engine and shows its current state in
+the sidebar.
 
-## 2. Get an engine
+## 2. Start Hopper Engine
 
-On a clean Apple silicon Mac running macOS 26, Hopper will say:
+Click **Start Hopper Engine**. On the first run Hopper downloads the pinned Linux
+base, creates its private VM disk, starts Docker, and waits for the daemon. Keep
+the app open until the footer says **Connected**.
 
-> **Run containers natively on this Mac**
-> Apple Containers is not installed yet.
-
-Click **Install Apple Containers**. Hopper downloads the package Apple signed and
-hands it to the system installer; macOS asks for your password. Approve it.
-
-When it finishes, Hopper starts the services itself. The first start pulls a
-kernel image, so it takes a moment. The footer goes **starting → connected**.
-
-> Already running Docker Desktop or Colima? Hopper will just connect to it and
-> you can skip this step entirely.
+Already running Docker Desktop, Colima, Rancher Desktop, or Podman? Hopper can
+attach to it instead. Select the engine under Settings.
 
 ## 3. Find an image
 
-Go to **Registry** and search for `nginx`. This search hits Docker Hub over
-HTTP, so it works even before an engine is up.
+Open **Registry** and search for `nginx`. Registry search talks to the registry
+over HTTP, so it does not depend on daemon-side search.
 
-Click **Run** on the official nginx result.
+Choose the official nginx image and click **Run**.
 
 ## 4. Configure the run
-
-The run dialog opens with the image filled in. Set:
 
 - **Name** — `web`
 - **Publish ports** — `8080:80`
 
-Leave the rest. Click **Run**.
+Leave the other fields at their defaults and click **Run**.
 
-## 5. See it
+## 5. Verify it
 
-Go to **Containers**. `web` is there, `running`, showing `8080→80`.
+The Containers view shows `web` as running with `8080→80`.
 
 ```sh
 curl http://localhost:8080
 ```
 
-You should get nginx's welcome page.
-
-Click the row. The detail pane opens with **Logs** streaming — you will see your
-own `curl` show up as an access log line.
+The nginx welcome page confirms port forwarding. Open the container detail pane
+to see the request in Logs, inspect live stats, browse files, or open a shell.
 
 ## 6. Clean up
 
-**Stop** on the row, then **Delete**.
-
----
-
-## What just happened
-
-On Apple Containers, `web` is not a process sharing your kernel — it is its own
-lightweight virtual machine with its own network address, and macOS forwarded
-port 8080 to it. That is stronger isolation than a traditional container runtime
-gives you, for roughly the same startup cost.
+Stop the container, then remove it. The image remains available for another run.
 
 **Next:** [Move off Docker Desktop](offdockerdesktop.html) if you have an
-existing setup to bring across.
+existing local environment to bring across.
