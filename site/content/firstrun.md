@@ -2,54 +2,52 @@
 title: First run
 group: Start
 order: 3
-summary: What happens when you open Hopper, and what to do if no engine answers.
+summary: What Hopper selects, how Hopper Engine starts, and what each engine state means.
 ---
 
-On launch Hopper picks an engine, points itself at it, and starts polling. The
-status footer in the sidebar tells you where it got to.
+On launch Hopper selects an engine, resolves its endpoint, and starts polling.
+The sidebar footer names the provider and its current state.
 
-## If Apple Containers is not installed
+## On a clean Mac
 
-You get an offer rather than an error:
+Hopper offers its managed engine instead of reporting that Docker is missing.
+Choose **Start Hopper Engine**. The first start:
 
-> **Run containers natively on this Mac**
-> Apple Containers is not installed yet.
-> *Hopper can download Apple's signed installer for you; macOS will ask you to
-> approve it.*
+1. verifies the bundled Lima helper and templates;
+2. downloads the pinned Linux base when it is not cached;
+3. creates Hopper's private VM disk under `~/.hopper/engine/lima`;
+4. applies CPU, memory, file-share, and Docker daemon settings;
+5. starts the VM and waits for Docker to answer its private socket.
 
-Clicking **Install Apple Containers** resolves Apple's current release, downloads
-the signed `.pkg`, and opens it. macOS takes over from there and asks for your
-administrator password — Hopper never asks for it and never elevates.
+The footer moves through preparation, VM startup, and Docker readiness. A booted
+VM with an unhealthy daemon is not shown as connected.
 
-Once the package is in, Hopper starts the services itself. That first start
-fetches a kernel image, so give it a moment.
+## If another engine is already running
 
-## If you already run Docker
+Automatic selection can attach to Docker Desktop, Colima, Rancher Desktop,
+Podman, or an explicit `DOCKER_HOST`. Open **Settings → Coexist or replace** to
+keep using it, switch to Hopper Engine, import its workloads, or review removal
+after independent backups and replacement verification.
 
-Nothing to do. Hopper finds the socket and connects, and the footer says which
-daemon answered — `Connected to Docker 29.7.2.` or similar.
+Hopper never removes another runtime merely because you switched engines or
+finished an import.
 
-You can still switch to Apple Containers later, and
-[Import from Docker](import.html) will bring your images across when you do.
+## The states
 
-## The states you might see
-
-| State | What it means |
+| State | Meaning |
 |---|---|
-| **connected** | An engine answered. Everything works. |
-| **starting** | Hopper is bringing the engine up, or the first probe is in flight. |
-| **stopped** | The engine is installed but not running. There is a Start button. |
-| **not installed** | No engine here, and one can be offered or installed. |
-| **needs permission** | The socket exists but Hopper is not allowed to open it. On Linux, usually the `docker` group. |
-| **unreachable** | Something is listening but not answering properly. |
-| **unsupported** | This engine cannot run on this machine — for example Apple Containers on an Intel Mac or before macOS 26. |
+| **connected** | The selected engine answered and is ready. |
+| **starting** | Provisioning, boot, or a Docker readiness check is in flight. |
+| **stopped** | The engine exists but is not running. Managed engines offer Start. |
+| **not installed** | The selected external runtime is absent, or an optional backend can be installed. |
+| **needs permission** | The endpoint exists but Hopper cannot open it. |
+| **unreachable** | The endpoint exists but the engine did not answer correctly. |
+| **unsupported** | This provider cannot run on the current hardware or build. |
 
-Only the states Hopper can actually act on offer a button. A stopped engine that
-Hopper manages gets **Start**; a missing Docker does not, because starting it is
-not Hopper's to do.
+Only states Hopper can act on get a lifecycle button. Hopper can start and stop
+Hopper Engine; it does not launch or kill somebody else's desktop runtime.
 
 ## Autostart
 
-On by default: if the selected engine is one Hopper manages and it is not
-running, Hopper starts it in the background. Turn it off under
-**Settings → Engine**.
+Autostart is enabled by default for Hopper Engine. Turn it off under
+**Settings → Engine** if you want the VM to remain stopped until requested.

@@ -6,7 +6,7 @@
   <title>Docker CLI — Hopper</title>
   <meta name="description" content="Point docker and docker compose at the engine Hopper is running.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -57,17 +57,21 @@
 <p>Hopper is a GUI, not a replacement for your terminal. Both should talk to the
 same engine.</p>
 <h2>With Hopper Engine</h2>
-<p>Open <strong>Settings → Docker CLI</strong> and click <strong>Install Docker CLI tools</strong>.
-Hopper installs its bundled Docker, Compose, and Buildx tools under your user account,
-creates a context named <code>hopper</code>, and makes it active. Existing commands not owned
-by Hopper are never overwritten.</p>
-<pre><code class="language-sh">docker version
-docker compose version
-docker buildx version
-docker context show
+<p>Use <strong>Settings → Docker CLI → Install Docker CLI tools</strong>. Hopper installs links
+to its bundled Docker, Compose, Buildx, and credential helper for the current
+user, then creates or updates a <code>hopper</code> context pointing at the private socket:</p>
+<pre><code class="language-sh">docker context use hopper
+docker info
 </code></pre>
-<p>The context is preferable to a permanent <code>DOCKER_HOST</code>: it keeps the endpoint in
-Docker's normal configuration and remains easy to switch.</p>
+<p>The setup also repairs links that targeted a removed Docker Desktop bundle.</p>
+<h2>With another Engine API engine</h2>
+<p>Point <code>DOCKER_HOST</code> at whatever Hopper reports under <strong>Settings → Docker CLI</strong>:</p>
+<pre><code class="language-sh">export DOCKER_HOST="unix:///var/run/docker.sock"
+</code></pre>
+<p>Or make it permanent with a context:</p>
+<pre><code class="language-sh">docker context create hopper --docker "host=unix:///var/run/docker.sock"
+docker context use hopper
+</code></pre>
 <h2>With Apple Containers</h2>
 <p>There is nothing to point <code>DOCKER_HOST</code> at — Apple publishes no Docker socket.
 Use Apple's own CLI, which is installed alongside the runtime:</p>
@@ -79,11 +83,10 @@ container logs -f web
 equivalent — <code>--restart</code>, <code>--hostname</code>, <code>--network=none</code> — fail loudly rather
 than silently doing nothing, which is the right choice.</p>
 <h2>What the app bundles</h2>
-<p>The release ships the Docker CLI, Compose, Buildx, and Docker's macOS Keychain credential helper inside
-<code>Hopper.app</code>, because Docker Desktop's uninstaller takes <code>docker</code> with it.
-The Settings action creates user-owned symlinks in <code>~/.local/bin</code> and
-<code>~/.docker/cli-plugins</code>. Make sure <code>~/.local/bin</code> is on your shell's
-<code>PATH</code> if your shell does not already include it.</p>
+<p>The release ships Docker, Compose, Buildx, and the macOS credential helper in
+<code>Hopper.app</code>, because Docker Desktop's uninstaller can remove the commands that
+used to point into its bundle. Hopper's setup action creates user-owned links;
+it does not replace unrelated working binaries.</p>
       <nav class="pager">
         <a class="prev" href="import.html"><span>Previous</span>Import from Docker</a>
         <a class="next" href="settings.html"><span>Next</span>Settings</a>
@@ -93,7 +96,7 @@ The Settings action creates user-owned symlinks in <code>~/.local/bin</code> and
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

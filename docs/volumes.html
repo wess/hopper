@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Volumes and networks — Hopper</title>
-  <meta name="description" content="Named volumes, bind mounts, and how Apple's networking differs.">
+  <meta name="description" content="Persistent data, host bind mounts, and container networking across Hopper's engines.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -53,43 +53,34 @@
 
     <article class="docs-body">
       <h1>Volumes and networks</h1>
-      <p class="lede-sm">Named volumes, bind mounts, and how Apple's networking differs.</p>
+      <p class="lede-sm">Persistent data, host bind mounts, and container networking across Hopper's engines.</p>
 <h2>Volumes</h2>
-<p>Create, inspect, remove and prune. Sizes come from the engine's disk-usage report
-where it has one.</p>
-<p>Two things about volumes on <strong>Apple Containers</strong> are worth knowing before they
-bite you:</p>
-<ul>
-<li>
-<p><strong>A named volume is a real ext4 filesystem</strong>, so it arrives with a
-<code>lost+found</code> directory in it. Postgres refuses to initialise into a non-empty
-directory, so point <code>PGDATA</code> at a subdirectory:</p>
+<p>Create, inspect, remove, and prune named volumes. Hopper Engine and other Engine
+API providers report usage through Docker's disk-usage endpoint. A volume
+outlives the container that mounts it; deleting a container does not delete its
+data.</p>
+<p>Imports recreate volume definitions but do not copy their contents. Back up and
+restore important data independently before starting a migrated workload.</p>
+<p>On the optional Apple Containers backend, a named volume is an ext4 filesystem
+and may contain <code>lost+found</code>. Point PostgreSQL at a subdirectory when needed:</p>
 <pre><code class="language-yaml">environment:
   PGDATA: /var/lib/postgresql/data/pgdata
 </code></pre>
-</li>
-<li>
-<p><strong>Anonymous volumes are not removed with their container.</strong> Docker cleans them
-up on <code>--rm</code>; Apple does not. Prune them from this view.</p>
-</li>
-</ul>
 <h2>Bind mounts</h2>
-<p>Apple's runtime bind-mounts host directories directly, so there is no share list
-to maintain — which is a simplification over the VM Hopper used to run, where a
-path outside the shared set silently showed the container an empty directory.</p>
-<p>Two caveats:</p>
-<ul>
-<li>only <code>ro</code> is honoured as a mount option</li>
-<li>a bind mount performs worse than a named volume, so put databases on volumes</li>
-</ul>
+<p>Hopper Engine shares configured host paths with its private VM. Add a path under
+<strong>Settings → Hopper Engine → File sharing</strong>, restart the engine, then mount it
+into a container. A path outside the shared set cannot expose its files.</p>
+<p>Prefer named volumes for database storage and bind mounts for source trees,
+configuration, and files that need direct host editing.</p>
+<p>Apple Containers bind-mounts host directories directly and accepts a smaller
+set of mount options. The UI reports unsupported options instead of dropping
+them silently.</p>
 <h2>Networks</h2>
-<p>Create, inspect, remove and prune. On macOS 26 Apple gives each container an
-address on its network, reachable from the host and from other containers on the
-same network, with DNS by container name. Separate networks are genuinely
-isolated from one another.</p>
-<p>Attaching a <em>running</em> container to a network is an Engine API feature. Apple
-attaches containers to their networks when it creates them, so Hopper refuses
-rather than pretending.</p>
+<p>Create, inspect, remove, and prune Docker networks. Hopper Engine supports the
+normal Engine API operations, including attaching or detaching a running
+container. Published ports are forwarded back to the Mac.</p>
+<p>Apple Containers attaches networks at container creation and cannot connect a
+running container afterward. Hopper hides or refuses that unsupported action.</p>
       <nav class="pager">
         <a class="prev" href="images.html"><span>Previous</span>Images</a>
         <a class="next" href="stacks.html"><span>Next</span>Compose stacks</a>
@@ -99,7 +90,7 @@ rather than pretending.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

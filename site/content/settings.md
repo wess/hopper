@@ -2,62 +2,64 @@
 title: Settings
 group: Use
 order: 7
-summary: Engine selection and lifecycle, CLI integration, and appearance.
+summary: Engine choice, Hopper Engine resources, Docker configuration, CLI tools, and replacement safety.
 ---
 
 ## Engine
 
-What the engine that is answering has to say for itself, and — when it is one
-Hopper manages — buttons to start and stop it. An engine that is not installed
-yet has nothing to start, so those buttons stay off and the install is offered
-below instead.
+The status panel names the selected provider and, for an engine Hopper manages,
+offers its supported lifecycle actions. Hopper Engine can be started and stopped
+here. External desktop runtimes remain under their own application's control.
 
 ## Which engine
 
-**Automatic** is the default: Apple Containers on a supported Apple silicon Mac,
-Docker or Podman on Linux or Windows, and whatever is already running as the
-fallback. When nothing is running,
-automatic lands on the engine Hopper can supply rather than reporting a missing
-Docker — Docker is not a requirement on macOS.
+**Automatic** prefers Hopper Engine on a supported Mac, the available Docker or
+Podman socket on Linux and Windows, and an existing compatible endpoint when one
+is already selected. Pinning a provider keeps that choice even while it is
+stopped, so an outage cannot silently redirect requests to another daemon.
 
-Pin one instead and Hopper stays on it. That includes an engine that is not
-installed yet: pinning the one you are moving *to* is the point, and its status
-then says what is left to do about it. A Mac without Apple's `container` is also
-offered the install here — reachable while Docker is still connected and
-working, which is the only moment someone happy on Docker Desktop would think
-to look.
+`HOPPER_ENGINE` overrides the saved choice for testing and automation.
 
-`HOPPER_ENGINE` in the environment overrides the saved setting, which is handy
-for testing without changing what is saved.
+## Hopper Engine resources
+
+Set the private VM's CPU count, memory, and disk budget. File shares decide which
+host paths containers can bind-mount. Docker settings accept daemon JSON for
+advanced configuration. Stop and start Hopper Engine after changing VM, share,
+or daemon settings.
+
+The disk panel reports usage and can reclaim unused VM space. Idle suspend can
+stop an empty Hopper Engine after the configured delay; autostart controls
+whether Hopper starts it on launch.
+
+These controls appear only for Hopper Engine. Docker Desktop, Podman, Colima,
+and remote daemons own their resources elsewhere.
+
+## Coexist or replace
+
+This section discovers other local container applications and keeps replacement
+explicit. You can continue using one, run it beside Hopper Engine, import its
+workloads, or review removal after backups and verification. Hopper shows
+destructive consequences and requires typed confirmation before opening the
+vendor removal command in Terminal.
+
+Switching engines and importing never uninstall anything.
 
 ## Docker CLI
 
-On an Engine API engine, the `DOCKER_HOST` line that points `docker` and
-`docker compose` at whatever Hopper is showing.
+**Install Docker CLI tools** configures Hopper's bundled Docker, Compose,
+Buildx, and credential helper for the current user, then creates or updates the
+`hopper` Docker context for Hopper Engine's private socket. It can also repair
+links left behind when Docker Desktop was removed.
 
-On Apple Containers there is no such line. That runtime publishes no Docker
-socket, so `docker` cannot be pointed at it at all — Apple's own `container`
-command drives the same runtime Hopper is showing.
+Apple Containers publishes no Docker socket, so Docker CLI tools cannot target
+that optional backend.
 
 ## Appearance
 
-Dark and light, following the system by default.
-
-## What is not here any more
-
-Hopper used to offer a **Resources** section — CPUs, memory, disk — and a
-**File sharing** list. Both belonged to the Linux VM it used to run.
-
-Apple sizes each container's VM when it runs it, and bind-mounts host paths
-directly, so a global budget has nothing to apply to and there is no share list
-to keep. Numbers that change nothing are worse than no numbers: they invite you
-to tune them and then wonder why nothing happened. Both sections are gone.
+Choose light, dark, or follow the system.
 
 ## Where settings live
 
-JSON under `~/.hopper/`, written atomically, with a corrupt file backed up
-rather than silently replaced. Credentials go to the OS keychain instead, one
-single-line JSON blob per key — the macOS keychain corrupts values containing a
-newline.
-
-`HOPPER_DIR` overrides the root, which is what the test suite uses.
+JSON lives under `~/.hopper/` and is written atomically. A corrupt document is
+backed up instead of silently discarded. Credentials live in the OS keychain as
+single-line JSON values. `HOPPER_DIR` overrides the root for isolated testing.

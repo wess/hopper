@@ -6,7 +6,7 @@
   <title>Run a Compose stack — Hopper</title>
   <meta name="description" content="A web service and a database, brought up together from the Stacks view — on any engine.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -54,8 +54,9 @@
     <article class="docs-body">
       <h1>Run a Compose stack</h1>
       <p class="lede-sm">A web service and a database, brought up together from the Stacks view — on any engine.</p>
-<p>Hopper reads the compose file and runs the services itself, so this works on
-Apple Containers with no Docker and no Compose binary anywhere on the machine.</p>
+<p>Hopper reads the compose file and runs the services itself, so Hopper Engine
+needs no separate Compose installation. The same planner also works on the
+optional Apple backend within its documented capability limits.</p>
 <h2>1. A stack to run</h2>
 <pre><code class="language-yaml"># compose.yaml
 services:
@@ -76,10 +77,8 @@ services:
 volumes:
   pgdata:
 </code></pre>
-<p>The <code>PGDATA</code> line is not decoration. A named volume can arrive with a
-<code>lost+found</code> in it, and Postgres refuses to initialise into a non-empty
-directory. Pointing at a subdirectory sidesteps it, and costs nothing when the
-volume is empty.</p>
+<p>The <code>PGDATA</code> subdirectory is portable across engines and also avoids the
+<code>lost+found</code> directory present on Apple-backed ext4 volumes.</p>
 <h2>2. Bring it up</h2>
 <p>Open <strong>Stacks</strong>, then <strong>Open compose file…</strong>, and pick the file or the directory
 it is in.</p>
@@ -114,7 +113,7 @@ hash of the service it came from, and one that still matches is left alone.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

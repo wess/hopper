@@ -279,4 +279,10 @@ initrd
 # Cargo.lock IS committed — Hopper is an application, not a library.
 /native/build
 .impeccable
+!.impeccable/
+.impeccable/*
+!.impeccable/design.json
+!.impeccable/surfaces/
+.impeccable/surfaces/*
+!.impeccable/surfaces/site-index-html.md
 __pycache__/

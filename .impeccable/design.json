@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-16T20:36:00Z",
+  "title": "Design System: Hopper",
+  "extensions": {
+    "colorMeta": {
+      "engine-navy": { "role": "primary", "displayName": "Engine Navy", "canonical": "#082852", "tonalRamp": ["#03101f", "#041a32", "#082852", "#16436b", "#3c6688", "#7695aa", "#b8c9d3", "#edf2f5"] },
+      "drafting-cyan": { "role": "tertiary", "displayName": "Drafting Cyan", "canonical": "#aff0f6", "tonalRamp": ["#0c2629", "#164247", "#27666d", "#428b92", "#70b4ba", "#9cdde2", "#caf5f7", "#f0fdfe"] },
+      "manual-bone": { "role": "neutral", "displayName": "Manual Bone", "canonical": "#f1f7f3", "tonalRamp": ["#1c211e", "#343b37", "#555f59", "#7d8982", "#a7b2ab", "#cdd6d0", "#e6ece8", "#f7faf8"] },
+      "action-vermilion": { "role": "secondary", "displayName": "Action Vermilion", "canonical": "#d3342c", "tonalRamp": ["#290b09", "#4d1410", "#78201a", "#a12a23", "#d3342c", "#e9655d", "#f5aaa4", "#fde8e6"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Industrial Display", "purpose": "Hero and section declarations." },
+      "body": { "displayName": "Manual Body", "purpose": "Operational explanations and procedures." },
+      "label": { "displayName": "Registration Label", "purpose": "States, indexes, and technical metadata." }
+      ,"docs-display": { "displayName": "Documentation Display", "purpose": "Long-form documentation headings." }
+      ,"docs-body": { "displayName": "Documentation Body", "purpose": "Long-form documentation prose." }
+      ,"docs-code": { "displayName": "Documentation Code", "purpose": "Commands, paths, and code examples." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "engine-scan", "value": "1500ms ease-out", "purpose": "One introductory scan across the engine cutaway; disabled for reduced motion." },
+      { "name": "control", "value": "180ms ease-out", "purpose": "Hover feedback on links and controls." }
+    ],
+    "breakpoints": [
+      { "name": "stack", "value": "900px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Download Control",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary release action with the field-manual arrow silhouette.",
+      "html": "<a class=\"ds-download\" href=\"#\">Download Hopper <span>↓</span></a>",
+      "css": ".ds-download{display:flex;justify-content:space-between;align-items:center;background:#d3342c;color:#fff;padding:14px 22px;font:700 28px/1 'Barlow Condensed',sans-serif;text-transform:uppercase;clip-path:polygon(0 0,92% 0,100% 50%,92% 100%,0 100%);transition:filter 180ms ease-out,transform 180ms ease-out}.ds-download:hover{filter:brightness(1.12);transform:translateX(5px)}.ds-download:focus-visible{outline:3px solid #f1f7f3;outline-offset:4px}"
+    },
+    {
+      "name": "Ruled Link",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Secondary action row used for documentation and source links.",
+      "html": "<a class=\"ds-ruled\" href=\"#\">Open documentation <span>↗</span></a>",
+      "css": ".ds-ruled{display:flex;justify-content:space-between;color:#f1f7f3;padding:18px 0;border-bottom:2px solid #f1f7f3;font:700 16px/1 'Barlow Condensed',sans-serif;letter-spacing:.035em;text-transform:uppercase;transition:color 180ms ease-out}.ds-ruled:hover{color:#aff0f6}.ds-ruled:focus-visible{outline:3px solid #f1f7f3;outline-offset:4px}"
+    },
+    {
+      "name": "Technical Ledger Row",
+      "kind": "custom",
+      "refersTo": "ledger-row",
+      "description": "Ruled capability statement with scope state.",
+      "html": "<div class=\"ds-ledger\"><strong>Managed engine</strong><span>Private Linux VM + rootful Docker</span><b>macOS</b></div>",
+      "css": ".ds-ledger{display:grid;grid-template-columns:.8fr 1.6fr .5fr;gap:20px;padding:20px 0;border-block:1px solid rgba(175,240,246,.4);background:#082852;color:#f1f7f3;font:400 18px/1.28 'Barlow Condensed',sans-serif}.ds-ledger strong{font-size:24px;text-transform:uppercase}.ds-ledger span{color:#aff0f6}.ds-ledger b{justify-self:end;color:#f74a3d;font-size:13px;letter-spacing:.1em;text-transform:uppercase}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Engine Field Manual",
+    "overview": "Hopper uses the visual language of a service manual drawn by the team that built the machine. The system is flat, precise, information-rich, and platform-aware without making one host its identity.",
+    "keyCharacteristics": ["Saturated navy working field with bone and cyan drafting ink.", "Vermilion reserved for actions, sequence numbers, and registration marks.", "Condensed type, square controls, thin rules, and explicit operational labels.", "Sectional product proof instead of detached application screenshots."],
+    "rules": [
+      { "name": "The Signal Discipline Rule", "body": "Vermilion marks action or sequence; it never becomes general decoration.", "section": "colors" },
+      { "name": "The Compression Rule", "body": "Display type may be tightly led and horizontally assertive; body copy must retain comfortable line height and readable measure.", "section": "typography" },
+      { "name": "The Flat Instrument Rule", "body": "Interface surfaces remain flat; illustration supplies material depth.", "section": "elevation" }
+    ],
+    "dos": ["Do organize capabilities as procedures, ledgers, matrices, and sectional diagrams.", "Do reserve vermilion for actions and sequence.", "Do keep current platform facts separate from the platform-neutral Hopper Engine story.", "Do provide normal-flow mobile layouts and reduced-motion behavior."],
+    "donts": ["Don't introduce rounded card grids, soft drop shadows, or generic gradient heroes.", "Don't place a detached product screenshot beside vague marketing copy.", "Don't use vermilion for long text or low-contrast decorative fills."]
+  }
+}

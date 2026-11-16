@@ -6,7 +6,7 @@
   <title>Install — Hopper</title>
   <meta name="description" content="Download the signed app, or install it with Homebrew.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -71,9 +71,10 @@ without complaint. If you want to confirm that yourself:</p>
 <tr><td><strong>Architecture</strong></td><td>Apple silicon (arm64)</td></tr>
 <tr><td><strong>macOS</strong></td><td>26 or later</td></tr>
 </tbody></table>
-<p>Hopper Engine uses Apple's Virtualization framework to run a managed Linux VM.
-Hopper can also attach to Docker Desktop, Podman, Colima, Rancher Desktop, Apple
-Containers, or a remote daemon from a supported Mac.</p>
+<p>Hopper Engine uses a bundled Lima helper and Apple's virtualization APIs to run
+its private Linux VM. The optional Apple Containers backend also requires macOS
+26. Hopper can attach to Docker Desktop, Podman, Colima, Rancher Desktop, or a
+remote daemon from a supported Mac.</p>
 <h2>Hopper asks for very little</h2>
 <p>Three entitlements, and no more:</p>
 <ul>
@@ -82,8 +83,8 @@ import stages on disk</li>
 <li><code>network.client</code> and <code>network.server</code> — registry pulls and published ports</li>
 </ul>
 <p>Notably <strong>not</strong> <code>com.apple.security.virtualization</code>. Hopper Engine's Linux VM
-runs in a separate bundled helper that carries that entitlement itself, so the app
-does not need it and the release build asserts it has not come back.</p>
+runs in a separate bundled helper that carries that entitlement itself, so the
+app does not need it and the release build asserts it has not come back.</p>
       <nav class="pager">
         <span></span>
         <a class="next" href="engines.html"><span>Next</span>Engines</a>
@@ -93,7 +94,7 @@ does not need it and the release build asserts it has not come back.</p>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

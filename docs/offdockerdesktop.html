@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Move off Docker Desktop — Hopper</title>
-  <meta name="description" content="Bring your images and containers across, then uninstall the thing you were paying for.">
+  <meta name="description" content="Import into Hopper Engine, verify the replacement, then remove Docker Desktop safely.">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -53,61 +53,68 @@
 
     <article class="docs-body">
       <h1>Move off Docker Desktop</h1>
-      <p class="lede-sm">Bring your images and containers across, then uninstall the thing you were paying for.</p>
-<p>Hopper Engine is a Docker-compatible Linux VM managed by Hopper. It supports the
-Docker CLI, Compose, image builds, named volumes, bind mounts, restart policies,
-published localhost ports, and tools that use the Engine API. Docker Desktop is
-not required.</p>
-<h2>1. Take stock</h2>
-<p>With Docker Desktop still running, open Hopper. It will connect to it — the
-footer says <code>Connected to Docker …</code>.</p>
-<p>Note what you actually need. <code>docker ps -a</code>, <code>docker images</code>, <code>docker volume ls</code>.
-Most people find half of it is scratch.</p>
+      <p class="lede-sm">Import into Hopper Engine, verify the replacement, then remove Docker Desktop safely.</p>
+<p>Hopper Engine is a private Docker environment owned by Hopper. You can run it
+beside Docker Desktop while you move, so the source stays intact until the new
+workloads have been verified.</p>
+<h2>1. Take stock and back up data</h2>
+<p>Keep Docker Desktop running. In <strong>Settings → Coexist or replace</strong>, Hopper lists
+the local runtimes it finds and explains the cost of running both.</p>
+<p>Review <code>docker ps -a</code>, <code>docker images</code>, <code>docker volume ls</code>, and any databases or
+named volumes you care about. Back those volumes up independently. Hopper's
+import deliberately does not copy volume contents.</p>
 <h2>2. Start Hopper Engine</h2>
-<p>Open <strong>Settings → Which engine → Hopper Engine</strong>. Hopper downloads its verified
-VM support files on first use and starts the engine. Your home directory is shared
-for bind mounts and published ports are forwarded to <code>localhost</code>.</p>
-<p>Leave <strong>Keep the engine running after closing Hopper</strong> enabled so terminal and
-CI workloads continue when the window is closed.</p>
-<h2>3. Set up the Docker CLI</h2>
-<p>Under <strong>Settings → Docker CLI</strong>, click <strong>Install Docker CLI tools</strong>. Hopper
-installs its bundled Docker, Compose, and Buildx commands for your user, activates
-a Docker context named <code>hopper</code>, and migrates Docker Desktop's credential-store
-setting to the macOS Keychain helper so pulls and logins keep working after Desktop is removed.</p>
-<pre><code class="language-sh">docker version
-docker compose version
-docker buildx version
-docker run --rm hello-world
+<p>Choose Hopper Engine and start it. First startup downloads the pinned Linux base,
+creates the private VM, starts Docker, and waits for the daemon to answer.</p>
+<p>Starting Hopper Engine does not stop, change, or remove Docker Desktop. Both can
+run at once, though they use extra memory and published ports may conflict.</p>
+<h2>3. Import</h2>
+<p>Open <strong>Import</strong>, select Docker Desktop as the source, and choose the images,
+containers, networks, and volume definitions you need. Images stream directly
+between the two Engine API endpoints. Containers are recreated from their
+configuration; their writable layers are scratch and do not move.</p>
+<p>The source is pinned for the duration of the run and nothing is deleted there.
+One failed item is reported without abandoning everything else.</p>
+<h2>4. Restore volume data</h2>
+<p>Create each destination volume and restore its independent backup before
+starting the container that owns it. One portable pattern is:</p>
+<pre><code class="language-sh"># Save from Docker Desktop.
+docker --context desktop-linux run --rm \
+  -v pgdata:/data -v "$PWD":/backup alpine \
+  tar czf /backup/pgdata.tgz -C /data .
+
+# Restore through Hopper Engine after installing its Docker CLI context.
+docker --context hopper volume create pgdata
+docker --context hopper run --rm \
+  -v pgdata:/data -v "$PWD":/backup alpine \
+  tar xzf /backup/pgdata.tgz -C /data
 </code></pre>
-<h2>4. Move the workloads you need</h2>
-<p>Images can be pulled again from their registries. Recreate Compose projects with
-<code>docker compose up -d</code>. For irreplaceable local images, save while Docker Desktop
-is active and load after switching to Hopper Engine:</p>
-<pre><code class="language-sh">docker save my-image:tag -o my-image.tar
-# switch to the hopper context
-docker load -i my-image.tar
-</code></pre>
-<p>Copy important named-volume data before removing Docker Desktop. Docker Desktop and
-Hopper Engine use separate VM disks, so uninstalling one does not migrate the other.</p>
-<h2>5. Verify before uninstalling</h2>
-<p>Start each Compose project, test its ports, run an image build, and confirm the data
-you care about. Quit Hopper once and verify that <code>docker ps</code> still works.</p>
-<h2>6. Uninstall Docker Desktop</h2>
-<pre><code class="language-sh">/Applications/Docker.app/Contents/MacOS/uninstall
-</code></pre>
-<p>Hopper's CLI and <code>hopper</code> context remain available. Docker Desktop's old
-<code>desktop-linux</code> context can be removed later with
-<code>docker context rm desktop-linux</code>.</p>
-<hr />
-<h2>Current boundaries</h2>
+<p>Use the real source context and volume names from your machine. Database-native
+backup and restore tools are safer than filesystem copies for a live database.</p>
+<h2>5. Verify the replacement</h2>
+<p>Start the imported workloads on Hopper Engine. Verify ports, logs, healthchecks,
+bind-mount paths, data, and any tools that mount the Docker socket. The Hopper
+Docker context points normal <code>docker</code>, Compose, and Engine API tools at the
+private socket.</p>
+<h2>6. Review removal</h2>
+<p>Only after independent backups and replacement verification, return to
+<strong>Settings → Coexist or replace</strong>. Hopper shows the exact vendor uninstaller,
+its destructive effects, and requires the application name as confirmation. It
+opens the review in Terminal; it never removes another runtime merely because
+you switched engines or completed an import.</p>
+<p>After Docker Desktop is gone, use <strong>Settings → Docker CLI → Install Docker CLI
+tools</strong> to repair command links and select the Hopper context if necessary.</p>
+<h2>Limits to check before removing anything</h2>
 <ul>
-<li>Hopper Engine currently supports Apple silicon Macs running macOS 26 or later.</li>
-<li>The VM shares your home directory by default. Add other host paths in Settings
-before using them as bind mounts.</li>
-<li>Tools hardcoded to <code>/var/run/docker.sock</code> need configuration to use the Hopper
-context or its socket path.</li>
-<li>Back up important volumes independently. A local VM disk is not a backup.</li>
+<li>Volume contents do not move automatically.</li>
+<li>A service with only <code>build:</code> cannot be built by Hopper; provide an <code>image:</code> or
+build it elsewhere first.</li>
+<li>Bind mounts must refer to paths shared with Hopper Engine.</li>
+<li>Containers that depend on a specific desktop runtime or privileged host
+integration need workload-specific testing.</li>
+<li>Running both engines can conflict on published host ports.</li>
 </ul>
+<p>The safe order is backup, import, restore, verify, and only then removal.</p>
       <nav class="pager">
         <a class="prev" href="firstcontainer.html"><span>Previous</span>Run your first container</a>
         <a class="next" href="composestack.html"><span>Next</span>Run a Compose stack</a>
@@ -117,7 +124,7 @@ context or its socket path.</li>
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

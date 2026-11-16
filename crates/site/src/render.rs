@@ -86,7 +86,7 @@ pub fn shell(page: &Page, pages: &[Page], groups: &[&str]) -> String {
   <title>{title} — Hopper</title>
   <meta name="description" content="{description}">
   <meta name="theme-color" content="#0c1018">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
 </head>
 <body>
@@ -118,7 +118,7 @@ pub fn shell(page: &Page, pages: &[Page], groups: &[&str]) -> String {
 
   <footer class="sitefooter">
     <div class="wrap">
-      <span>Hopper — Apple Containers on macOS; Docker or Podman on Linux and Windows.</span>
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
       <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
     </div>
   </footer>

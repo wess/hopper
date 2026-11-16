@@ -4,8 +4,8 @@
 //! committed rather than built in CI — the site stays reviewable in the diff,
 //! and a broken generator cannot take the site down.
 //!
-//! Run it with `cargo run -p site`. The landing page (`docs/index.html`) is
-//! hand-authored and left alone; everything else here is generated.
+//! Run it with `cargo run -p site`. The landing page and its static assets are
+//! copied from `site/`; everything else is generated from Markdown.
 
 mod page;
 mod render;
@@ -22,6 +22,11 @@ fn main() {
     let root = repo_root();
     let content = root.join("site/content");
     let out = root.join("docs");
+
+    for name in ["index.html", "styles.css", "docs.css", "main.js"] {
+        copy_file(&root.join("site").join(name), &out.join(name));
+    }
+    copy_tree(&root.join("site/assets"), &out.join("assets"));
 
     let mut pages = match read_all(&content) {
         Ok(pages) if !pages.is_empty() => pages,
@@ -80,6 +85,35 @@ fn main() {
     }
 
     println!("{written} pages -> {}", out.display());
+}
+
+fn copy_file(from: &Path, to: &Path) {
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent).unwrap_or_else(|e| {
+            eprintln!("could not create {}: {e}", parent.display());
+            std::process::exit(1);
+        });
+    }
+    std::fs::copy(from, to).unwrap_or_else(|e| {
+        eprintln!("could not copy {} to {}: {e}", from.display(), to.display());
+        std::process::exit(1);
+    });
+}
+
+fn copy_tree(from: &Path, to: &Path) {
+    let entries = std::fs::read_dir(from).unwrap_or_else(|e| {
+        eprintln!("could not read {}: {e}", from.display());
+        std::process::exit(1);
+    });
+    for entry in entries.filter_map(Result::ok) {
+        let source = entry.path();
+        let target = to.join(entry.file_name());
+        if source.is_dir() {
+            copy_tree(&source, &target);
+        } else {
+            copy_file(&source, &target);
+        }
+    }
 }
 
 /// Read every `.md` in a directory, sorted so the build is reproducible.

@@ -2,107 +2,90 @@
 title: Engines
 group: Start
 order: 2
-summary: Apple Containers on macOS, Docker or Podman on Linux, and anything that answers the Engine API.
+summary: Hopper Engine on macOS, Docker or Podman on Linux, and any compatible Engine API endpoint.
 ---
 
-Hopper does not have one engine. It discovers the engines that make sense on
-this machine, shows them separately, and tells you which one answered.
+Hopper discovers the engines that make sense on the current machine, shows them
+separately, and says which one answered. A saved choice stays selected even
+while it is stopped so an outage never silently moves workloads elsewhere.
 
-## macOS Apple silicon — Apple Containers
+## macOS — Hopper Engine
 
-[Apple's `container`](https://github.com/apple/container) ships as part of the
-macOS 26 story and requires Apple silicon: every container is its own lightweight virtual machine, images
-are OCI, and Apple maintains it. Hopper installs it, starts and stops its
-services, and drives it.
+Hopper Engine is the default on Apple silicon Macs. It is a private, headless
+Linux VM running rootful Docker. A bundled Lima helper drives Apple's
+Virtualization framework; users do not install Lima, Docker, or a separate
+daemon first.
 
-This is the default on macOS. If `container` is not on the machine, Hopper
-offers to fetch the package **Apple** signed and hands it to the system
-installer, which asks you to approve it. Hopper never elevates privileges
-itself.
+The VM lives under `~/.hopper/engine/lima`, isolated from other Lima and Colima
+instances. Hopper owns its lifecycle, Docker readiness checks, CPU and memory
+budget, file shares, port forwarding, daemon configuration, and disk reclaim.
+The Docker socket is published only to Hopper's private host path.
+
+The first start downloads the pinned Linux base, prepares the disk, starts
+Docker, and waits for the daemon to answer. VM boot alone is not considered
+ready. Later launches reuse the disk and return much faster.
+
+## macOS — Apple Containers
+
+[Apple's `container`](https://github.com/apple/container) remains an optional
+backend on supported Apple silicon Macs. Hopper can install Apple's signed
+package, start its services, and drive the CLI. Every container is a lightweight
+VM and the runtime publishes no Docker socket.
+
+That missing socket is the important boundary. Hopper can manage the runtime,
+but the Docker CLI, Engine API integrations, live stats, file browsing, terminal,
+healthchecks, pause, rename, and post-create resource updates are unavailable.
+The UI hides those controls rather than drawing buttons that always fail.
 
 ## Linux — Docker or Podman
 
-Whichever you have. Hopper checks rootless sockets before system ones, so a
-desktop Podman is not passed over in favour of a stale root daemon:
+Hopper attaches to what the host already runs. Rootless sockets come before
+system sockets:
 
 1. `$XDG_RUNTIME_DIR/podman/podman.sock`
 2. `$XDG_RUNTIME_DIR/docker.sock`
 3. `/var/run/docker.sock`
 4. `/run/podman/podman.sock`
 
-Podman's socket is deliberately Docker-compatible, so nothing else changes.
-`DOCKER_HOST`, when set, wins outright — if you are pointing at a remote daemon
-you mean it. `CONTAINER_HOST` is also accepted when `DOCKER_HOST` is unset.
+`DOCKER_HOST` wins when set; `CONTAINER_HOST` is accepted when `DOCKER_HOST` is
+unset. Podman's Docker-compatible socket uses the same Engine API path.
 
 ## Windows — Docker Desktop or Podman
 
 Hopper checks Docker Desktop's `docker_engine` named pipe and Podman's default
-machine pipe. They are shown as separate choices when both are present, and
-Hopper attaches to the one you select without taking over its lifecycle.
+machine pipe. They appear as separate choices when both are present. Hopper
+attaches to the selected daemon and does not take over its lifecycle.
 
-## Anywhere — an engine you already run
+## Existing and remote engines
 
-Docker Desktop, Colima, Rancher Desktop, or a daemon over TCP. This one is
-always available and always last, so Hopper stays useful whatever else fails.
+Docker Desktop, Colima, Rancher Desktop, Podman, OrbStack, a Unix socket, a
+Windows named pipe, or a daemon over TCP/TLS all work through the Engine API.
+Hopper resolves the endpoint fresh for each request, so switching providers does
+not leave a long-lived client pointed at the old engine.
 
-## When nothing is running
+## Capabilities
 
-The fallback never disqualifies itself, so landing on it proves nothing is
-listening. On a platform with an engine of its own, that is exactly when Hopper
-offers *that* engine instead of reporting a missing Docker. A Mac with neither
-Docker nor Apple's runtime gets the install offer, not a dead end about the
-thing Hopper exists to replace.
-
-It keeps looking, too. An engine that appears after launch — Docker Desktop
-started by hand, Apple's runtime finishing its install — is picked up by the
-status poll without restarting Hopper.
-
-## What each engine can do
-
-Apple's runtime is not the Docker Engine API, and Hopper does not pretend
-otherwise. It publishes no Docker socket — [the request for one was closed as
-not planned](https://github.com/apple/container/issues/636) — so Hopper speaks
-to it through the `container` command instead. Some things are simply not there:
-
-| | Engine API | Apple Containers |
+| | Hopper Engine / Engine API | Apple Containers |
 |---|---|---|
 | Start, stop, restart | yes | yes |
-| Logs | yes | yes |
-| Pause / unpause | yes | **no** |
-| Rename | yes | **no** |
-| Change CPU / memory after create | yes | **no** |
-| Restart policies | yes | **no** |
-| Healthchecks | yes | **no** |
-| Live event stream | yes | **no**, Hopper polls |
-| Live stats | yes | not yet |
-| Shell into a container | yes | not yet |
-| Browse the filesystem | yes | not yet |
-| Compose | yes | yes, Hopper's own |
+| Logs and inspect | yes | yes |
+| Live stats, files, terminal | yes | no |
+| Pause / unpause | yes | no |
+| Rename | yes | no |
+| Healthchecks and restart policies | yes | no |
+| Post-create CPU / memory update | yes | no |
+| Docker CLI and Engine API tools | yes | no |
+| Compose stacks | yes | yes, through Hopper's parser |
 
-Hopper hides what an engine cannot do rather than offering a button that always
-fails. On Apple Containers the detail pane shows Logs and Inspect instead of five
-tabs where three cannot load.
+## Choosing one
 
-Compose is the exception, and deliberately so. Apple ships none and publishes no
-socket for the real one to reach, so rather than hide the feature Hopper reads
-the compose file and creates the containers itself — see
-[Stacks](stacks.html).
-
-If you need any of it, switch engines under **Settings → Engine**.
-
-## Choosing one yourself
-
-`HOPPER_ENGINE` overrides everything, then the saved setting, then the platform
-default:
+Use **Settings → Which engine**, or set `HOPPER_ENGINE`. Common ids are `vm`,
+`existing`, `docker`, and `podman`; macOS also offers `apple`, `colima`, and
+`rancher` when present.
 
 ```sh
-HOPPER_ENGINE=existing /Applications/Hopper.app/Contents/MacOS/hopper
+HOPPER_ENGINE=vm /Applications/Hopper.app/Contents/MacOS/hopper
 ```
 
-Valid ids depend on the platform. The common ids are `existing`, `docker`, and
-`podman`; macOS also offers `apple`, `colima`, and `rancher` when those engines
-are supported by the host.
-
-An engine you name is honoured even when it cannot run yet — Hopper reports on
-the one you asked for and what it needs, rather than quietly answering about a
-different one.
+An explicit choice is honoured even when it cannot run. Hopper reports the
+selected engine's real state instead of quietly answering about another one.
