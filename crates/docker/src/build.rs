@@ -6,97 +6,14 @@
 
 use crate::client::{Client, Req};
 use crate::error::{DockerError, Result};
+#[cfg(test)]
 use bytes::Bytes;
-use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use model::{BuildInput, BuildProgress};
 use serde::Deserialize;
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
-/// Compile a `.dockerignore` into a matcher.
-///
-/// `.dockerignore` is gitignore-shaped, including `!` negations, which the
-/// classic builder silently mishandles — doing it here means the tar we send
-/// is already correct.
-pub fn load_dockerignore(context: &Path) -> Gitignore {
-    let mut builder = GitignoreBuilder::new(context);
-    let file = context.join(".dockerignore");
-    if file.exists() {
-        // `add` returns any parse error; a bad line should not fail the build.
-        if let Some(e) = builder.add(&file) {
-            tracing::warn!("ignoring unreadable .dockerignore rule: {e}");
-        }
-    }
-    builder.build().unwrap_or_else(|_| Gitignore::empty())
-}
-
-/// Whether a path is excluded from the context.
-///
-/// The Dockerfile and `.dockerignore` are never excluded: Docker needs both,
-/// and a broad pattern like `*` would otherwise make the build fail with a
-/// confusing "Dockerfile not found".
-pub fn is_excluded(matcher: &Gitignore, rel: &Path, is_dir: bool, dockerfile: &str) -> bool {
-    let as_str = rel.to_string_lossy();
-    if as_str == dockerfile || as_str == ".dockerignore" {
-        return false;
-    }
-    matcher.matched_path_or_any_parents(rel, is_dir).is_ignore()
-}
-
-/// Build the context tarball.
-pub fn tar_context(input: &BuildInput) -> Result<Bytes> {
-    let context = PathBuf::from(&input.context_dir);
-    if !context.is_dir() {
-        return Err(DockerError::transport(format!(
-            "{} is not a directory.",
-            context.display()
-        )));
-    }
-    let dockerfile = input.dockerfile_name().to_string();
-    if !context.join(&dockerfile).is_file() {
-        return Err(DockerError::transport(format!(
-            "No {dockerfile} in {}.",
-            context.display()
-        )));
-    }
-
-    let matcher = load_dockerignore(&context);
-    let mut builder = tar::Builder::new(Vec::new());
-    builder.follow_symlinks(false);
-
-    let walker = ignore::WalkBuilder::new(&context)
-        // The context's own rules are the only ones that apply; a developer's
-        // global gitignore must not silently change what gets built.
-        .git_ignore(false)
-        .git_global(false)
-        .git_exclude(false)
-        .hidden(false)
-        .build();
-
-    for entry in walker.flatten() {
-        let path = entry.path();
-        let Ok(rel) = path.strip_prefix(&context) else {
-            continue;
-        };
-        if rel.as_os_str().is_empty() {
-            continue;
-        }
-        let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        if is_excluded(&matcher, rel, is_dir, &dockerfile) {
-            continue;
-        }
-        if is_dir {
-            continue; // tar entries for files carry their paths
-        }
-        builder
-            .append_path_with_name(path, rel)
-            .map_err(|e| DockerError::transport(format!("Could not add {}: {e}", rel.display())))?;
-    }
-
-    let out = builder
-        .into_inner()
-        .map_err(|e| DockerError::transport(format!("Could not finish the context: {e}")))?;
-    Ok(Bytes::from(out))
-}
+pub use crate::context::{is_excluded, load_dockerignore, tar_context};
 
 /// The query string for a build request.
 pub fn build_request(input: &BuildInput) -> Req {
@@ -147,13 +64,18 @@ pub async fn run<F>(
 where
     F: FnMut(BuildProgress),
 {
-    let tar = tar_context(input)?;
-    let req = build_request(input).raw_body(tar, "application/x-tar");
+    let crate::context::ContextStream {
+        receiver,
+        worker,
+        cancel,
+        finished,
+    } = crate::context::stream_context(input.clone());
+    let req = build_request(input).stream_body(receiver, "application/x-tar");
 
     let mut error: Option<String> = None;
     let mut image_id: Option<String> = None;
 
-    client
+    let remote = client
         .ndjson::<RawBuild, _>(req, |frame| {
             if let Some(e) = frame.error {
                 on_progress(BuildProgress {
@@ -179,7 +101,19 @@ where
             });
             true
         })
-        .await?;
+        .await;
+    let locally_finished = finished.load(std::sync::atomic::Ordering::Acquire);
+    drop(cancel);
+    let local = worker
+        .await
+        .map_err(|e| DockerError::transport(format!("Build context worker failed: {e}")))?;
+    if locally_finished {
+        local?;
+        remote?;
+    } else {
+        remote?;
+        local?;
+    }
 
     on_progress(BuildProgress {
         request_id: request_id.to_string(),

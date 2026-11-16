@@ -4,6 +4,7 @@
 pub mod json;
 pub mod keychain;
 pub mod paths;
+pub mod transaction;
 
 use model::{Settings, Workspace};
 
@@ -13,7 +14,22 @@ pub fn load_settings() -> Settings {
 }
 
 pub fn save_settings(settings: &Settings) -> std::io::Result<()> {
+    paths::ensure_root()?;
     json::write(&paths::settings_file(), settings)
+}
+
+pub fn merge_settings(base: &Settings, next: &Settings) -> std::io::Result<Settings> {
+    paths::ensure_root()?;
+    transaction::update(&paths::settings_file(), |current| {
+        transaction::merge(base, next, current)
+    })
+}
+
+pub fn update_workspaces(
+    change: impl FnOnce(Vec<Workspace>) -> Vec<Workspace>,
+) -> std::io::Result<Vec<Workspace>> {
+    paths::ensure_root()?;
+    transaction::update(&paths::workspaces_file(), |current| Ok(change(current)))
 }
 
 /// The saved workspaces. The built-in "all" scope is not stored — it is the
@@ -23,6 +39,7 @@ pub fn load_workspaces() -> Vec<Workspace> {
 }
 
 pub fn save_workspaces(workspaces: &[Workspace]) -> std::io::Result<()> {
+    paths::ensure_root()?;
     json::write(&paths::workspaces_file(), &workspaces)
 }
 

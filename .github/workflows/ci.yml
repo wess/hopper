@@ -14,13 +14,13 @@ jobs:
     runs-on: macos-26
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: dtolnay/rust-toolchain@92e73e19cbfb3981e63ef478a16f95f415e634d3 # 1.99.0
         with:
           components: clippy
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Test workspace
         # Every crate runs even after one fails, so a platform-specific break
@@ -32,3 +32,45 @@ jobs:
 
       - name: Release build workspace
         run: cargo build --workspace --release --locked
+
+  core:
+    name: Core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@92e73e19cbfb3981e63ef478a16f95f415e634d3 # 1.99.0
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Test platform core
+        run: cargo test --locked -p model -p store -p docker -p compose -p engine -p migrate -p host -p mcp
+      - name: Lint platform core
+        run: cargo clippy --locked --all-targets -p model -p store -p docker -p compose -p engine -p migrate -p host -p mcp -- -D warnings
+      - name: Verify streamed contexts against BuildKit
+        if: runner.os == 'Linux'
+        env:
+          HOPPER_TEST_HOST: unix:///var/run/docker.sock
+        run: cargo test -p docker --test build --locked -- --ignored
+
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@92e73e19cbfb3981e63ef478a16f95f415e634d3 # 1.99.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Install pinned advisory scanner
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Reject vulnerable, unsound, or yanked dependencies
+        run: cargo audit --deny unsound --deny yanked
+      - name: Generate SBOM and check license declarations
+        run: python3 scripts/check/sbom.py dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dependencies
+          path: |
+            dist/hopper.cdx.json
+            dist/dependencies.txt

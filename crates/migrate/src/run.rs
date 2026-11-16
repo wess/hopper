@@ -6,7 +6,7 @@
 //! one unreadable volume must not cost the user the other nineteen.
 
 use docker::client::Client;
-use model::{ContainerState, MigrationPhase, MigrationPlan, MigrationProgress};
+use model::{MigrationPhase, MigrationPlan, MigrationProgress};
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -61,6 +61,9 @@ pub async fn migrate_images(
     report: Report<'_>,
 ) -> usize {
     let total = plan.images.len();
+    if total == 0 {
+        return 0;
+    }
     let mut copied = 0;
     let scratch = match tempfile::Builder::new()
         .prefix(&format!("hopper-migrate-{}-", Uuid::new_v4()))
@@ -100,6 +103,8 @@ pub async fn migrate_images(
                 report(p);
             }
         }
+        // Keep scratch usage proportional to one image, rather than the entire import.
+        let _ = tokio::fs::remove_file(&archive).await;
     }
     copied
 }
@@ -112,6 +117,9 @@ pub async fn migrate_networks(
     report: Report<'_>,
 ) -> usize {
     let total = plan.networks.len();
+    if total == 0 {
+        return 0;
+    }
     let mut created = 0;
     let existing = match docker::networks::list(source).await {
         Ok(existing) => existing,
@@ -147,10 +155,6 @@ pub async fn migrate_networks(
         };
         match docker::networks::create(destination, &input).await {
             Ok(_) => created += 1,
-            Err(e) if e.is_conflict() => {
-                // Already there: that is a success for a migration.
-                created += 1;
-            }
             Err(e) => {
                 let mut p = step(MigrationPhase::Networks, &net.name, i, total, "Failed");
                 p.error = Some(e.message);
@@ -218,7 +222,7 @@ pub async fn migrate_containers(
             report(p);
         }
 
-        let input = match inspect_run_input(source, container).await {
+        let mut input = match inspect_run_input(source, container).await {
             Ok(input) => input,
             Err(e) => {
                 let mut p = step(
@@ -236,25 +240,13 @@ pub async fn migrate_containers(
                 continue;
             }
         };
+        // A recovered daemon must not start an imported workload before its
+        // data and configuration have been reviewed by the user.
+        input.restart = None;
         match docker::containers::create(destination, &input).await {
-            Ok(id) => {
-                if container.state.is_up() && container.state != ContainerState::Paused {
-                    if let Err(e) = docker::containers::start(destination, &id).await {
-                        let mut p = step(
-                            MigrationPhase::Containers,
-                            &container.name,
-                            i,
-                            total,
-                            "Failed",
-                        );
-                        p.error = Some(e.message);
-                        report(p);
-                        continue;
-                    }
-                }
+            Ok(_) => {
                 created += 1;
             }
-            Err(e) if e.is_conflict() => created += 1,
             Err(e) => {
                 let mut p = step(
                     MigrationPhase::Containers,
@@ -341,6 +333,11 @@ pub(crate) async fn inspect_run_input(
 ) -> docker::error::Result<model::RunInput> {
     let mut input = to_run_input(c);
     let raw = docker::containers::inspect(source, &c.id).await?;
+    apply_inspect(&mut input, &raw)?;
+    Ok(input)
+}
+
+fn apply_inspect(input: &mut model::RunInput, raw: &Value) -> docker::Result<()> {
     let config = raw.get("Config").ok_or_else(|| {
         docker::error::DockerError::decode("Source container has no Config section.")
     })?;
@@ -351,6 +348,16 @@ pub(crate) async fn inspect_run_input(
     input.user = nonempty_string(config.get("User"));
     input.hostname = nonempty_string(config.get("Hostname"));
     input.tty = config.get("Tty").and_then(Value::as_bool).unwrap_or(false);
+    let host = &raw["HostConfig"];
+    let positive = |key: &str| host[key].as_u64().filter(|n| *n > 0);
+    input.limits.memory = positive("Memory");
+    input.limits.memory_reservation = positive("MemoryReservation");
+    input.limits.pids_limit = host["PidsLimit"].as_i64().filter(|n| *n > 0);
+    input.limits.cpus = positive("NanoCpus")
+        .map(|n| n as f64 / 1_000_000_000.0)
+        .or_else(|| {
+            positive("CpuQuota").map(|q| q as f64 / positive("CpuPeriod").unwrap_or(100_000) as f64)
+        });
     if let Some(restart) = raw
         .get("HostConfig")
         .and_then(|h| h.get("RestartPolicy"))
@@ -360,7 +367,7 @@ pub(crate) async fn inspect_run_input(
     {
         input.restart = Some(restart.to_string());
     }
-    Ok(input)
+    Ok(())
 }
 
 fn strings(value: Option<&Value>) -> Vec<String> {

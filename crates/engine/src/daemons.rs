@@ -149,6 +149,12 @@ pub fn known(os: &str, env: &Env) -> Vec<Daemon> {
     // socket rather than one of its own.
     if os == "macos" {
         out.push(Daemon {
+            id: "orbstack",
+            label: "OrbStack",
+            paths: vec![format!("{home}/.orbstack/run/docker.sock")],
+            npipe: false,
+        });
+        out.push(Daemon {
             id: "rancher",
             label: "Rancher Desktop",
             paths: vec![format!("{home}/.rd/docker.sock")],

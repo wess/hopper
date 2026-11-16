@@ -34,17 +34,18 @@ impl Backend {
 
     /// Resolve the backend for a runtime kind.
     ///
-    /// Falls back to the Engine API when Apple's runtime is selected but its
-    /// binary has gone — an uninstall mid-session degrades to "no engine"
-    /// rather than to a panic.
+    /// A missing Apple binary remains an Apple operation and fails at process
+    /// launch. It must never fall through to an unrelated Docker daemon.
     pub fn resolve(kind: RuntimeKind) -> Self {
         match kind {
             RuntimeKind::EngineApi => Self::EngineApi,
             #[cfg(target_os = "macos")]
-            RuntimeKind::Apple => match apple::Cli::locate() {
-                Some(cli) => Self::Apple(cli),
-                None => Self::EngineApi,
-            },
+            RuntimeKind::Apple => Self::Apple(apple::Cli::locate().unwrap_or_else(|| {
+                apple::Cli::at(
+                    std::env::var_os("HOPPER_CONTAINER_BIN")
+                        .unwrap_or_else(|| "/usr/local/bin/container".into()),
+                )
+            })),
             #[cfg(not(target_os = "macos"))]
             RuntimeKind::Apple => Self::EngineApi,
         }
@@ -90,13 +91,13 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    fn apple_falls_back_when_the_binary_is_missing() {
+    fn missing_apple_binary_never_selects_an_unrelated_docker_engine() {
         // A stale override stands in for an uninstall mid-session.
         std::env::set_var("HOPPER_CONTAINER_BIN", "/nonexistent/container");
         assert_eq!(
             Backend::resolve(RuntimeKind::Apple).kind(),
-            RuntimeKind::EngineApi,
-            "a missing binary must degrade, not panic"
+            RuntimeKind::Apple,
+            "a missing binary must fail on the selected backend"
         );
         std::env::remove_var("HOPPER_CONTAINER_BIN");
     }

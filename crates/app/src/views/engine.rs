@@ -60,6 +60,7 @@ pub fn provider_label(provider: &str) -> &'static str {
         "podman" => "Podman",
         "colima" => "Colima",
         "rancher" => "Rancher Desktop",
+        "orbstack" => "OrbStack",
         "existing" => "Docker-compatible engine",
         "linux" => "Linux engine",
         _ => "Container engine",

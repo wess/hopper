@@ -26,7 +26,7 @@ pub enum Stream {
 /// The standard directory may contain `ca.pem`, `cert.pem`, and `key.pem`.
 /// When it does not provide a CA, the platform's native roots are used, which
 /// keeps ordinary HTTPS endpoints working without Docker-specific files.
-fn tls_config() -> Result<rustls::ClientConfig> {
+pub(crate) fn tls_config() -> Result<rustls::ClientConfig> {
     let cert_dir = std::env::var_os("DOCKER_CERT_PATH").map(std::path::PathBuf::from);
     let mut roots = rustls::RootCertStore::empty();
 
@@ -109,6 +109,13 @@ fn tls_config() -> Result<rustls::ClientConfig> {
 
 /// Open a connection to the daemon.
 pub async fn connect(ep: &Endpoint) -> Result<Stream> {
+    connect_with_tls(ep, None).await
+}
+
+pub(crate) async fn connect_with_tls(
+    ep: &Endpoint,
+    tls_config_snapshot: Option<Arc<rustls::ClientConfig>>,
+) -> Result<Stream> {
     match ep {
         #[cfg(unix)]
         Endpoint::Unix { path } => {
@@ -143,8 +150,11 @@ pub async fn connect(ep: &Endpoint) -> Result<Stream> {
             if !*tls {
                 return Ok(Stream::Tcp(tcp));
             }
-            let config = tls_config()?;
-            let connector = tokio_rustls::TlsConnector::from(Arc::new(config));
+            let config = match tls_config_snapshot {
+                Some(config) => config,
+                None => Arc::new(tls_config()?),
+            };
+            let connector = tokio_rustls::TlsConnector::from(config);
             let server_name = rustls::pki_types::ServerName::try_from(host.clone())
                 .map_err(|_| DockerError::transport(format!("Invalid TLS server name: {host}")))?;
             let stream = connector.connect(server_name, tcp).await.map_err(|e| {

@@ -65,6 +65,8 @@ impl DiskUsage {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DockerEvent {
+    #[serde(default)]
+    pub time_nano: i64,
     /// container | image | volume | network | daemon | …
     #[serde(rename = "type")]
     pub kind: String,

@@ -1,0 +1,36 @@
+name: Native VM certification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-vm-certification
+  cancel-in-progress: false
+
+jobs:
+  vm:
+    # A dedicated Apple silicon host with VZ and network access. Hosted CI
+    # core checks do not establish real VM behavior or nested VZ availability.
+    runs-on: [self-hosted, macOS, ARM64, hopper-vz]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@92e73e19cbfb3981e63ef478a16f95f415e634d3 # 1.99.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Fetch pinned helper
+        run: |
+          scripts/build/lima.sh
+          scripts/build/docker.sh
+          scripts/build/buildx.sh
+      - name: Verify native engine
+        env:
+          HOPPER_CERTIFICATION_LOGS: ${{ runner.temp }}/hoppercertification
+        run: scripts/check/engine.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: native-vm-certification
+          path: ${{ runner.temp }}/hoppercertification

@@ -2,7 +2,9 @@ use anyhow::{bail, Context};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 
 use super::config::INSTANCE;
@@ -88,40 +90,155 @@ impl Cli {
         if !self.home.join(INSTANCE).exists() {
             return Ok(None);
         }
-        let output = tokio::time::timeout(
-            Duration::from_secs(5),
-            self.command(&["list".into(), "--json".into()]).output(),
-        )
-        .await
-        .context("VM status check timed out")??;
-        if !output.status.success() {
-            bail!(
-                "VM status check failed: {}",
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-        parse_instances(&String::from_utf8_lossy(&output.stdout))
+        let output = self
+            .output(&["list".into(), "--json".into()], Duration::from_secs(5))
+            .await?;
+        parse_instances(&output)
     }
 
     pub async fn run(&self, args: &[String], timeout: Duration) -> anyhow::Result<()> {
-        tokio::fs::create_dir_all(&self.home).await?;
+        self.execute(args, timeout, None, true).await.map(|_| ())
+    }
+
+    pub async fn output(&self, args: &[String], timeout: Duration) -> anyhow::Result<String> {
+        self.execute(args, timeout, None, false).await
+    }
+
+    pub async fn input(
+        &self,
+        args: &[String],
+        input: &[u8],
+        timeout: Duration,
+    ) -> anyhow::Result<String> {
+        self.execute(args, timeout, Some(input), false).await
+    }
+
+    async fn execute(
+        &self,
+        args: &[String],
+        timeout: Duration,
+        input: Option<&[u8]>,
+        logging: bool,
+    ) -> anyhow::Result<String> {
+        ensure_home(&self.home).await?;
         let log_path = self.home.join("engine.log");
-        let log = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)?;
+        let log = if logging {
+            Some(Arc::new(tokio::sync::Mutex::new(
+                super::log::Log::open(log_path.clone()).await?,
+            )))
+        } else {
+            None
+        };
         let mut child = self
             .command(args)
-            .stdout(Stdio::from(log.try_clone()?))
-            .stderr(Stdio::from(log))
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()
             .context("Could not launch Hopper's VM helper")?;
-        let status = tokio::time::timeout(timeout, child.wait())
-            .await
-            .with_context(|| format!("VM operation timed out. See {}", log_path.display()))??;
+        let stdout = child.stdout.take().unwrap();
+        let stderr = child.stderr.take().unwrap();
+        let mut stdin = child.stdin.take();
+        let result = tokio::time::timeout(timeout, async {
+            tokio::try_join!(
+                pump(stdout, log.clone()),
+                pump(stderr, log),
+                async {
+                    if let (Some(input), Some(stdin)) = (input, stdin.as_mut()) {
+                        stdin.write_all(input).await?;
+                        stdin.shutdown().await?;
+                    }
+                    drop(stdin.take());
+                    Ok::<_, anyhow::Error>(())
+                },
+                async { Ok::<_, anyhow::Error>(child.wait().await?) }
+            )
+        })
+        .await
+        .with_context(|| format!("VM operation timed out. See {}", log_path.display()))??;
+        let (stdout, stderr, (), status) = result;
         if !status.success() {
-            bail!("VM operation failed ({status}). See {}", log_path.display());
+            if logging {
+                bail!("VM operation failed ({status}). See {}", log_path.display());
+            }
+            // Input can contain proxy credentials. Never reflect subprocess
+            // output for an operation that received secret-bearing stdin.
+            if input.is_some() {
+                bail!(
+                    "VM configuration operation failed ({status}). Check Docker daemon settings."
+                );
+            }
+            bail!(
+                "VM operation failed ({status}): {}",
+                String::from_utf8_lossy(&stderr)
+            );
         }
-        Ok(())
+        Ok(String::from_utf8_lossy(&stdout).into())
     }
+}
+
+async fn pump(
+    mut input: impl AsyncRead + Unpin,
+    log: Option<Arc<tokio::sync::Mutex<super::log::Log>>>,
+) -> anyhow::Result<Vec<u8>> {
+    let mut result = Vec::new();
+    let mut chunk = [0; 8192];
+    loop {
+        let count = input.read(&mut chunk).await?;
+        if count == 0 {
+            break;
+        }
+        if let Some(log) = &log {
+            log.lock().await.write(&chunk[..count]).await?;
+        } else {
+            anyhow::ensure!(
+                result.len() + count <= 64 * 1024,
+                "VM helper output exceeded 64 KiB."
+            );
+            result.extend_from_slice(&chunk[..count]);
+        }
+    }
+    Ok(result)
+}
+
+pub async fn ensure_home(home: &Path) -> anyhow::Result<()> {
+    tokio::fs::create_dir_all(home).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(home, std::fs::Permissions::from_mode(0o700)).await?;
+    }
+    Ok(())
+}
+
+/// OS locks are released after crashes too. UI and MCP processes cannot run
+/// competing lifecycle operations against the same VM directory.
+pub struct Lifecycle(std::fs::File);
+
+impl Drop for Lifecycle {
+    fn drop(&mut self) {
+        // Explicit unlock also releases the lock when a concurrently spawned
+        // child briefly inherited the descriptor before its exec closes it.
+        let _ = self.0.unlock();
+    }
+}
+
+pub async fn lifecycle(home: &Path) -> anyhow::Result<Lifecycle> {
+    ensure_home(home).await?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(home.join("lifecycle.lock"))?;
+    file.try_lock().map_err(|_| {
+        anyhow::anyhow!("Another Hopper process is changing this VM. Wait for it to finish.")
+    })?;
+    Ok(Lifecycle(file))
 }

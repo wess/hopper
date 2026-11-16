@@ -4,7 +4,10 @@
 //! or switching containers tears the stream down — there is no separate abort
 //! registry to fall out of sync with what is on screen.
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
 use gpui::prelude::*;
 use gpui::{div, Context, Window};
@@ -15,11 +18,6 @@ use crate::format;
 use crate::state::AppState;
 use crate::theme;
 use model::{Container, ContainerStats, LogOptions, StreamKind};
-
-/// How many log lines to keep. A chatty container emits megabytes a minute;
-/// keeping everything would grow without bound and eventually stall the
-/// renderer, so the buffer is a window onto the tail.
-const MAX_LINES: usize = 2_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
@@ -88,7 +86,9 @@ pub struct Detail {
     state: AppState,
     container: Container,
     tab: Tab,
-    lines: Vec<(StreamKind, String)>,
+    logs: super::logs::Buffer,
+    stream: Option<gpui::Task<()>>,
+    request: Option<gpui::Task<()>>,
     stats: Option<ContainerStats>,
     inspect: Option<String>,
     files: Option<gpui::Entity<super::files::Files>>,
@@ -106,7 +106,9 @@ impl Detail {
             state,
             container,
             tab: Tab::from_env(),
-            lines: Vec::new(),
+            logs: super::logs::Buffer::default(),
+            stream: None,
+            request: None,
             stats: None,
             inspect: None,
             files: None,
@@ -129,7 +131,7 @@ impl Detail {
             term.update(cx, |t, cx| t.show(container.id.clone(), cx));
         }
         self.container = container;
-        self.lines.clear();
+        self.logs.clear();
         self.stats = None;
         self.inspect = None;
         self.generation += 1;
@@ -148,16 +150,16 @@ impl Detail {
     }
 
     fn append(&mut self, stream: StreamKind, text: String) {
-        self.lines.push((stream, text));
-        if self.lines.len() > MAX_LINES {
-            // Drop from the front so the newest output stays visible.
-            let excess = self.lines.len() - MAX_LINES;
-            self.lines.drain(..excess);
-        }
+        self.logs.push(stream, text);
     }
 
     /// Start whatever the active tab needs.
     fn follow(&mut self, cx: &mut Context<Self>) {
+        self.stream = None;
+        self.request = None;
+        if self.tab != Tab::Terminal {
+            self.terminal = None;
+        }
         let generation = self.generation;
         let id = self.container.id.clone();
         let host = Arc::clone(&self.state.host);
@@ -167,7 +169,15 @@ impl Detail {
             // Files and Terminal drive their own lifecycles through entities.
             Tab::Files | Tab::Terminal => {}
             Tab::Logs => {
-                bridge::stream(
+                let pending = Arc::new(Mutex::new(super::logs::Buffer::default()));
+                let notice = Arc::new(Mutex::new(None::<String>));
+                let notified = Arc::new(AtomicBool::new(false));
+                let update_pending = Arc::clone(&pending);
+                let finish_pending = Arc::clone(&pending);
+                let update_flag = Arc::clone(&notified);
+                let finish_notice = Arc::clone(&notice);
+                let finish_entity = entity.clone();
+                self.stream = Some(bridge::stream_owned(
                     cx,
                     move |mut tx| async move {
                         let opts = LogOptions {
@@ -175,31 +185,83 @@ impl Detail {
                             follow: true,
                             ..Default::default()
                         };
-                        let _ = host
-                            .stream_logs("detail", &id, &opts, |line| {
-                                tx.try_send((line.stream, line.text)).is_ok()
-                            })
-                            .await;
-                    },
-                    {
-                        move |(stream, text), cx| {
-                            let _ = entity.update(cx, |this: &mut Self, cx| {
-                                if this.generation == generation {
-                                    this.append(stream, text);
-                                    cx.notify();
+                        let callback_pending = Arc::clone(&pending);
+                        let signal = Arc::new(tokio::sync::Notify::new());
+                        let callback_signal = Arc::clone(&signal);
+                        let request = host.stream_logs("detail", &id, &opts, move |line| {
+                            // Keep only the bounded newest tail when the UI is
+                            // busy. Full notification queues never stop logs.
+                            callback_pending
+                                .lock()
+                                .unwrap()
+                                .push(line.stream, line.text);
+                            callback_signal.notify_one();
+                            true
+                        });
+                        tokio::pin!(request);
+                        let mut tick = tokio::time::interval(std::time::Duration::from_millis(100));
+                        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                        let mut dirty = false;
+                        loop {
+                            tokio::select! {
+                                result = &mut request => {
+                                    *notice.lock().unwrap() = Some(match result {
+                                        Ok(()) => "Log stream ended. Reopen Logs to reconnect.".into(),
+                                        Err(error) => format!("Log stream failed: {}. Reopen Logs to reconnect.", error.message),
+                                    });
+                                    break;
+                                },
+                                _ = signal.notified(), if !dirty => dirty = true,
+                                _ = tick.tick(), if dirty => {
+                                    dirty = false;
+                                    if !pending.lock().unwrap().lines.is_empty() && !notified.swap(true, Ordering::AcqRel) {
+                                        if let Err(error) = tx.try_send(()) {
+                                            notified.store(false, Ordering::Release);
+                                            if error.is_disconnected() { return; }
+                                        }
+                                    }
                                 }
-                            });
+                            }
                         }
                     },
-                    |_| {},
-                );
+                    move |(), cx| {
+                        update_flag.store(false, Ordering::Release);
+                        let batch = std::mem::take(&mut *update_pending.lock().unwrap());
+                        let _ = entity.update(cx, |this: &mut Self, cx| {
+                            if this.generation == generation {
+                                for (stream, text) in batch.lines {
+                                    this.append(stream, text);
+                                }
+                                cx.notify();
+                            }
+                        });
+                    },
+                    move |cx| {
+                        let batch = std::mem::take(&mut *finish_pending.lock().unwrap());
+                        let notice = finish_notice.lock().unwrap().take();
+                        let _ = finish_entity.update(cx, |this: &mut Self, cx| {
+                            if this.generation == generation {
+                                for (stream, text) in batch.lines {
+                                    this.append(stream, text);
+                                }
+                                if let Some(notice) = notice {
+                                    this.append(StreamKind::Stderr, format!("[Hopper] {notice}"));
+                                }
+                                cx.notify();
+                            }
+                        });
+                    },
+                ));
             }
             Tab::Stats => {
-                bridge::stream(
+                self.stream = Some(bridge::stream_owned(
                     cx,
                     move |mut tx| async move {
                         let _ = host
-                            .stream_stats(&id, |sample| tx.try_send(sample).is_ok())
+                            .stream_stats(&id, |sample| match tx.try_send(sample) {
+                                Ok(()) => true,
+                                Err(error) => !error.is_disconnected(),
+                            })
                             .await;
                     },
                     {
@@ -213,50 +275,62 @@ impl Detail {
                         }
                     },
                     |_| {},
-                );
+                ));
             }
             Tab::Inspect => {
-                bridge::run(cx, async move { host.container_inspect(&id).await }, {
-                    move |result, cx| {
-                        let _ = entity.update(cx, |this: &mut Self, cx| {
-                            if this.generation != generation {
-                                return;
-                            }
-                            this.inspect = Some(match result {
-                                Ok(value) => serde_json::to_string_pretty(&value)
-                                    .unwrap_or_else(|e| e.to_string()),
-                                Err(e) => e.message,
+                self.request = Some(bridge::run_owned(
+                    cx,
+                    async move { host.container_inspect(&id).await },
+                    {
+                        move |result, cx| {
+                            let _ = entity.update(cx, |this: &mut Self, cx| {
+                                if this.generation != generation {
+                                    return;
+                                }
+                                this.inspect = Some(match result {
+                                    Ok(value) => serde_json::to_string_pretty(&value)
+                                        .unwrap_or_else(|e| e.to_string()),
+                                    Err(e) => e.message,
+                                });
+                                cx.notify();
                             });
-                            cx.notify();
-                        });
-                    }
-                });
+                        }
+                    },
+                ));
             }
         }
     }
 
-    fn logs_body(&self, cx: &gpui::App) -> gpui::AnyElement {
-        if self.lines.is_empty() {
+    fn logs_body(&self, cx: &mut Context<Self>) -> gpui::AnyElement {
+        if self.logs.lines.is_empty() {
             return crate::views::message("Waiting for output…");
         }
-        let palette = theme::palette(cx);
-        let mut body = div().flex().flex_col().font_family(theme::MONO_FAMILY);
-        for (stream, text) in &self.lines {
-            body = body.child(
-                div()
-                    .text_xs()
-                    // stderr is coloured so a failing container is obvious
-                    // without reading every line.
-                    .when(*stream == StreamKind::Stderr, |d| {
-                        d.text_color(gpui::Hsla::from(gpui::rgb(0xf87171)))
+        gpui::uniform_list(
+            "detail-logs",
+            self.logs.lines.len(),
+            cx.processor(|this, range: std::ops::Range<usize>, _, cx| {
+                let palette = theme::palette(cx);
+                range
+                    .filter_map(|index| this.logs.lines.get(index))
+                    .map(|(stream, text)| {
+                        div()
+                            .h(gpui::px(18.0))
+                            .text_xs()
+                            .font_family(theme::MONO_FAMILY)
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_color(if *stream == StreamKind::Stderr {
+                                gpui::Hsla::from(gpui::rgb(0xf87171))
+                            } else {
+                                palette.text_muted
+                            })
+                            .child(text.clone())
                     })
-                    .when(*stream == StreamKind::Stdout, |d| {
-                        d.text_color(palette.text_muted)
-                    })
-                    .child(text.clone()),
-            );
-        }
-        body.into_any_element()
+                    .collect()
+            }),
+        )
+        .size_full()
+        .into_any_element()
     }
 
     fn stats_body(&self, cx: &gpui::App) -> gpui::AnyElement {
@@ -422,22 +496,5 @@ mod tests {
         // them would offer three tabs that cannot load.
         let caps = model::EngineCapabilities::apple();
         assert_eq!(Tab::available(&caps), vec![Tab::Logs, Tab::Inspect]);
-    }
-
-    #[test]
-    fn the_log_buffer_is_bounded_to_the_tail() {
-        // A chatty container must not grow the buffer without bound.
-        let mut lines: Vec<(StreamKind, String)> = Vec::new();
-        for i in 0..(MAX_LINES + 500) {
-            lines.push((StreamKind::Stdout, format!("line {i}")));
-            if lines.len() > MAX_LINES {
-                let excess = lines.len() - MAX_LINES;
-                lines.drain(..excess);
-            }
-        }
-        assert_eq!(lines.len(), MAX_LINES);
-        // The newest output survives; the oldest is what gets dropped.
-        assert_eq!(lines.last().unwrap().1, format!("line {}", MAX_LINES + 499));
-        assert_eq!(lines.first().unwrap().1, format!("line {}", 500));
     }
 }

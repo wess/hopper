@@ -3,7 +3,7 @@
 //! list live.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{div, Context, Entity, FocusHandle, Subscription, UpdateGlobal, Window};
@@ -27,6 +27,8 @@ pub struct Root {
     import: Entity<views::Import>,
     settings: Entity<views::Settings>,
     detail: Option<Entity<views::Detail>>,
+    detail_engine: u64,
+    events: Option<gpui::Task<()>>,
     volumes: Entity<views::Volumes>,
     networks: Entity<views::Networks>,
     registry: Entity<views::Registry>,
@@ -60,7 +62,7 @@ impl Root {
         let run_dialog = cx.new(views::RunDialog::new);
         let focus = cx.focus_handle();
 
-        let root = Root {
+        let mut root = Root {
             state,
             containers,
             images,
@@ -74,6 +76,8 @@ impl Root {
             engine_setup,
             run_dialog,
             detail: None,
+            detail_engine: 0,
+            events: None,
             focus,
             appearance_subscription: None,
         };
@@ -165,18 +169,35 @@ impl Root {
     /// engine that appears after launch is selected without a restart.
     fn poll_engine(&self, cx: &mut Context<Self>) {
         let state = self.state.clone();
-        cx.spawn(async move |_, cx| loop {
-            let host = Arc::clone(&state.host);
-            let (tx, rx) = futures::channel::oneshot::channel();
-            let _task = bridge::abort_on_drop(bridge::runtime().spawn(async move {
-                let _ = tx.send(host.poll_engine().await);
-            }));
-            if let Ok(status) = rx.await {
-                if cx.update(|cx| state.engine.set(cx, status)).is_err() {
-                    return;
+        cx.spawn(async move |_, cx| {
+            let mut reconciled = Instant::now();
+            loop {
+                let host = Arc::clone(&state.host);
+                let (tx, rx) = futures::channel::oneshot::channel();
+                let _task = bridge::abort_on_drop(bridge::runtime().spawn(async move {
+                    let _ = tx.send(host.poll_engine().await);
+                }));
+                if let Ok(status) = rx.await {
+                    let periodic = reconciled.elapsed() >= Duration::from_secs(30);
+                    match cx.update(|cx| {
+                        let reconnect = status.connected && !state.engine.read(cx).connected;
+                        let refresh = status.connected && (periodic || reconnect);
+                        state.engine.set_if_changed(cx, status);
+                        // A silent event subscription must not leave inventory
+                        // stale indefinitely. Reconcile after recovery and at
+                        // low frequency even while the socket remains open.
+                        if refresh {
+                            state.bump(cx);
+                        }
+                        refresh
+                    }) {
+                        Ok(true) => reconciled = Instant::now(),
+                        Ok(false) => {}
+                        Err(_) => return,
+                    }
                 }
+                cx.background_executor().timer(Duration::from_secs(3)).await;
             }
-            cx.background_executor().timer(Duration::from_secs(3)).await;
         })
         .detach();
     }
@@ -186,40 +207,70 @@ impl Root {
     /// Events are coalesced: a `compose up` of twenty services emits hundreds
     /// of events in a second, and refetching per event would hammer the daemon
     /// and thrash the list.
-    fn watch_events(&self, cx: &mut Context<Self>) {
+    fn watch_events(&mut self, cx: &mut Context<Self>) {
         let state = self.state.clone();
         let host = Arc::clone(&self.state.host);
         let refresh_pending = Arc::new(AtomicBool::new(false));
-        bridge::stream(
+        self.events = Some(bridge::stream_owned(
             cx,
-            move |tx| async move {
-                // Initial selection runs concurrently with Root construction;
-                // do not attach the first event stream to the old endpoint.
+            move |mut tx| async move {
                 host.wait_for_initial_selection().await;
+                let mut changes = host.selection_changes();
+                let mut previous_generation = host.selection_generation();
+                let mut since = None;
+                let mut backoff = Duration::from_millis(500);
                 loop {
                     let generation = host.selection_generation();
+                    changes.borrow_and_update();
+                    if generation != previous_generation {
+                        since = None;
+                        backoff = Duration::from_millis(500);
+                        previous_generation = generation;
+                    }
+                    // Reconcile inventory after every connection gap: event
+                    // replay is bounded by the daemon and is only best effort.
+                    let _ = tx.try_send(());
                     let event_host = Arc::clone(&host);
                     let mut events = tx.clone();
-                    let _ = host
-                        .stream_events(move |event| {
-                            // A provider switch invalidates the long-lived
-                            // connection; let the outer loop reconnect to the
-                            // newly selected engine.
+                    let started = tokio::time::Instant::now();
+                    let result = host
+                        .stream_events_since(since, |event| {
                             if event_host.selection_generation() != generation {
                                 return false;
                             }
-                            // A closed receiver means the app is gone.
-                            events.try_send(event).is_ok()
+                            // Replay the last timestamp inclusively. Events can
+                            // share timestamps; duplicate invalidations are safe.
+                            if event.time_nano > 0 {
+                                since = Some(event.time_nano);
+                            }
+                            match events.try_send(()) {
+                                Ok(()) => true,
+                                Err(error) => error.is_full(),
+                            }
                         })
                         .await;
                     if tx.is_closed() {
                         break;
                     }
-                    // Apple has no event endpoint, and a stopped daemon can
-                    // reject the stream. Back off in both cases so the UI
-                    // remains cheap while the three-second status poll keeps
-                    // the state current.
-                    tokio::time::sleep(Duration::from_secs(3)).await;
+                    if host.selection_generation() != generation {
+                        continue;
+                    }
+                    if let Err(error) = result {
+                        tracing::debug!("engine event stream disconnected: {}", error.message);
+                    }
+                    if started.elapsed() >= Duration::from_secs(30) {
+                        backoff = Duration::from_millis(500);
+                    }
+                    let jitter = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_millis() as u64
+                        % 251;
+                    tokio::select! {
+                        _ = tokio::time::sleep(backoff + Duration::from_millis(jitter)) => {},
+                        _ = changes.changed() => {},
+                    }
+                    backoff = (backoff * 2).min(Duration::from_secs(30));
                 }
             },
             move |_event, cx| {
@@ -240,7 +291,7 @@ impl Root {
                 }
             },
             |_| {},
-        );
+        ));
     }
 }
 
@@ -269,6 +320,15 @@ impl Render for Root {
 
         let route = self.state.route.get(cx);
         let engine = self.state.engine.get(cx);
+        let generation = self.state.host.selection_generation();
+        if generation != self.detail_engine {
+            self.detail = None;
+            self.detail_engine = generation;
+            self.state.selected.set(cx, None);
+        }
+        if route != Route::Containers || !engine.connected {
+            self.detail = None;
+        }
 
         // With no engine answering, stand in for the resource lists with the
         // first-run surface — what's happening and what to do — rather than a
@@ -346,7 +406,7 @@ impl Render for Root {
             .text_color(text)
             .font_family(font)
             .child(sidebar::render(&self.state, cx))
-            .child(content)
+            .child(content.flex_1().min_w_0().w_0().overflow_hidden())
             // Overlays, above everything: the Run dialog (renders nothing when
             // closed) and the app-wide toast stack (top-right).
             .child(self.run_dialog.clone())

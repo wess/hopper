@@ -13,7 +13,9 @@ use std::sync::Arc;
 use gpui::prelude::*;
 use gpui::{div, px, Context, Window};
 use guise::prelude::*;
-use model::{MigrationItem, MigrationKind, MigrationPlan, MigrationProgress, MigrationScan};
+use model::{
+    MigrationItem, MigrationKind, MigrationPlan, MigrationProgress, MigrationReview, MigrationScan,
+};
 
 use crate::bridge;
 use crate::state::AppState;
@@ -158,12 +160,16 @@ pub struct Import {
     /// Item id → the name it was listed under, so a note says `web` rather
     /// than the hash the plan travels by.
     labels: HashMap<String, String>,
+    review: Option<(MigrationReview, u64)>,
+    reviewing: bool,
+    requested_source: Option<String>,
 }
 
 impl Import {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let state = AppState::get(cx);
         watch(cx, &state.engine);
+        watch(cx, &state.import_provider);
         Self {
             state,
             stage: Stage::Idle,
@@ -171,20 +177,30 @@ impl Import {
             progress: None,
             notes: Vec::new(),
             labels: HashMap::new(),
+            review: None,
+            reviewing: false,
+            requested_source: None,
         }
     }
 
     fn scan(&mut self, cx: &mut Context<Self>) {
         let host = Arc::clone(&self.state.host);
+        let source = self.state.import_provider.get(cx);
         let check_host = Arc::clone(&host);
         let request_generation = host.selection_generation();
         let this = cx.entity().downgrade();
         self.stage = Stage::Scanning;
         self.notes.clear();
+        self.review = None;
         cx.notify();
         bridge::run(
             cx,
-            async move { host.import_scan().await },
+            async move {
+                match source {
+                    Some(provider) => host.import_scan_provider(&provider).await,
+                    None => host.import_scan().await,
+                }
+            },
             move |scan, cx| {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
@@ -205,7 +221,51 @@ impl Import {
         );
     }
 
+    fn review(&mut self, cx: &mut Context<Self>) {
+        let Stage::Chosen(scan) = &self.stage else {
+            return;
+        };
+        let plan = plan_from(scan, &self.selected);
+        if plan.is_empty() || self.reviewing {
+            return;
+        }
+        let selected = self.selected.clone();
+        let host = Arc::clone(&self.state.host);
+        let check_host = Arc::clone(&host);
+        let generation = host.selection_generation();
+        let this = cx.entity().downgrade();
+        self.reviewing = true;
+        cx.notify();
+        bridge::run(
+            cx,
+            async move { host.import_review(&plan).await },
+            move |review, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.reviewing = false;
+                    if generation == check_host.selection_generation() && this.selected == selected
+                    {
+                        this.review = Some((review, generation));
+                    }
+                    cx.notify();
+                });
+            },
+        );
+    }
+
     fn import(&mut self, cx: &mut Context<Self>) {
+        let Some((review, generation)) = &self.review else {
+            self.review(cx);
+            return;
+        };
+        if *generation != self.state.host.selection_generation() {
+            self.review = None;
+            self.stage = Stage::Idle;
+            cx.notify();
+            return;
+        }
+        if review.blocked() {
+            return;
+        }
         let Stage::Chosen(scan) = &self.stage else {
             return;
         };
@@ -229,25 +289,35 @@ impl Import {
         // Progress arrives as a stream so a long copy shows movement rather
         // than freezing on one spinner.
         let this_done = this.clone();
+        let outcome = Arc::new(std::sync::Mutex::new(None));
+        let completed = Arc::clone(&outcome);
         bridge::stream(
             cx,
             move |mut tx| async move {
+                let mut notices = Vec::new();
                 let mut report = |p: MigrationProgress| {
+                    if (p.error.is_some() || p.warning.is_some()) && notices.len() < 2048 {
+                        notices.push(p.clone());
+                    }
                     let _ = tx.try_send(p);
                 };
-                host.import_run(&plan, &mut report).await;
+                let summary = host.import_run(&plan, &mut report).await;
+                // A full progress queue must never lose the authoritative
+                // result or turn a failed import into a successful one.
+                *outcome.lock().unwrap() = Some((summary, notices));
             },
             move |frame: MigrationProgress, cx| {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
                         let item = this.label(&frame.item);
-                        if let Some(e) = &frame.error {
+                        if let Some(e) = frame.error.as_ref().filter(|_| this.notes.len() < 2048) {
                             this.notes.push(Note {
                                 item: item.clone(),
                                 text: e.clone(),
                             });
                         }
-                        if let Some(w) = &frame.warning {
+                        if let Some(w) = frame.warning.as_ref().filter(|_| this.notes.len() < 2048)
+                        {
                             this.notes.push(Note {
                                 item,
                                 text: w.clone(),
@@ -264,13 +334,23 @@ impl Import {
             move |cx| {
                 if let Some(this) = this_done.upgrade() {
                     this.update(cx, |this, cx| {
-                        // The bounded progress queue may drop the terminal
-                        // frame under heavy output. The producer's completion
-                        // is still authoritative, so never leave the view
-                        // spinning forever waiting for that frame.
-                        if matches!(this.stage, Stage::Importing) {
-                            this.stage =
-                                Stage::Done("Import finished. Review the notes below.".into());
+                        if let Some((summary, notices)) = completed.lock().unwrap().take() {
+                            this.stage = Stage::Done(summary);
+                            this.notes = notices
+                                .into_iter()
+                                .flat_map(|p| {
+                                    let item = this.label(&p.item);
+                                    p.error.into_iter().chain(p.warning).map(move |text| Note {
+                                        item: item.clone(),
+                                        text,
+                                    })
+                                })
+                                .collect();
+                        } else {
+                            this.stage = Stage::Done(
+                                "Import was interrupted. Inspect the destination before retrying."
+                                    .into(),
+                            );
                         }
                         cx.notify();
                     });
@@ -289,6 +369,7 @@ impl Import {
     }
 
     fn toggle(&mut self, k: String, cx: &mut Context<Self>) {
+        self.review = None;
         if !self.selected.remove(&k) {
             self.selected.insert(k);
         }
@@ -298,6 +379,14 @@ impl Import {
 
 impl Render for Import {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let requested = self.state.import_provider.get(cx);
+        if requested != self.requested_source && self.stage != Stage::Importing {
+            self.requested_source = requested;
+            self.stage = Stage::Idle;
+            self.review = None;
+            self.selected.clear();
+            self.notes.clear();
+        }
         let palette = theme::palette(cx);
         let mut body = Stack::new().gap(Size::Md);
 
@@ -307,9 +396,7 @@ impl Render for Import {
                 .child(Text::new("Import from Docker").size(Size::Xl).medium())
                 .child(
                     Text::new(
-                        "Copy the images and containers from Docker Desktop, Colima or \
-                         Rancher Desktop into the engine Hopper is running. Nothing is \
-                         removed from Docker."
+                        "Copy images and container definitions from another Docker-compatible engine. Imported containers stay stopped. Volume contents are not copied; back up databases and volumes separately. Nothing is removed from the source."
                             .to_string(),
                     )
                     .size(Size::Sm)
@@ -317,6 +404,25 @@ impl Render for Import {
                 ),
         );
 
+        if let Some(provider) = &self.requested_source {
+            body = body
+                .child(
+                    Text::new(format!(
+                    "Selected source: {provider}. This scan will not fall back to another engine."
+                ))
+                    .size(Size::Xs)
+                    .dimmed(),
+                )
+                .child(
+                    Button::new("import-any-source", "Choose an available source instead")
+                        .size(Size::Xs)
+                        .variant(Variant::Subtle)
+                        .disabled(self.stage == Stage::Importing)
+                        .on_click(
+                            cx.listener(|this, _, _, cx| this.state.import_provider.set(cx, None)),
+                        ),
+                );
+        }
         match &self.stage {
             Stage::Idle => {
                 body = body.child(
@@ -405,20 +511,47 @@ impl Render for Import {
                 body = body.child(ScrollArea::new("import-list").max_height(320.0).child(list));
 
                 let n = self.selected.len();
+                if let Some((review, _)) = &self.review {
+                    let mut notes = Stack::new()
+                        .gap(Size::Xs)
+                        .child(Text::new("Import review").size(Size::Sm).medium());
+                    for notice in &review.notices {
+                        let text = notice.error.as_ref().or(notice.warning.as_ref());
+                        if let Some(text) = text {
+                            let label = if notice.item.is_empty() {
+                                text.clone()
+                            } else {
+                                format!("{}: {text}", shorten(&notice.item))
+                            };
+                            notes = notes.child(Text::new(label).size(Size::Xs));
+                        }
+                    }
+                    body = body.child(notes);
+                }
+                let blocked = self.review.as_ref().is_some_and(|(r, _)| r.blocked());
                 body = body.child(
                     Group::new().child(
                         Button::new(
                             "import-run",
-                            if n == 0 {
+                            if self.reviewing {
+                                "Checking import…".to_string()
+                            } else if blocked {
+                                "Resolve import conflicts".to_string()
+                            } else if n == 0 {
                                 "Nothing selected".to_string()
+                            } else if self.review.is_none() {
+                                "Review import".to_string()
                             } else {
-                                format!("Import {n} item{}", if n == 1 { "" } else { "s" })
+                                format!(
+                                    "Import {n} item{} (containers stopped)",
+                                    if n == 1 { "" } else { "s" }
+                                )
                             },
                         )
                         .size(Size::Sm)
                         .variant(Variant::Filled)
                         .color(ColorName::Green)
-                        .disabled(n == 0)
+                        .disabled(n == 0 || blocked || self.reviewing)
                         .on_click(cx.listener(|this, _, _, cx| this.import(cx))),
                     ),
                 );
@@ -453,11 +586,6 @@ impl Render for Import {
                         Group::new()
                             .gap(Size::Sm)
                             .align(Align::Center)
-                            .child(
-                                Icon::new(IconName::CircleCheck)
-                                    .size(Size::Md)
-                                    .color(ColorName::Green),
-                            )
                             .child(Text::new(summary.clone()).size(Size::Sm).medium()),
                     )
                     .child(

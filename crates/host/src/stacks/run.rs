@@ -59,6 +59,32 @@ impl Host {
     ///
     /// Returns the one-line summary, which is also the final progress frame.
     pub async fn compose_up(&self, plan: &ComposePlan, report: Report<'_>) -> String {
+        let (operation, guard) = match self.admit("compose_up").await {
+            Ok(admission) => admission,
+            Err(error) => {
+                let summary = error.message;
+                report(finished(
+                    &plan.project,
+                    summary.clone(),
+                    Some(summary.clone()),
+                ));
+                return summary;
+            }
+        };
+        let mut failed = false;
+        let summary = operation
+            .compose_up_bound(plan, &mut |frame| {
+                failed |= frame.error.is_some();
+                report(frame);
+            })
+            .await;
+        if let Some(guard) = guard {
+            guard.finish(!failed);
+        }
+        summary
+    }
+
+    async fn compose_up_bound(&self, plan: &ComposePlan, report: Report<'_>) -> String {
         let id = plan.project.clone();
 
         // Everything the file asked for that this engine will not do, said
@@ -256,6 +282,28 @@ impl Host {
     /// Driven by the project label rather than the file, so a stack can be
     /// taken down after the compose file it came from has been deleted.
     pub async fn compose_down(&self, project: &str, volumes: bool, report: Report<'_>) -> String {
+        let (operation, guard) = match self.admit("compose_down").await {
+            Ok(admission) => admission,
+            Err(error) => {
+                let summary = error.message;
+                report(finished(project, summary.clone(), Some(summary.clone())));
+                return summary;
+            }
+        };
+        let mut failed = false;
+        let summary = operation
+            .compose_down_bound(project, volumes, &mut |frame| {
+                failed |= frame.error.is_some();
+                report(frame);
+            })
+            .await;
+        if let Some(guard) = guard {
+            guard.finish(!failed);
+        }
+        summary
+    }
+
+    async fn compose_down_bound(&self, project: &str, volumes: bool, report: Report<'_>) -> String {
         let id = project.to_string();
         let containers = match self.containers(true).await {
             Ok(list) => list,

@@ -99,6 +99,7 @@ impl Registry {
         let providers = ids.into_iter().filter_map(|id| self.get(id));
         let rows = futures::future::join_all(providers.map(|p| async move {
             let available = p.available().await;
+            let installed = p.installed().await;
             // Availability means the provider can be addressed (for example,
             // its socket exists); it does not mean the daemon is healthy.
             // Surface the current status for every row so an installed but
@@ -108,17 +109,18 @@ impl Registry {
             // picker says so in words rather than repeating the engine's name
             // back at itself.
             let endpoint = p.endpoint().await.map(|ep| ep.describe());
-            (p, available, status, endpoint)
+            (p, available, installed, status, endpoint)
         }))
         .await;
 
         rows.into_iter()
-            .map(|(p, available, status, endpoint)| {
+            .map(|(p, available, installed, status, endpoint)| {
                 let reason = (!status.connected).then_some(status.message);
                 EngineChoice {
                     id: p.id().to_string(),
                     label: p.label().to_string(),
                     available,
+                    installed,
                     connected: status.connected,
                     state: status.state,
                     managed: p.managed(),

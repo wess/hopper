@@ -28,6 +28,8 @@ pub fn candidate_endpoints(home: &str) -> Vec<Endpoint> {
     paths.push(format!("{home}/.docker/run/docker.sock"));
     // Colima.
     paths.push(format!("{home}/.colima/default/docker.sock"));
+    // OrbStack.
+    paths.push(format!("{home}/.orbstack/run/docker.sock"));
     // Rancher Desktop.
     paths.push(format!("{home}/.rd/docker.sock"));
 
@@ -80,7 +82,14 @@ fn non_empty_env(name: &str) -> Option<String> {
 /// itself and waste a lot of disk proving nothing.
 pub fn is_same_engine(source: &Endpoint, destination: &Endpoint) -> bool {
     match (source, destination) {
-        (Endpoint::Unix { path: a }, Endpoint::Unix { path: b }) => a == b,
+        (Endpoint::Unix { path: a }, Endpoint::Unix { path: b }) => {
+            a == b || {
+                match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+                    (Ok(a), Ok(b)) => a == b,
+                    _ => false,
+                }
+            }
+        }
         (Endpoint::Npipe { path: a }, Endpoint::Npipe { path: b }) => a == b,
         (
             Endpoint::Tcp {
@@ -143,8 +152,30 @@ pub async fn scan(destination: &Endpoint, home: &str) -> MigrationScan {
         };
     };
 
+    scan_source(destination, source).await
+}
+
+/// Scan exactly the source the user chose; never fall back to another engine.
+pub async fn scan_source(destination: &Endpoint, source: Endpoint) -> MigrationScan {
+    if is_same_engine(&source, destination) {
+        return MigrationScan {
+            available: false,
+            message: Some("Choose a different source and destination engine.".into()),
+            ..Default::default()
+        };
+    }
     let client = Client::new(source.clone());
     client.set_timeout(Duration::from_secs(10));
+    if let Err(error) = client.negotiate().await {
+        return MigrationScan {
+            available: false,
+            message: Some(format!(
+                "The selected source could not be reached: {}",
+                error.message
+            )),
+            ..Default::default()
+        };
+    }
     let mut scan = MigrationScan {
         available: true,
         source: Some(source.describe()),

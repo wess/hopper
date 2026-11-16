@@ -4,11 +4,13 @@
 //! UI. The layer above (`host`) composes it into the service facade the app
 //! calls.
 
+pub mod api;
 pub mod archive;
 pub mod build;
 pub mod client;
 pub mod compose;
 pub mod containers;
+pub mod context;
 pub mod credentials;
 pub mod demux;
 pub mod endpoint;

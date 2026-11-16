@@ -8,7 +8,9 @@
 //! The source is always read-only. Nothing here removes anything from Docker.
 
 use docker::Endpoint;
-use model::{MigrationPhase, MigrationPlan, MigrationProgress, MigrationScan, RuntimeKind};
+use model::{
+    MigrationPhase, MigrationPlan, MigrationProgress, MigrationReview, MigrationScan, RuntimeKind,
+};
 use std::time::Duration;
 
 use crate::facade::Host;
@@ -31,6 +33,73 @@ fn destination_endpoint(host: &Host) -> Endpoint {
 }
 
 impl Host {
+    /// Read-only preflight for the import review screen.
+    pub async fn import_review(&self, plan: &MigrationPlan) -> MigrationReview {
+        let _selection = self.lock_selection().await;
+        self.review_import(plan).await
+    }
+
+    async fn review_import(&self, plan: &MigrationPlan) -> MigrationReview {
+        match self.check_import(plan).await {
+            Ok(review) => review,
+            Err(error) => MigrationReview {
+                notices: vec![migrate::review::notice(
+                    MigrationPhase::Error,
+                    "",
+                    error.message,
+                    true,
+                )],
+            },
+        }
+    }
+
+    async fn check_import(&self, plan: &MigrationPlan) -> docker::Result<MigrationReview> {
+        let source = plan.source.clone().ok_or_else(|| {
+            docker::DockerError::decode("No source engine was pinned for this import.")
+        })?;
+        let source = docker::Client::new(source.into());
+        source.set_timeout(Duration::from_secs(10));
+        if migrate::scan::is_same_engine(&source.endpoint(), &destination_endpoint(self)) {
+            return Err(docker::DockerError::decode(
+                "The source and destination must be different engines.",
+            ));
+        }
+        source.negotiate().await?;
+        let (containers, networks) = match self.backend() {
+            #[cfg(target_os = "macos")]
+            Backend::Apple(cli) => (
+                if plan.containers.is_empty() {
+                    Vec::new()
+                } else {
+                    apple::containers::list(&cli, true).await?
+                },
+                if plan.networks.is_empty() {
+                    Vec::new()
+                } else {
+                    apple::networks::list(&cli).await?
+                },
+            ),
+            Backend::EngineApi => (
+                if plan.containers.is_empty() {
+                    Vec::new()
+                } else {
+                    docker::containers::list(&self.client(), true).await?
+                },
+                if plan.networks.is_empty() {
+                    Vec::new()
+                } else {
+                    docker::networks::list(&self.client()).await?
+                },
+            ),
+        };
+        let mut review = migrate::review::inspect(&source, plan, &containers, &networks).await?;
+        if self.runtime_kind() == RuntimeKind::Apple && !plan.containers.is_empty() {
+            review.notices.push(migrate::review::notice(MigrationPhase::Containers, "",
+                "Apple Containers does not preserve Docker restart policies, healthchecks, custom hostnames, soft memory reservations, or PID limits.", false));
+        }
+        Ok(review)
+    }
+
     /// What the other engine holds, ready for the user to choose from.
     pub async fn import_scan(&self) -> MigrationScan {
         let home = if cfg!(windows) {
@@ -45,21 +114,88 @@ impl Host {
         migrate::scan(&destination_endpoint(self), &home).await
     }
 
+    /// A replacement flow pins the selected installation as the source.
+    pub async fn import_scan_provider(&self, provider: &str) -> MigrationScan {
+        let (destination, source) = {
+            let _selection = self.lock_selection().await;
+            let source = match self.engines().registry().get(provider) {
+                Some(provider) => provider.endpoint().await,
+                None => None,
+            };
+            (destination_endpoint(self), source)
+        };
+        match source {
+            Some(source) => migrate::scan::scan_source(&destination, source).await,
+            None => MigrationScan { available: false, message: Some("The selected source has no Docker-compatible endpoint. Start it and review your DOCKER_HOST override before scanning again.".into()), ..Default::default() },
+        }
+    }
+
     /// Copy the selection across, reporting as it goes.
     ///
     /// Ordering matters: images before containers, because a container cannot
     /// start without its image; networks before containers for the same
     /// reason.
     pub async fn import_run(&self, plan: &MigrationPlan, report: Report<'_>) -> String {
+        let (operation, guard) = match self.admit("import").await {
+            Ok(admission) => admission,
+            Err(error) => {
+                let mut frame = migrate::run::finished(error.message.clone());
+                frame.error = Some(error.message.clone());
+                report(frame);
+                return error.message;
+            }
+        };
+        let mut failed = false;
+        let summary = operation
+            .import_bound(plan, &mut |frame| {
+                failed |= frame.error.is_some();
+                report(frame);
+            })
+            .await;
+        if let Some(guard) = guard {
+            guard.finish(!failed);
+        }
+        summary
+    }
+
+    async fn import_bound(&self, plan: &MigrationPlan, report: Report<'_>) -> String {
         // A migration is one destination-bound operation. Hold selection
         // stable so a Settings change cannot move the second half of it onto
         // another engine after images or networks have already arrived.
         let _selection = self.lock_selection().await;
-        let Some(source_endpoint) = plan.source.clone() else {
-            return "No source engine was pinned for this import.".into();
-        };
+        let review = self.review_import(plan).await;
+        for notice in &review.notices {
+            report(notice.clone());
+        }
+        if review.blocked() {
+            let summary =
+                "Import blocked. Resolve the preflight errors and review again.".to_string();
+            let mut frame = migrate::run::finished(summary.clone());
+            frame.error = Some(summary.clone());
+            report(frame);
+            return summary;
+        }
+        let source_endpoint = plan.source.clone().expect("preflight requires a source");
         let source = docker::client::Client::new(source_endpoint.into());
         source.set_timeout(Duration::from_secs(10));
+        if let Err(error) = source.negotiate().await {
+            let mut frame = migrate::run::finished(
+                "Import failed before copying: the source engine could not be negotiated.",
+            );
+            frame.error = Some(error.message);
+            report(frame.clone());
+            return frame.message;
+        }
+
+        let failures = std::sync::atomic::AtomicUsize::new(0);
+        let mut tracked = |frame: MigrationProgress| {
+            failures.fetch_add(
+                usize::from(frame.error.is_some()),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            report(frame);
+        };
+        let report: Report<'_> = &mut tracked;
 
         let (images, networks, containers) = match self.backend() {
             #[cfg(target_os = "macos")]
@@ -88,8 +224,24 @@ impl Host {
         skipped(report, MigrationPhase::Volumes, &plan.volumes,
             "Volume contents are not copied yet. Create the volume on this engine and move the data yourself before starting the container that needs it.");
 
-        let summary = summarize(images, networks, containers);
-        report(migrate::run::finished(summary.clone()));
+        let mut summary = summarize(images, networks, containers);
+        if containers > 0 {
+            summary.push_str(
+                " Containers are stopped; verify data and settings before starting them.",
+            );
+        }
+        if !plan.volumes.is_empty() {
+            summary.push_str(" Volume contents were not copied.");
+        }
+        let failures = failures.load(std::sync::atomic::Ordering::Relaxed);
+        if failures > 0 {
+            summary.push_str(&format!(" {failures} item(s) failed; review the notes."));
+        }
+        let mut frame = migrate::run::finished(summary.clone());
+        if failures > 0 {
+            frame.error = Some(format!("{failures} item(s) failed."));
+        }
+        tracked(frame);
         summary
     }
 }

@@ -2,3 +2,7 @@
 
 pub mod cli;
 pub mod config;
+pub mod daemon;
+mod log;
+pub mod resources;
+pub mod stats;

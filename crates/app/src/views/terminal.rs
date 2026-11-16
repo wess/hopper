@@ -27,6 +27,8 @@ pub struct Terminal {
     /// interactive shell reads cleanly.
     screen: super::ansi::Screen,
     session: Option<Arc<host::docker_exec::Session>>,
+    output: Option<gpui::Task<()>>,
+    connection: Option<gpui::Task<()>>,
     started: bool,
     error: Option<String>,
     /// Invalidates output and completions from a session for the prior
@@ -41,6 +43,8 @@ impl Terminal {
             container,
             screen: super::ansi::Screen::new(MAX_LINES),
             session: None,
+            output: None,
+            connection: None,
             started: false,
             error: None,
             generation: 0,
@@ -69,6 +73,8 @@ impl Terminal {
     }
 
     fn connect(&mut self, cx: &mut Context<Self>) {
+        self.output = None;
+        self.connection = None;
         self.started = true;
         self.error = None;
         let generation = self.generation;
@@ -83,7 +89,7 @@ impl Terminal {
         // memory without limit; backpressure ends the session cleanly.
         let (mut tx, mut rx) = futures::channel::mpsc::channel::<String>(256);
 
-        cx.spawn(async move |_, cx| {
+        self.output = Some(cx.spawn(async move |_, cx| {
             while let Some(text) = futures::StreamExt::next(&mut rx).await {
                 if cx
                     .update(|cx| {
@@ -99,11 +105,10 @@ impl Terminal {
                     return;
                 }
             }
-        })
-        .detach();
+        }));
 
         let entity2 = cx.entity().downgrade();
-        bridge::run(
+        self.connection = Some(bridge::run_owned(
             cx,
             async move {
                 host.exec_start(&id, None, true, move |chunk| tx.try_send(chunk).is_ok())
@@ -123,7 +128,7 @@ impl Terminal {
                     cx.notify();
                 });
             },
-        );
+        ));
     }
 
     /// Send a keystroke to the container.

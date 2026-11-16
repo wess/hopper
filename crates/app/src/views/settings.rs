@@ -48,6 +48,9 @@ fn choice_status(choice: &EngineChoice) -> (&'static str, ColorName) {
     if choice.connected || choice.state == EngineState::Connected {
         return ("Connected", ColorName::Green);
     }
+    if choice.id != "existing" && choice.installed && choice.state == EngineState::NotInstalled {
+        return ("Installed", ColorName::Gray);
+    }
     match choice.state {
         EngineState::Connected => ("Connected", ColorName::Green),
         EngineState::Starting => ("Starting", ColorName::Blue),
@@ -70,13 +73,20 @@ fn choice_status(choice: &EngineChoice) -> (&'static str, ColorName) {
 
 pub struct Settings {
     state: AppState,
+    replacement: Entity<super::replacement::Replacement>,
     busy: bool,
+    lifecycle_generation: u64,
     notice: Option<String>,
     resource_notice: Option<Result<String, String>>,
     cli_notice: Option<Result<String, String>>,
     cpus: Entity<NumberInput>,
     memory: Entity<NumberInput>,
     disk: Entity<NumberInput>,
+    share_path: Entity<TextArea>,
+    share_writable: bool,
+    daemon_json: Entity<TextArea>,
+    vm_notice: Option<String>,
+    vm_stats: Option<model::EngineStats>,
     /// Engines this machine could be pointed at.
     choices: Vec<EngineChoice>,
     /// The pinned engine id, or `None` for automatic.
@@ -97,11 +107,12 @@ impl Settings {
         watch(cx, &state.engine);
         watch(cx, &state.settings);
         let settings = state.host.settings();
+        let capacity = state.host.engine_capacity();
         let preference = settings.engine_preference.clone();
         let cpus = cx.new(|cx| {
             NumberInput::new(cx)
                 .min(1.0)
-                .max(64.0)
+                .max(capacity.max_cpus as f64)
                 .step(1.0)
                 .value(settings.resources.cpus as f64)
                 .label("CPU cores")
@@ -109,7 +120,7 @@ impl Settings {
         let memory = cx.new(|cx| {
             NumberInput::new(cx)
                 .min(1.0)
-                .max(256.0)
+                .max(capacity.max_memory_gib as f64)
                 .step(1.0)
                 .value(settings.resources.memory_gib as f64)
                 .label("Memory (GiB)")
@@ -122,15 +133,42 @@ impl Settings {
                 .value(settings.resources.disk_gib as f64)
                 .label("Disk (GiB)")
         });
+        let share_path = cx.new(|cx| {
+            TextArea::new(cx)
+                .label("Directory to share")
+                .placeholder("Absolute host directory")
+                .rows(1)
+                .max_rows(1)
+                .submit_on_enter(true)
+        });
+        let daemon_json = cx.new(|cx| {
+            let mut input = TextArea::new(cx)
+                .label("Docker daemon JSON")
+                .rows(8)
+                .max_rows(8);
+            input.set_text(
+                &state.host.daemon_document().unwrap_or_else(|_| "{}".into()),
+                cx,
+            );
+            input
+        });
+        let replacement = cx.new(super::replacement::Replacement::new);
         let mut view = Self {
             state,
+            replacement,
             busy: false,
+            lifecycle_generation: 0,
             notice: None,
             resource_notice: None,
             cli_notice: None,
             cpus,
             memory,
             disk,
+            share_path,
+            share_writable: false,
+            daemon_json,
+            vm_notice: None,
+            vm_stats: None,
             choices: Vec::new(),
             preference,
             loading_choices: false,
@@ -142,16 +180,55 @@ impl Settings {
         view
     }
 
+    fn reload_saved(&mut self, cx: &mut Context<Self>) {
+        self.state.host.reload_preferences();
+        let settings = self.state.host.settings();
+        self.cpus.update(cx, |input, cx| {
+            input.set_value(settings.resources.cpus as f64, cx)
+        });
+        self.memory.update(cx, |input, cx| {
+            input.set_value(settings.resources.memory_gib as f64, cx)
+        });
+        self.disk.update(cx, |input, cx| {
+            input.set_value(settings.resources.disk_gib as f64, cx)
+        });
+        self.daemon_json.update(cx, |input, cx| {
+            input.set_text(
+                &self
+                    .state
+                    .host
+                    .daemon_document()
+                    .unwrap_or_else(|_| "{}".into()),
+                cx,
+            )
+        });
+        self.share_path
+            .update(cx, |input, cx| input.set_text("", cx));
+        self.share_writable = false;
+        self.state.settings.set(cx, settings);
+        self.notice = None;
+        self.vm_notice = None;
+        self.resource_notice = None;
+        cx.notify();
+    }
+
     fn toggle(&mut self, field: ToggleField, cx: &mut Context<Self>) {
         let mut settings = self.state.host.settings();
         match field {
             ToggleField::Autostart => settings.autostart_engine = !settings.autostart_engine,
             ToggleField::KeepAlive => settings.keep_engine_on_quit = !settings.keep_engine_on_quit,
+            ToggleField::Idle => {
+                settings.idle_suspend_minutes = if settings.idle_suspend_minutes.is_some() {
+                    None
+                } else {
+                    Some(10)
+                }
+            }
         }
         if let Err(error) = self.state.host.save_settings(settings.clone()) {
             self.notice = Some(format!("Could not save settings: {error}"));
         } else {
-            self.state.settings.set(cx, settings);
+            self.state.settings.set(cx, self.state.host.settings());
             self.notice = None;
         }
         cx.notify();
@@ -170,15 +247,16 @@ impl Settings {
             cx.notify();
             return;
         };
+        let capacity = self.state.host.engine_capacity();
         if [cpus, memory, disk]
             .iter()
             .any(|value| !value.is_finite() || value.fract() != 0.0)
-            || !(1.0..=64.0).contains(&cpus)
-            || !(1.0..=256.0).contains(&memory)
+            || !(1.0..=capacity.max_cpus as f64).contains(&cpus)
+            || !(1.0..=capacity.max_memory_gib as f64).contains(&memory)
             || !(10.0..=2048.0).contains(&disk)
         {
             self.resource_notice = Some(Err(
-                "Use whole numbers: 1–64 CPU cores, 1–256 GiB memory, and 10–2048 GiB disk.".into(),
+                format!("Use whole numbers: 1–{} CPU cores, 1–{} GiB memory, and 10–2048 GiB disk. Hopper reserves resources for the host.", capacity.max_cpus, capacity.max_memory_gib),
             ));
             cx.notify();
             return;
@@ -191,7 +269,7 @@ impl Settings {
         .bounded();
         match self.state.host.save_settings(settings.clone()) {
             Ok(()) => {
-                self.state.settings.set(cx, settings);
+                self.state.settings.set(cx, self.state.host.settings());
                 self.resource_notice = Some(Ok(format!("Saved: {cpus} cores, {memory} GiB memory, {disk} GiB initial disk. Stop and start the engine to apply CPU and memory changes.")));
             }
             Err(error) => {
@@ -199,6 +277,92 @@ impl Settings {
             }
         }
         cx.notify();
+    }
+
+    fn save_vm_settings(&mut self, settings: model::Settings, cx: &mut Context<Self>) -> bool {
+        match self.state.host.save_settings(settings) {
+            Ok(()) => {
+                self.state.settings.set(cx, self.state.host.settings());
+                self.vm_notice = Some(
+                    "Saved. Stop and start Hopper Engine to apply file shares and Docker settings."
+                        .into(),
+                );
+                cx.notify();
+                true
+            }
+            Err(error) => {
+                self.vm_notice = Some(error.to_string());
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    fn add_share(&mut self, cx: &mut Context<Self>) {
+        let path = self.share_path.read(cx).text().trim().to_string();
+        let mut settings = self.state.host.settings();
+        settings.shares.push(model::SharedPath {
+            path,
+            writable: self.share_writable,
+        });
+        if self.save_vm_settings(settings, cx) {
+            self.share_path
+                .update(cx, |input, cx| input.set_text("", cx));
+            self.share_writable = false;
+        }
+    }
+
+    fn remove_share(&mut self, path: &str, cx: &mut Context<Self>) {
+        let mut settings = self.state.host.settings();
+        settings.shares.retain(|share| share.path != path);
+        settings.shared_paths.retain(|share| share != path);
+        self.save_vm_settings(settings, cx);
+    }
+
+    fn save_daemon(&mut self, cx: &mut Context<Self>) {
+        let mut settings = self.state.host.settings();
+        settings.daemon = model::DaemonConfig {
+            extra_json: Some(self.daemon_json.read(cx).text()),
+            ..Default::default()
+        };
+        self.save_vm_settings(settings, cx);
+    }
+
+    fn refresh_vm_stats(&mut self, cx: &mut Context<Self>) {
+        let host = Arc::clone(&self.state.host);
+        let this = cx.entity().downgrade();
+        self.busy = true;
+        bridge::run(
+            cx,
+            async move { host.engine_stats().await },
+            move |stats, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.busy = false;
+                    this.vm_stats = stats;
+                    this.vm_notice = stats.is_none().then(|| {
+                        "VM usage could not be sampled. Start Hopper Engine and retry.".into()
+                    });
+                    cx.notify();
+                });
+            },
+        );
+    }
+
+    fn reclaim_vm(&mut self, cx: &mut Context<Self>) {
+        let host = Arc::clone(&self.state.host);
+        let this = cx.entity().downgrade();
+        self.busy = true;
+        bridge::run(
+            cx,
+            async move { host.reclaim_engine().await },
+            move |result, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.busy = false;
+                    this.vm_notice = Some(result.detail);
+                    cx.notify();
+                });
+            },
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -232,7 +396,7 @@ impl Settings {
         settings.theme = mode;
         let saved = match self.state.host.save_settings(settings.clone()) {
             Ok(()) => {
-                self.state.settings.set(cx, settings);
+                self.state.settings.set(cx, self.state.host.settings());
                 self.notice = None;
                 true
             }
@@ -407,6 +571,8 @@ impl Settings {
     }
 
     fn start_engine(&mut self, cx: &mut Context<Self>) {
+        self.lifecycle_generation += 1;
+        let generation = self.lifecycle_generation;
         let host = Arc::clone(&self.state.host);
         let state = self.state.clone();
         let this = cx.entity().downgrade();
@@ -421,6 +587,9 @@ impl Settings {
                 // pane, so a `tracing::warn` reaches nobody who pressed it.
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
+                        if this.lifecycle_generation != generation {
+                            return;
+                        }
                         this.busy = false;
                         this.notice = result.err();
                         cx.notify();
@@ -432,6 +601,8 @@ impl Settings {
     }
 
     fn stop_engine(&mut self, cx: &mut Context<Self>) {
+        self.lifecycle_generation += 1;
+        let generation = self.lifecycle_generation;
         let host = Arc::clone(&self.state.host);
         let state = self.state.clone();
         let this = cx.entity().downgrade();
@@ -444,6 +615,9 @@ impl Settings {
             move |result, cx| {
                 if let Some(this) = this.upgrade() {
                     this.update(cx, |this, cx| {
+                        if this.lifecycle_generation != generation {
+                            return;
+                        }
                         // Keep the control usable after a failed stop and make
                         // recovery visible beside the action.
                         this.notice = result.err();
@@ -459,6 +633,8 @@ impl Settings {
     fn section(&self, title: &str, body: impl IntoElement, cx: &gpui::App) -> impl IntoElement {
         let palette = theme::palette(cx);
         div()
+            .w_full()
+            .min_w_0()
             .p_4()
             .rounded_md()
             .bg(palette.bg_subtle)
@@ -478,6 +654,9 @@ impl Render for Settings {
         let palette = theme::palette(cx);
         let engine = self.state.engine.get(cx);
         let settings = self.state.settings.get(cx);
+        if !self.busy {
+            self.preference = settings.engine_preference.clone();
+        }
 
         // `NotInstalled` is deliberately absent: on macOS that means Apple's
         // runtime is not on the machine, and there is nothing to start until
@@ -486,7 +665,8 @@ impl Render for Settings {
             engine.state,
             EngineState::Stopped | EngineState::Unreachable
         ) && engine.managed;
-        let can_stop = engine.connected && engine.managed;
+        let can_stop =
+            (engine.connected || engine.state == EngineState::Starting) && engine.managed;
 
         let mut engine_body = Stack::new()
             .gap(Size::Sm)
@@ -534,7 +714,9 @@ impl Render for Settings {
                             .size(Size::Xs)
                             .variant(Variant::Subtle)
                             .color(ColorName::Red)
-                            .disabled(self.busy || !can_stop)
+                            .disabled(
+                                !can_stop || (self.busy && engine.state != EngineState::Starting),
+                            )
                             .on_click(cx.listener(|this, _, _, cx| this.stop_engine(cx))),
                     ),
             );
@@ -694,15 +876,15 @@ impl Render for Settings {
                             .variant(Variant::Light)
                             .color(ColorName::Blue)
                             .disabled(self.busy)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.configure_docker_cli(cx)
-                            })),
+                            .on_click(cx.listener(|this, _, _, cx| this.configure_docker_cli(cx))),
                     )
-                    .children(self.cli_notice.as_ref().map(|notice| match notice {
-                        Ok(message) => Text::new(message.clone()).size(Size::Xs).dimmed(),
-                        Err(message) => Text::new(message.clone())
-                            .size(Size::Xs)
-                            .color(guise::theme::theme(cx).color(ColorName::Red, 6)),
+                    .children(self.cli_notice.as_ref().map(|notice| {
+                        match notice {
+                            Ok(message) => Text::new(message.clone()).size(Size::Xs).dimmed(),
+                            Err(message) => Text::new(message.clone())
+                                .size(Size::Xs)
+                                .color(guise::theme::theme(cx).color(ColorName::Red, 6)),
+                        }
                     }));
             }
             body
@@ -734,14 +916,21 @@ impl Render for Settings {
                     .child(Switch::new("keep-engine-alive").size(Size::Sm).checked(settings.keep_engine_on_quit).on_change(cx.listener(|this, _, _, cx| this.toggle(ToggleField::KeepAlive, cx))))
                     .child(Stack::new().gap(Size::Xs).child(Text::new("Keep the engine running after closing Hopper").size(Size::Xs)).child(Text::new("Useful for CLI and CI workloads; uses resources until stopped.").size(Size::Xs).dimmed())),
             );
+        let lifecycle_body = lifecycle_body.child(
+            Group::new().gap(Size::Sm).align(Align::Center)
+                .child(Switch::new("idle-engine").size(Size::Sm).checked(settings.idle_suspend_minutes.is_some()).on_change(cx.listener(|this, _, _, cx| this.toggle(ToggleField::Idle, cx))))
+                .child(Stack::new().gap(Size::Xs)
+                    .child(Text::new(format!("Stop an empty Hopper Engine after {} minutes", settings.idle_suspend_minutes.unwrap_or(10))).size(Size::Xs))
+                    .child(Text::new("Opt-in. Any existing container prevents stopping. CLI clients need you to start the engine again; no automatic wake.").size(Size::Xs).dimmed()))
+        );
         let resource_body = if engine.provider == "vm" {
             Stack::new().gap(Size::Sm)
                 .child(Text::new("One Linux VM runs your containers. CPU and memory changes apply after stopping and starting the engine.").size(Size::Xs))
-                .child(Group::new().gap(Size::Sm).align(Align::Start)
+                .child(Group::new().gap(Size::Sm).align(Align::Start).wrap(true)
                     .child(div().w(px(180.0)).h(px(84.0)).child(self.cpus.clone()))
                     .child(div().w(px(180.0)).h(px(84.0)).child(self.memory.clone()))
                     .child(div().w(px(180.0)).h(px(84.0)).child(self.disk.clone())))
-                .child(Text::new("Disk size applies when the VM is first created. Existing disks and volumes are kept. Your home folder is shared with the VM; published ports are available on localhost.").size(Size::Xs).dimmed())
+                .child(Text::new("Disk size applies when the VM is first created. Existing disks and volumes are kept. Published ports are available on localhost. CPU and memory limits reserve capacity for the host.").size(Size::Xs).dimmed())
                 .child(Button::new("engine-save-resources", "Save VM resources")
                     .size(Size::Xs).variant(Variant::Light).color(ColorName::Blue)
                     .disabled(self.busy)
@@ -785,10 +974,85 @@ impl Render for Settings {
                 .into_any_element()
         };
 
+        let vm_settings = if engine.provider == "vm" {
+            let mut shares = Stack::new().gap(Size::Sm)
+                .child(Text::new("Shares for the next engine start").size(Size::Sm).medium())
+                .child(Text::new("Only listed directories will be shared. Grants are read-only by default. Current shares remain in effect until you stop and start the engine.").size(Size::Xs).dimmed());
+            for (index, share) in settings
+                .shares
+                .iter()
+                .cloned()
+                .chain(settings.shared_paths.iter().map(|path| model::SharedPath {
+                    path: path.clone(),
+                    writable: false,
+                }))
+                .enumerate()
+            {
+                let path = share.path.clone();
+                shares = shares.child(
+                    Group::new()
+                        .gap(Size::Sm)
+                        .wrap(true)
+                        .child(Text::new(share.path).size(Size::Xs))
+                        .child(
+                            Badge::new(if share.writable {
+                                "Read/write"
+                            } else {
+                                "Read-only"
+                            })
+                            .size(Size::Xs),
+                        )
+                        .child(
+                            Button::new(
+                                SharedString::from(format!("remove-share-{index}")),
+                                "Remove",
+                            )
+                            .size(Size::Xs)
+                            .variant(Variant::Subtle)
+                            .disabled(self.busy)
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.remove_share(&path, cx)),
+                            ),
+                        ),
+                );
+            }
+            if settings.shares.is_empty() && settings.shared_paths.is_empty() {
+                shares = shares.child(
+                    Text::new("No host directories are shared on the next start.")
+                        .size(Size::Xs)
+                        .dimmed(),
+                );
+            }
+            shares = shares.child(div().w_full().min_w_0().flex().flex_col().h(px(84.0)).child(self.share_path.clone()))
+                .child(Group::new().gap(Size::Sm).wrap(true)
+                    .child(Switch::new("share-writable").checked(self.share_writable).size(Size::Sm).on_change(cx.listener(|this, _, _, cx| {this.share_writable = !this.share_writable; cx.notify();})))
+                    .child(Text::new("Allow writes to this directory").size(Size::Xs))
+                    .child(Button::new("add-share", "Add directory").size(Size::Xs).variant(Variant::Light).disabled(self.busy).on_click(cx.listener(|this, _, _, cx| this.add_share(cx)))))
+                .child(Text::new("Docker defaults limit new container logs and build-cache retention. Advanced JSON is validated before saving, then validated by Docker before activation; a failed activation restores the previous configuration.").size(Size::Xs).dimmed())
+                .child(div().w_full().min_w_0().flex().flex_col().h(px(240.0)).child(self.daemon_json.clone()))
+                .child(Button::new("save-daemon", "Save Docker settings").size(Size::Xs).variant(Variant::Light).disabled(self.busy).on_click(cx.listener(|this, _, _, cx| this.save_daemon(cx))))
+                .child(Group::new().gap(Size::Sm).wrap(true)
+                    .child(Button::new("vm-stats", "Refresh VM usage").size(Size::Xs).variant(Variant::Light).disabled(self.busy || !engine.connected).on_click(cx.listener(|this, _, _, cx| this.refresh_vm_stats(cx))))
+                    .child(Button::new("vm-reclaim", "Reclaim unused disk blocks").size(Size::Xs).variant(Variant::Light).disabled(self.busy || !engine.connected).on_click(cx.listener(|this, _, _, cx| this.reclaim_vm(cx)))));
+            if let Some(stats) = self.vm_stats {
+                shares = shares.child(Text::new(format!("VM memory: {} MiB used / {} MiB total · disk: {} MiB used / {} MiB total · load: {:.2}", (stats.mem_total_kb - stats.mem_avail_kb) / 1024, stats.mem_total_kb / 1024, stats.disk_used_kb / 1024, stats.disk_total_kb / 1024, stats.load1)).size(Size::Xs));
+            }
+            if let Some(notice) = &self.vm_notice {
+                shares = shares.child(Text::new(notice.clone()).size(Size::Xs));
+            }
+            Some(
+                self.section("VM files, Docker, and usage", shares, cx)
+                    .into_any_element(),
+            )
+        } else {
+            None
+        };
+
         div()
             .flex()
             .flex_col()
             .size_full()
+            .min_w_0()
             .child(
                 div()
                     .flex()
@@ -796,7 +1060,15 @@ impl Render for Settings {
                     .p_4()
                     .border_b_1()
                     .border_color(palette.border)
-                    .child(Text::new("Settings").size(Size::Xl).bold()),
+                    .justify_between()
+                    .child(Text::new("Settings").size(Size::Xl).bold())
+                    .child(
+                        Button::new("reload-settings", "Reload saved values")
+                            .size(Size::Xs)
+                            .variant(Variant::Subtle)
+                            .disabled(self.busy)
+                            .on_click(cx.listener(|this, _, _, cx| this.reload_saved(cx))),
+                    ),
             )
             .child(
                 ScrollArea::new("settings-scroll").fill().child(
@@ -805,6 +1077,7 @@ impl Render for Settings {
                             .gap(Size::Md)
                             .child(self.section("Engine", engine_body, cx))
                             .child(self.section("Which engine", choice_body, cx))
+                            .child(self.section("Coexist or replace", self.replacement.clone(), cx))
                             .child(self.section("Docker CLI", cli_body, cx))
                             .child(self.section("Lifecycle", lifecycle_body, cx))
                             .child(self.section(
@@ -816,6 +1089,7 @@ impl Render for Settings {
                                 resource_body,
                                 cx,
                             ))
+                            .children(vm_settings)
                             .child(self.section("Appearance", theme_body, cx)),
                     ),
                 ),
@@ -827,6 +1101,7 @@ impl Render for Settings {
 enum ToggleField {
     Autostart,
     KeepAlive,
+    Idle,
 }
 
 #[cfg(test)]
@@ -838,6 +1113,7 @@ mod tests {
             id: id.into(),
             label: id.into(),
             available,
+            installed: false,
             connected,
             state: if connected {
                 EngineState::Connected
@@ -887,6 +1163,13 @@ mod tests {
             choice_status(&choice("existing", true, true)).0,
             "Connected"
         );
+    }
+
+    #[test]
+    fn an_installed_stopped_app_is_not_labeled_missing() {
+        let mut stopped = choice("docker", false, false);
+        stopped.installed = true;
+        assert_eq!(choice_status(&stopped).0, "Installed");
     }
 
     #[test]

@@ -8,6 +8,7 @@ use engine::Registry;
 use model::{EngineChoice, EngineResources, EngineStatus};
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct Engines {
     registry: Arc<Registry>,
 }
@@ -55,6 +56,13 @@ impl Engines {
     pub async fn start(&self, resources: EngineResources) -> anyhow::Result<()> {
         match self.registry.active() {
             Some(provider) => provider.start(resources).await,
+            None => anyhow::bail!("No engine provider is selected."),
+        }
+    }
+
+    pub async fn start_configured(&self, settings: &model::Settings) -> anyhow::Result<()> {
+        match self.registry.active() {
+            Some(provider) => provider.start_configured(settings).await,
             None => anyhow::bail!("No engine provider is selected."),
         }
     }

@@ -139,6 +139,7 @@ where
     cmd.args(&argv)
         .kill_on_drop(true)
         .env_remove("DOCKER_TLS_VERIFY")
+        .env_remove("DOCKER_CONTEXT")
         .env("DOCKER_HOST", client.endpoint().docker_host_value())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

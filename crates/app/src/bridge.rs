@@ -34,6 +34,10 @@ pub fn runtime() -> &'static Runtime {
     static RT: OnceLock<Runtime> = OnceLock::new();
     RT.get_or_init(|| {
         tokio::runtime::Builder::new_multi_thread()
+            // Work here is asynchronous I/O; archive production uses the
+            // blocking pool. Do not reserve one worker per host CPU.
+            .worker_threads(2)
+            .thread_name("hopper-io")
             .enable_all()
             .build()
             .expect("build tokio runtime")
@@ -46,17 +50,24 @@ pub fn run<T: Send + 'static>(
     fut: impl Future<Output = T> + Send + 'static,
     done: impl FnOnce(T, &mut App) + 'static,
 ) {
+    run_owned(cx, fut, done).detach();
+}
+
+pub fn run_owned<T: Send + 'static>(
+    cx: &mut App,
+    fut: impl Future<Output = T> + Send + 'static,
+    done: impl FnOnce(T, &mut App) + 'static,
+) -> gpui::Task<()> {
     let (tx, rx) = futures::channel::oneshot::channel();
-    let task = runtime().spawn(async move {
+    let task = AbortOnDrop(runtime().spawn(async move {
         let _ = tx.send(fut.await);
-    });
+    }));
     cx.spawn(async move |cx| {
-        let _task = AbortOnDrop(task);
+        let _task = task;
         if let Ok(result) = rx.await {
             let _ = cx.update(|cx| done(result, cx));
         }
     })
-    .detach();
 }
 
 /// Run a streaming producer on the tokio runtime, delivering each item to
@@ -69,16 +80,33 @@ pub fn run<T: Send + 'static>(
 pub fn stream<T, Fut>(
     cx: &mut App,
     producer: impl FnOnce(mpsc::Sender<T>) -> Fut + Send + 'static,
-    mut on_item: impl FnMut(T, &mut App) + 'static,
+    on_item: impl FnMut(T, &mut App) + 'static,
     on_done: impl FnOnce(&mut App) + 'static,
 ) where
     T: Send + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
+    stream_owned(cx, producer, on_item, on_done).detach();
+}
+
+/// A view owns the returned task. Dropping it cancels both sides immediately,
+/// including a producer blocked waiting for a silent daemon.
+pub fn stream_owned<T, Fut>(
+    cx: &mut App,
+    producer: impl FnOnce(mpsc::Sender<T>) -> Fut + Send + 'static,
+    mut on_item: impl FnMut(T, &mut App) + 'static,
+    on_done: impl FnOnce(&mut App) + 'static,
+) -> gpui::Task<()>
+where
+    T: Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
     let (tx, mut rx) = mpsc::channel(512);
-    let task = runtime().spawn(producer(tx));
+    // Construct the guard before spawning the consumer so cancellation also
+    // works if the consumer has never been polled.
+    let task = AbortOnDrop(runtime().spawn(producer(tx)));
     cx.spawn(async move |cx| {
-        let _task = AbortOnDrop(task);
+        let _task = task;
         while let Some(item) = rx.next().await {
             if cx.update(|cx| on_item(item, cx)).is_err() {
                 return;
@@ -86,5 +114,42 @@ pub fn stream<T, Fut>(
         }
         let _ = cx.update(|cx| on_done(cx));
     })
-    .detach();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn cancelling_an_owner_drops_a_silent_producer_without_waiting_for_output() {
+        let (ready_tx, ready) = tokio::sync::oneshot::channel();
+        let (closed_tx, closed) = tokio::sync::oneshot::channel::<()>();
+        let task = tokio::spawn(async move {
+            let _closed = closed_tx;
+            ready_tx.send(()).unwrap();
+            std::future::pending::<()>().await;
+        });
+        let owner = abort_on_drop(task);
+        ready.await.unwrap();
+        drop(owner);
+        assert!(tokio::time::timeout(Duration::from_secs(1), closed)
+            .await
+            .unwrap()
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn cancellation_also_drops_an_unpolled_producer() {
+        let (sender, receiver) = tokio::sync::oneshot::channel::<()>();
+        let owner = abort_on_drop(tokio::spawn(async move {
+            let _sender = sender;
+            std::future::pending::<()>().await;
+        }));
+        drop(owner);
+        assert!(tokio::time::timeout(Duration::from_secs(1), receiver)
+            .await
+            .unwrap()
+            .is_err());
+    }
 }

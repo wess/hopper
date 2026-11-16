@@ -155,6 +155,7 @@ pub struct AppState {
     /// The image reference the Run dialog is open for, if any. Setting this
     /// opens the dialog; the Images and Registry views both trigger it.
     pub run_target: Signal<Option<String>>,
+    pub import_provider: Signal<Option<String>>,
 
     /// App-wide transient feedback, painted top-right over everything. Views
     /// push to it through [`AppState::toast`] so an action always shows the
@@ -191,6 +192,7 @@ impl AppState {
                 std::env::var("HOPPER_SIDEBAR").as_deref() == Ok("collapsed"),
             ),
             run_target: Signal::new(cx, None),
+            import_provider: Signal::new(cx, None),
             toasts: cx.new(|_| ToastStack::new().duration(Some(Duration::from_secs(4)))),
             epoch: Signal::new(cx, 0),
         }

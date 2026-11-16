@@ -10,15 +10,25 @@ use std::time::Duration;
 #[tokio::test]
 #[ignore = "starts and restarts Hopper's VM; requires network access"]
 async fn docker_files_ports_and_volumes_survive_a_vm_restart() -> anyhow::Result<()> {
-    let vm = Vm::default();
-    vm.start(EngineResources::default()).await?;
+    let vm = Vm::at(std::path::PathBuf::from(
+        std::env::var("HOPPER_TEST_VM_HOME")
+            .context("set HOPPER_TEST_VM_HOME to an isolated test VM directory")?,
+    ));
+    let home = std::env::var_os("HOME").context("HOME is unavailable")?;
+    let fixture = tempfile::tempdir_in(home)?;
+    let settings = model::Settings {
+        shares: vec![model::SharedPath {
+            path: fixture.path().canonicalize()?.to_string_lossy().into(),
+            writable: true,
+        }],
+        ..Default::default()
+    };
+    vm.start_configured(&settings).await?;
     let client = Client::new(vm.endpoint().await.unwrap());
     client.negotiate().await?;
     let pulled = images::pull(&client, "vm-check", "busybox:1.37", |_| {}).await?;
     anyhow::ensure!(pulled.ok, "image pull failed: {:?}", pulled.error);
     let name = format!("hoppercheck{}", std::process::id());
-    let home = std::env::var_os("HOME").context("HOME is unavailable")?;
-    let fixture = tempfile::tempdir_in(home)?;
     std::fs::write(fixture.path().join("index.html"), "hopper vm ready")?;
     volumes::create(&client, &name, None, &BTreeMap::new()).await?;
     let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
@@ -82,7 +92,7 @@ async fn docker_files_ports_and_volumes_survive_a_vm_restart() -> anyhow::Result
         containers::unpause(&client, &id).await?;
         wait_http(port).await?;
         vm.stop().await?;
-        vm.start(EngineResources::default()).await?;
+        vm.start_configured(&settings).await?;
         client.negotiate().await?;
         wait_http(port).await?;
         let (output, code) =
@@ -96,7 +106,7 @@ async fn docker_files_ports_and_volumes_survive_a_vm_restart() -> anyhow::Result
         };
         std::fs::remove_file(path)?;
         anyhow::ensure!(vm.status().await.state == model::EngineState::Unreachable);
-        vm.start(EngineResources::default()).await?;
+        vm.start_configured(&settings).await?;
         wait_http(port).await?;
         anyhow::Ok(())
     }
@@ -107,6 +117,129 @@ async fn docker_files_ports_and_volumes_survive_a_vm_restart() -> anyhow::Result
     result?;
     removed?;
     volume?;
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires HOPPER_TEST_VM_HOME; verifies file grants, usage, trim, and failed daemon activation"]
+async fn configured_vm_enforces_grants_and_preserves_the_previous_daemon_configuration(
+) -> anyhow::Result<()> {
+    let home = std::path::PathBuf::from(std::env::var("HOPPER_TEST_VM_HOME")?);
+    let vm = Vm::at(home.clone());
+    let user_home = std::env::var_os("HOME").context("HOME is unavailable")?;
+    let writable = tempfile::tempdir_in(&user_home)?;
+    let readonly = tempfile::tempdir_in(&user_home)?;
+    let unshared = tempfile::tempdir_in(&user_home)?;
+    std::fs::write(unshared.path().join("canary"), "not shared")?;
+    let settings = model::Settings {
+        shares: vec![
+            model::SharedPath {
+                path: writable.path().canonicalize()?.to_string_lossy().into(),
+                writable: true,
+            },
+            model::SharedPath {
+                path: readonly.path().canonicalize()?.to_string_lossy().into(),
+                writable: false,
+            },
+        ],
+        ..Default::default()
+    };
+    let cli = engine::vm::cli::Cli {
+        bin: engine::vm::cli::locate().context("VM helper missing")?,
+        home: home.clone(),
+    };
+    vm.stop().await?;
+    let result = async {
+        vm.start_configured(&settings).await?;
+        let config: serde_yaml::Value =
+            serde_yaml::from_str(&std::fs::read_to_string(home.join("hopper/lima.yaml"))?)?;
+        anyhow::ensure!(
+            config["mounts"].as_sequence().is_some_and(|m| m.len() == 2),
+            "unexpected implicit mount: {:?}",
+            config["mounts"]
+        );
+        let command = |args: &[&str]| -> Vec<String> {
+            ["shell", "--workdir=/", "hopper"]
+                .into_iter()
+                .chain(args.iter().copied())
+                .map(str::to_string)
+                .collect()
+        };
+        let write_path = writable
+            .path()
+            .join("written")
+            .canonicalize()
+            .unwrap_or_else(|_| writable.path().join("written"));
+        cli.output(
+            &command(&[
+                "sudo",
+                "sh",
+                "-c",
+                "printf granted > \"$1\"",
+                "sh",
+                write_path.to_str().unwrap(),
+            ]),
+            Duration::from_secs(5),
+        )
+        .await?;
+        anyhow::ensure!(std::fs::read_to_string(write_path)? == "granted");
+        let ro_path = readonly.path().join("blocked");
+        anyhow::ensure!(cli
+            .output(
+                &command(&[
+                    "sudo",
+                    "sh",
+                    "-c",
+                    "printf denied > \"$1\"",
+                    "sh",
+                    ro_path.to_str().unwrap()
+                ]),
+                Duration::from_secs(5)
+            )
+            .await
+            .is_err());
+        anyhow::ensure!(!ro_path.exists(), "read-only share was writable");
+        anyhow::ensure!(
+            cli.output(
+                &command(&[
+                    "test",
+                    "-e",
+                    unshared.path().join("canary").to_str().unwrap()
+                ]),
+                Duration::from_secs(5)
+            )
+            .await
+            .is_err(),
+            "the VM can see an unshared host directory"
+        );
+        let read_daemon = command(&["sudo", "cat", "/etc/docker/daemon.json"]);
+        let before = cli.output(&read_daemon, Duration::from_secs(5)).await?;
+        let document: serde_json::Value = serde_json::from_str(&before)?;
+        anyhow::ensure!(document["log-driver"] == "local");
+        anyhow::ensure!(document["builder"]["gc"]["defaultKeepStorage"] == "5GB");
+        anyhow::ensure!(vm.stats().await.is_some(), "VM statistics unavailable");
+        let reclaimed = vm.reclaim().await;
+        anyhow::ensure!(reclaimed.ok, "{}", reclaimed.detail);
+        vm.stop().await?;
+        let mut invalid = settings.clone();
+        invalid.daemon.extra_json = Some(r#"{"data-root":"/dev/null/hopper"}"#.into());
+        anyhow::ensure!(
+            vm.start_configured(&invalid).await.is_err(),
+            "invalid driver was accepted"
+        );
+        let after = cli.output(&read_daemon, Duration::from_secs(5)).await?;
+        anyhow::ensure!(
+            serde_json::from_str::<serde_json::Value>(&before)?
+                == serde_json::from_str::<serde_json::Value>(&after)?,
+            "failed activation did not retain the previous configuration"
+        );
+        vm.start_configured(&settings).await?;
+        Ok::<_, anyhow::Error>(())
+    }
+    .await;
+    let stopped = vm.stop().await;
+    result?;
+    stopped?;
     Ok(())
 }
 

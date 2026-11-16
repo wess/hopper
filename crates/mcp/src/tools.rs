@@ -67,6 +67,11 @@ pub fn catalogue() -> Value {
                 }
             },
             {
+                "name": "docker.recent_operations",
+                "description": "Read the last 64 Hopper mutations for the selected engine, including failures and interrupted operations. This does not replay operations.",
+                "inputSchema": { "type": "object", "properties": {} }
+            },
+            {
                 "name": "docker.system_info",
                 "description": "Engine version, resource counts, and disk usage.",
                 "inputSchema": { "type": "object", "properties": {} }
@@ -94,6 +99,10 @@ pub async fn call(host: &Arc<Host>, name: &str, args: &Value) -> Value {
     };
 
     match name {
+        "docker.recent_operations" => match host.recent_operations().await {
+            Ok(records) => text_result(serde_json::to_string_pretty(&records).unwrap_or_default()),
+            Err(error) => error_result(error.message),
+        },
         "docker.list_containers" => {
             let all = args.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
             match host.containers(all).await {

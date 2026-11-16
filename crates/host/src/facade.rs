@@ -35,20 +35,33 @@ pub struct Host {
     /// Event watching must not begin against the client's construction-time
     /// endpoint while the initial provider selection is still in flight.
     selected: tokio::sync::watch::Sender<bool>,
+    selection_events: tokio::sync::watch::Sender<u64>,
     /// Cached Engine API version for the active provider. Connectivity is
     /// probed frequently; version negotiation is only needed once per engine
     /// selection, not on every status tick.
     engine_version: RwLock<Option<String>>,
     settings: RwLock<Settings>,
     workspaces: RwLock<Vec<Workspace>>,
+    persistence: std::sync::Mutex<()>,
+    directory: std::path::PathBuf,
+    pub(crate) inventory: Arc<crate::inventory::Inventory>,
+    admitted: bool,
+    idle: Arc<crate::idle::Idle>,
 }
 
 impl Host {
     pub fn new(client: Client) -> Arc<Self> {
-        let mut settings = store::load_settings();
+        Self::with_directory(client, store::paths::root())
+    }
+
+    /// Explicit state root for isolated callers and verification.
+    pub fn with_directory(client: Client, directory: std::path::PathBuf) -> Arc<Self> {
+        let mut settings: Settings = store::json::read_or_default(&directory.join("settings.json"));
         // Older or hand-edited settings must not create an invalid VM on the
         // first start after an upgrade.
-        settings.resources = settings.resources.bounded();
+        settings.resources = settings
+            .resources
+            .bounded_to(::engine::vm::resources::capacity());
         Arc::new(Self {
             engines: crate::engine::Engines::new(client.clone()),
             client,
@@ -58,9 +71,17 @@ impl Host {
             selection: tokio::sync::Mutex::new(()),
             selection_generation: AtomicU64::new(0),
             selected: tokio::sync::watch::channel(false).0,
+            selection_events: tokio::sync::watch::channel(0).0,
             engine_version: RwLock::new(None),
             settings: RwLock::new(settings),
-            workspaces: RwLock::new(store::load_workspaces()),
+            workspaces: RwLock::new(store::json::read_or_default(
+                &directory.join("workspaces.json"),
+            )),
+            directory,
+            inventory: Arc::new(crate::inventory::Inventory::default()),
+            admitted: false,
+            idle: Arc::new(crate::idle::Idle::default()),
+            persistence: std::sync::Mutex::new(()),
         })
     }
 
@@ -69,20 +90,105 @@ impl Host {
     }
 
     pub fn client(&self) -> Client {
-        self.client.clone()
+        self.client.snapshot()
     }
 
     /// Point the whole app at a different daemon.
-    pub fn set_endpoint(&self, ep: docker::Endpoint, provider: &str, managed: bool) {
+    pub async fn set_endpoint(&self, ep: docker::Endpoint, provider: &str, managed: bool) {
+        let _selection = self.selection.lock().await;
         self.client.set_endpoint(ep);
         *self.provider.write().unwrap() = provider.to_string();
         *self.managed.write().unwrap() = managed;
         *self.engine_version.write().unwrap() = None;
+        *self.runtime.write().unwrap() = RuntimeKind::EngineApi;
+        self.idle.reset();
+        self.inventory.invalidate();
+        let generation = self.selection_generation.fetch_add(1, Ordering::AcqRel) + 1;
+        self.selection_events.send_replace(generation);
+        self.selected.send_replace(true);
     }
 
     /// The client that answers for the active engine.
     pub(crate) fn backend(&self) -> Backend {
         Backend::resolve(*self.runtime.read().unwrap())
+    }
+
+    /// Capture backend and connection together while selection is stable.
+    /// Requests then run without blocking engine selection and cannot be
+    /// redirected by a change to the application's shared client.
+    pub(crate) async fn session(&self) -> (Backend, Client) {
+        let _selection = self.selection.lock().await;
+        (self.backend(), self.client.snapshot())
+    }
+
+    async fn inventory_session(&self) -> (Backend, Client, String) {
+        let _selection = self.selection.lock().await;
+        (
+            self.backend(),
+            self.client.snapshot(),
+            format!(
+                "{}:{}",
+                self.selection_generation(),
+                self.inventory.revision()
+            ),
+        )
+    }
+
+    /// Pin a multi-step operation, including nested facade calls. Settings and
+    /// workspace scope are captured once alongside the engine session.
+    pub(crate) async fn operation(&self) -> Self {
+        let _selection = self.selection.lock().await;
+        Self {
+            client: self.client.snapshot(),
+            engines: self.engines.clone(),
+            provider: RwLock::new(self.provider.read().unwrap().clone()),
+            managed: RwLock::new(*self.managed.read().unwrap()),
+            runtime: RwLock::new(self.runtime_kind()),
+            selection: tokio::sync::Mutex::new(()),
+            selection_generation: AtomicU64::new(self.selection_generation()),
+            selected: tokio::sync::watch::channel(true).0,
+            selection_events: tokio::sync::watch::channel(self.selection_generation()).0,
+            engine_version: RwLock::new(self.engine_version.read().unwrap().clone()),
+            settings: RwLock::new(self.settings()),
+            workspaces: RwLock::new(self.workspaces()),
+            directory: self.directory.clone(),
+            inventory: Arc::clone(&self.inventory),
+            admitted: self.admitted,
+            idle: Arc::clone(&self.idle),
+            persistence: std::sync::Mutex::new(()),
+        }
+    }
+
+    fn engine_key(&self) -> String {
+        format!(
+            "{:?}:{}",
+            self.runtime_kind(),
+            self.client.endpoint().describe()
+        )
+    }
+
+    pub async fn recent_operations(&self) -> docker::Result<Vec<OperationRecord>> {
+        let operation = self.operation().await;
+        crate::operations::recent(&operation.directory, &operation.engine_key())
+    }
+
+    pub(crate) async fn admit(
+        &self,
+        action: &str,
+    ) -> docker::Result<(Self, Option<crate::operations::Guard>)> {
+        let mut operation = self.operation().await;
+        self.idle.reset();
+        let guard = if self.admitted {
+            None
+        } else {
+            Some(crate::operations::begin(
+                &operation.directory,
+                &operation.engine_key(),
+                action,
+            )?)
+        };
+        operation.admitted = true;
+        Ok((operation, guard))
     }
 
     /// What the active engine can do, so the UI can hide what it cannot.
@@ -103,20 +209,58 @@ impl Host {
     /// Choose an engine and point the client at it.
     pub async fn select_engine(&self) -> EngineStatus {
         let _selection = self.selection.lock().await;
+        let before = (
+            self.provider.read().unwrap().clone(),
+            self.client.endpoint(),
+            self.runtime_kind(),
+        );
         let preference = self.settings().engine_preference;
-        let status = self.engines.select(preference.as_deref()).await;
+        let mut status = self.engines.select(preference.as_deref()).await;
         *self.provider.write().unwrap() = status.provider.clone();
         *self.managed.write().unwrap() = status.managed;
         *self.runtime.write().unwrap() = self.engines.registry().active_runtime();
         *self.engine_version.write().unwrap() = None;
-        self.selection_generation.fetch_add(1, Ordering::Relaxed);
+        if status.connected && self.runtime_kind() == RuntimeKind::EngineApi {
+            // Initial list requests must use the negotiated API too, rather
+            // than waiting for the next status poll to discover an old daemon.
+            let negotiated = async {
+                self.client.negotiate().await?;
+                system::version(&self.client).await
+            }
+            .await;
+            match negotiated {
+                Ok(version) => *self.engine_version.write().unwrap() = Some(version.version),
+                Err(error) => {
+                    status = crate::status::classify(
+                        &error,
+                        &status.provider,
+                        status.managed,
+                        &self.client.endpoint().describe(),
+                    )
+                }
+            }
+        }
+        let after = (
+            status.provider.clone(),
+            self.client.endpoint(),
+            self.runtime_kind(),
+        );
+        if before != after || !self.selection_ready() {
+            self.inventory.invalidate();
+            let generation = self.selection_generation.fetch_add(1, Ordering::AcqRel) + 1;
+            self.selection_events.send_replace(generation);
+        }
         self.selected.send_replace(true);
         status
     }
 
     /// Generation of the currently selected provider, for long-lived work.
     pub fn selection_generation(&self) -> u64 {
-        self.selection_generation.load(Ordering::Relaxed)
+        self.selection_generation.load(Ordering::Acquire)
+    }
+
+    pub fn selection_changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.selection_events.subscribe()
     }
 
     /// Wait until the app's initial provider selection has completed.
@@ -165,17 +309,97 @@ impl Host {
     }
 
     pub async fn start_engine(&self) -> anyhow::Result<()> {
-        // Starting a managed runtime can take seconds. Keep the provider
-        // selection stable for the whole operation so a Settings switch
-        // cannot redirect it halfway through.
+        // Pin the provider without holding selection through a long boot.
+        // Stop, including the quit hook, must be able to cancel that boot.
+        let (provider, settings, guard) = {
+            let _selection = self.selection.lock().await;
+            (
+                self.engines
+                    .registry()
+                    .active()
+                    .ok_or_else(|| anyhow::anyhow!("No engine is selected."))?,
+                self.settings(),
+                crate::operations::begin(&self.directory, &self.engine_key(), "engine_start")?,
+            )
+        };
+        let result = provider.start_configured(&settings).await;
+        guard.finish(result.is_ok());
+        self.inventory.invalidate();
+        result
+    }
+
+    pub fn engine_capacity(&self) -> EngineCapacity {
+        ::engine::vm::resources::capacity()
+    }
+
+    pub fn daemon_document(&self) -> Result<String, String> {
+        let document =
+            ::engine::vm::daemon::document(&self.settings().daemon).map_err(|e| e.to_string())?;
+        serde_json::to_string_pretty(&document).map_err(|e| e.to_string())
+    }
+
+    pub async fn engine_stats(&self) -> Option<EngineStats> {
         let _selection = self.selection.lock().await;
-        let resources = self.settings().resources.bounded();
-        self.engines.start(resources).await
+        self.engines.registry().active()?.stats().await
+    }
+
+    pub async fn reclaim_engine(&self) -> ReclaimResult {
+        let (provider, guard) = {
+            let _selection = self.selection.lock().await;
+            let Some(provider) = self.engines.registry().active() else {
+                return ReclaimResult {
+                    ok: false,
+                    detail: "No engine is selected.".into(),
+                };
+            };
+            let guard = match crate::operations::begin(
+                &self.directory,
+                &self.engine_key(),
+                "engine_reclaim",
+            ) {
+                Ok(guard) => guard,
+                Err(error) => {
+                    return ReclaimResult {
+                        ok: false,
+                        detail: error.message,
+                    }
+                }
+            };
+            (provider, guard)
+        };
+        let result = provider.reclaim().await;
+        guard.finish(result.ok);
+        result
     }
 
     pub async fn stop_engine(&self) -> anyhow::Result<()> {
-        let _selection = self.selection.lock().await;
-        self.engines.stop().await
+        let (provider, guard) = {
+            let _selection = self.selection.lock().await;
+            let provider = self
+                .engines
+                .registry()
+                .active()
+                .ok_or_else(|| anyhow::anyhow!("No engine is selected."))?;
+            // Stop is also cancellation for this process's active startup.
+            // That startup owns admission and records its cancelled outcome.
+            let guard = if provider.starting() {
+                None
+            } else {
+                Some(crate::operations::begin(
+                    &self.directory,
+                    &self.engine_key(),
+                    "engine_stop",
+                )?)
+            };
+            (provider, guard)
+        };
+        let result = provider.stop().await;
+        if let Some(guard) = guard {
+            guard.finish(result.is_ok());
+        }
+        self.idle.reset();
+        self.inventory.invalidate();
+        result
     }
 
     /// Install Hopper's Docker CLI tools for the current user and point them
@@ -218,10 +442,69 @@ impl Host {
     /// re-running it is what keeps that offer current in both directions.
     pub async fn poll_engine(&self) -> EngineStatus {
         let status = self.engine_status().await;
+        if status.connected && self.suspend_empty_vm().await {
+            return self.engine_status().await;
+        }
         if status.connected || status.state == model::EngineState::Starting {
             return status;
         }
         self.select_engine().await
+    }
+
+    async fn suspend_empty_vm(&self) -> bool {
+        let _selection = self.selection.lock().await;
+        let settings = self.settings();
+        let Some(minutes) = settings
+            .idle_suspend_minutes
+            .filter(|_| self.engines.active_id() == "vm")
+        else {
+            self.idle.reset();
+            return false;
+        };
+        let client = self.client.snapshot();
+        client.set_timeout(Duration::from_secs(3));
+        // Even stopped containers prevent suspension. This deliberately avoids
+        // interrupting logs, terminals, paused workloads, or expected restarts.
+        if !matches!(containers::list(&client, true).await, Ok(list) if list.is_empty()) {
+            self.idle.reset();
+            return false;
+        }
+        if !self
+            .idle
+            .due(Duration::from_secs(u64::from(minutes.clamp(1, 1440)) * 60))
+        {
+            return false;
+        }
+        let Ok(guard) =
+            crate::operations::begin(&self.directory, &self.engine_key(), "idle_suspend")
+        else {
+            self.idle.reset();
+            return false;
+        };
+        let _pause = self.idle.pause();
+        if !self.idle.drained().await {
+            return false;
+        }
+        let Some(provider) = self.engines.registry().active() else {
+            return false;
+        };
+        if !provider.idle().await
+            || !matches!(containers::list(&client, true).await, Ok(list) if list.is_empty())
+        {
+            guard.finish(false);
+            return false;
+        }
+        // Check API clients once more after the final inventory connection
+        // closes. New external CLI requests during shutdown need a manual
+        // engine start; the UI describes that behavior when opting in.
+        if !provider.idle().await {
+            guard.finish(false);
+            return false;
+        }
+        let stopped = provider.stop().await.is_ok();
+        guard.finish(stopped);
+        self.inventory.invalidate();
+        stopped
     }
 
     /// Probe the engine and describe what we found.
@@ -239,9 +522,11 @@ impl Host {
         if self.runtime_kind() == RuntimeKind::Apple {
             return self.engines.status().await;
         }
-        if self.engines.active_id() == "vm" {
+        let vm_probed = self.engines.active_id() == "vm";
+        if vm_probed {
             let status = self.engines.status().await;
             if !status.connected {
+                *self.engine_version.write().unwrap() = None;
                 return status;
             }
         }
@@ -255,10 +540,13 @@ impl Host {
         // daemon must not consume the normal 30-second operation deadline or
         // leave a pile of probes behind. The selected client remains at its
         // normal timeout for user operations.
-        let probe = Client::new(endpoint);
-        probe.set_timeout(Duration::from_secs(3));
-        if let Err(e) = probe.ping().await {
-            return crate::status::classify(&e, &provider, managed, &described);
+        if !vm_probed {
+            let probe = Client::new(endpoint);
+            probe.set_timeout(Duration::from_secs(3));
+            if let Err(e) = probe.ping().await {
+                *self.engine_version.write().unwrap() = None;
+                return crate::status::classify(&e, &provider, managed, &described);
+            }
         }
         let cached_version = { self.engine_version.read().unwrap().clone() };
         let version = if let Some(version) = cached_version {
@@ -281,16 +569,18 @@ impl Host {
     }
 
     pub async fn version(&self) -> docker::Result<SystemVersion> {
-        match self.backend() {
+        let (_backend, client) = self.session().await;
+        match _backend {
             #[cfg(target_os = "macos")]
             Backend::Apple(cli) => apple::system::version(&cli).await,
-            Backend::EngineApi => system::version(&self.client).await,
+            Backend::EngineApi => system::version(&client).await,
         }
     }
 
     pub async fn info(&self) -> docker::Result<SystemInfo> {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
+        if let Backend::Apple(cli) = _backend {
             // Apple publishes no `info` equivalent, so the dashboard's totals
             // are counted from the lists it does publish.
             // Preserve failures: an engine that went away between the health
@@ -321,20 +611,41 @@ impl Host {
                 docker_root_dir: String::new(),
             });
         }
-        system::info(&self.client).await
+        system::info(&client).await
     }
 
     pub async fn disk_usage(&self) -> docker::Result<DiskUsage> {
-        match self.backend() {
+        let (_backend, client) = self.session().await;
+        match _backend {
             #[cfg(target_os = "macos")]
             Backend::Apple(cli) => apple::system::df(&cli).await,
-            Backend::EngineApi => system::df(&self.client).await,
+            Backend::EngineApi => system::df(&client).await,
         }
     }
 
     pub async fn prune_all(&self) -> Vec<PruneReport> {
+        let (operation, guard) = match self.admit("prune").await {
+            Ok(admission) => admission,
+            Err(error) => {
+                return vec![PruneReport {
+                    kind: "all".into(),
+                    error: Some(error.message),
+                    ..Default::default()
+                }]
+            }
+        };
+        let result = operation.prune_all_bound().await;
+        if let Some(guard) = guard {
+            guard.finish(result.iter().all(|report| report.error.is_none()));
+        }
+        result
+    }
+
+    async fn prune_all_bound(&self) -> Vec<PruneReport> {
+        let _changed = self.inventory.mutation();
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
+        if matches!(_backend, Backend::Apple(_)) {
             // No single prune command, so run the four and keep whichever
             // succeeded — one failing kind must not cost the others.
             let mut out = Vec::new();
@@ -356,18 +667,23 @@ impl Host {
             }
             return out;
         }
-        system::prune_all(&self.client).await
+        system::prune_all(&client).await
     }
 
     // containers
 
     /// List containers, scoped to the active workspace.
     pub async fn containers(&self, all: bool) -> docker::Result<Vec<Container>> {
-        let list = match self.backend() {
-            #[cfg(target_os = "macos")]
-            Backend::Apple(cli) => apple::containers::list(&cli, all).await?,
-            Backend::EngineApi => containers::list(&self.client, all).await?,
-        };
+        let (_backend, client, key) = self.inventory_session().await;
+        let list = self.inventory.containers[usize::from(all)]
+            .get(key, async {
+                Ok(match _backend {
+                    #[cfg(target_os = "macos")]
+                    Backend::Apple(cli) => apple::containers::list(&cli, all).await?,
+                    Backend::EngineApi => containers::list(&client, all).await?,
+                })
+            })
+            .await?;
         let ws = self.active_workspace();
         Ok(list
             .into_iter()
@@ -376,133 +692,43 @@ impl Host {
     }
 
     pub async fn container_inspect(&self, id: &str) -> docker::Result<InspectResult> {
-        match self.backend() {
+        let (_backend, client) = self.session().await;
+        match _backend {
             #[cfg(target_os = "macos")]
             Backend::Apple(cli) => apple::containers::inspect(&cli, id).await,
-            Backend::EngineApi => containers::inspect(&self.client, id).await,
-        }
-    }
-
-    pub async fn container_start(&self, id: &str) -> docker::Result<()> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            Backend::Apple(cli) => apple::containers::start(&cli, id).await,
-            Backend::EngineApi => containers::start(&self.client, id).await,
-        }
-    }
-
-    pub async fn container_stop(&self, id: &str) -> docker::Result<()> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            Backend::Apple(cli) => apple::containers::stop(&cli, id).await,
-            Backend::EngineApi => containers::stop(&self.client, id).await,
-        }
-    }
-
-    pub async fn container_restart(&self, id: &str) -> docker::Result<()> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            Backend::Apple(cli) => apple::containers::restart(&cli, id).await,
-            Backend::EngineApi => containers::restart(&self.client, id).await,
-        }
-    }
-
-    pub async fn container_pause(&self, id: &str) -> docker::Result<()> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            Backend::Apple(_) => refuse("pause a container"),
-            Backend::EngineApi => containers::pause(&self.client, id).await,
-        }
-    }
-
-    pub async fn container_unpause(&self, id: &str) -> docker::Result<()> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            Backend::Apple(_) => refuse("resume a paused container"),
-            Backend::EngineApi => containers::unpause(&self.client, id).await,
-        }
-    }
-
-    pub async fn container_kill(&self, id: &str) -> docker::Result<()> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            Backend::Apple(cli) => apple::containers::kill(&cli, id).await,
-            Backend::EngineApi => containers::kill(&self.client, id).await,
-        }
-    }
-
-    pub async fn container_rename(&self, id: &str, name: &str) -> docker::Result<()> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            // A container's name *is* its id under Apple's runtime, so there
-            // is nothing to rename it to.
-            Backend::Apple(_) => refuse("rename a container"),
-            Backend::EngineApi => containers::rename(&self.client, id, name).await,
-        }
-    }
-
-    pub async fn container_remove(
-        &self,
-        id: &str,
-        force: bool,
-        volumes: bool,
-    ) -> docker::Result<()> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            // Apple keeps anonymous volumes when a container goes; the
-            // volumes view is where they are reclaimed.
-            Backend::Apple(cli) => apple::containers::remove(&cli, id, force).await,
-            Backend::EngineApi => containers::remove(&self.client, id, force, volumes).await,
+            Backend::EngineApi => containers::inspect(&client, id).await,
         }
     }
 
     pub async fn container_top(&self, id: &str) -> docker::Result<ProcessList> {
-        match self.backend() {
+        let (_backend, client) = self.session().await;
+        match _backend {
             #[cfg(target_os = "macos")]
             Backend::Apple(_) => refuse("list the processes in a container"),
-            Backend::EngineApi => containers::top(&self.client, id).await,
+            Backend::EngineApi => containers::top(&client, id).await,
         }
-    }
-
-    pub async fn container_update(&self, id: &str, input: &UpdateInput) -> docker::Result<()> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            // Apple fixes a container's VM size at creation.
-            Backend::Apple(_) => refuse("change a container's resources after it is created"),
-            Backend::EngineApi => containers::update(&self.client, id, input).await,
-        }
-    }
-
-    pub async fn container_run(&self, input: &RunInput) -> docker::Result<String> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            // Anything Apple cannot honour is reported rather than dropped.
-            for note in apple::containers::unsupported(input) {
-                tracing::warn!("{note}");
-            }
-            return apple::containers::run(&cli, input).await;
-        }
-        containers::run(&self.client, input).await
     }
 
     // container filesystem (the Files tab)
 
     /// List a directory inside a container.
     pub async fn container_ls(&self, id: &str, dir: &str) -> docker::Result<Vec<FileEntry>> {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
+        if matches!(_backend, Backend::Apple(_)) {
             return refuse("browse a container's filesystem");
         }
-        archive::list_dir(&self.client, id, dir).await
+        archive::list_dir(&client, id, dir).await
     }
 
     /// Read a file's bytes out of a container.
     pub async fn container_read(&self, id: &str, path: &str) -> docker::Result<Vec<u8>> {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
+        if matches!(_backend, Backend::Apple(_)) {
             return refuse("browse a container's filesystem");
         }
-        archive::read_file(&self.client, id, path).await
+        archive::read_file(&client, id, path).await
     }
 
     /// Export a path from a container to a tar file on the host.
@@ -512,25 +738,12 @@ impl Host {
         path: &str,
         dest: &std::path::Path,
     ) -> docker::Result<()> {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
+        if matches!(_backend, Backend::Apple(_)) {
             return refuse("export a path from a container");
         }
-        archive::export_to(&self.client, id, path, dest).await
-    }
-
-    /// Write bytes to a path inside a container.
-    pub async fn container_write(
-        &self,
-        id: &str,
-        path: &str,
-        content: &[u8],
-    ) -> docker::Result<()> {
-        #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
-            return refuse("write into a container");
-        }
-        archive::write_file(&self.client, id, path, content).await
+        archive::export_to(&client, id, path, dest).await
     }
 
     // interactive exec (the Terminal tab)
@@ -546,25 +759,39 @@ impl Host {
     where
         F: FnMut(String) -> bool + Send + 'static,
     {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
+        if matches!(_backend, Backend::Apple(_)) {
             return refuse("open a shell in a container");
         }
-        exec::start(&self.client, id, shell, tty, on_output).await
-    }
-
-    pub async fn containers_prune(&self) -> docker::Result<PruneReport> {
-        match self.backend() {
-            #[cfg(target_os = "macos")]
-            Backend::Apple(cli) => apple::containers::prune(&cli).await,
-            Backend::EngineApi => containers::prune(&self.client).await,
-        }
+        exec::start(&client, id, shell, tty, on_output).await
     }
 
     /// Apply one action to many containers, reporting per-item failures rather
     /// than aborting the batch. Stopping twelve containers must not stop at
     /// the first one that is already down.
     pub async fn container_batch(
+        &self,
+        ids: &[String],
+        action: BatchAction,
+    ) -> Vec<(String, Option<String>)> {
+        let (operation, guard) = match self.admit("container_batch").await {
+            Ok(admission) => admission,
+            Err(error) => {
+                return ids
+                    .iter()
+                    .map(|id| (id.clone(), Some(error.message.clone())))
+                    .collect()
+            }
+        };
+        let result = operation.container_batch_bound(ids, action).await;
+        if let Some(guard) = guard {
+            guard.finish(result.iter().all(|(_, error)| error.is_none()));
+        }
+        result
+    }
+
+    async fn container_batch_bound(
         &self,
         ids: &[String],
         action: BatchAction,
@@ -588,11 +815,16 @@ impl Host {
     // images
 
     pub async fn images(&self, all: bool) -> docker::Result<Vec<Image>> {
-        let list = match self.backend() {
-            #[cfg(target_os = "macos")]
-            Backend::Apple(cli) => apple::images::list(&cli).await?,
-            Backend::EngineApi => images::list(&self.client, all).await?,
-        };
+        let (_backend, client, key) = self.inventory_session().await;
+        let list = self.inventory.images[usize::from(all)]
+            .get(key, async {
+                Ok(match _backend {
+                    #[cfg(target_os = "macos")]
+                    Backend::Apple(cli) => apple::images::list(&cli).await?,
+                    Backend::EngineApi => images::list(&client, all).await?,
+                })
+            })
+            .await?;
         let ws = self.active_workspace();
         Ok(list
             .into_iter()
@@ -601,58 +833,32 @@ impl Host {
     }
 
     pub async fn image_inspect(&self, id: &str) -> docker::Result<InspectResult> {
-        match self.backend() {
+        let (_backend, client) = self.session().await;
+        match _backend {
             #[cfg(target_os = "macos")]
             Backend::Apple(cli) => apple::images::inspect(&cli, id).await,
-            Backend::EngineApi => images::inspect(&self.client, id).await,
+            Backend::EngineApi => images::inspect(&client, id).await,
         }
     }
 
     pub async fn image_history(&self, id: &str) -> docker::Result<Vec<ImageHistoryEntry>> {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
+        if matches!(_backend, Backend::Apple(_)) {
             return refuse("show an image's layer history");
         }
-        images::history(&self.client, id).await
-    }
-
-    pub async fn image_remove(&self, id: &str, force: bool) -> docker::Result<()> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::images::remove(&cli, id).await;
-        }
-        images::remove(&self.client, id, force).await
-    }
-
-    pub async fn image_tag(&self, id: &str, repo: &str, tag: &str) -> docker::Result<()> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            let target = if tag.is_empty() {
-                repo.to_string()
-            } else {
-                format!("{repo}:{tag}")
-            };
-            return apple::images::tag(&cli, id, &target).await;
-        }
-        images::tag(&self.client, id, repo, tag).await
-    }
-
-    pub async fn images_prune(&self, all: bool) -> docker::Result<PruneReport> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::images::prune(&cli, all).await;
-        }
-        images::prune(&self.client, all).await
+        images::history(&client, id).await
     }
 
     pub async fn image_search(&self, term: &str) -> docker::Result<Vec<ImageSearchResult>> {
+        let (_backend, client) = self.session().await;
         // Apple has no daemon-side search. The Registry view reaches Docker Hub
         // and GitHub over HTTP instead, which works on every backend.
         #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
+        if matches!(_backend, Backend::Apple(_)) {
             return refuse("search a registry from the daemon");
         }
-        images::search(&self.client, term).await
+        images::search(&client, term).await
     }
 
     /// Search a public registry (Docker Hub, GitHub) for images to pull. Talks
@@ -668,111 +874,49 @@ impl Host {
     // volumes / networks
 
     pub async fn volumes(&self) -> docker::Result<Vec<Volume>> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::volumes::list(&cli).await;
-        }
-        volumes::list(&self.client).await
+        let (_backend, client, key) = self.inventory_session().await;
+        self.inventory
+            .volumes
+            .get(key, async {
+                #[cfg(target_os = "macos")]
+                if let Backend::Apple(cli) = _backend {
+                    return apple::volumes::list(&cli).await;
+                }
+                volumes::list(&client).await
+            })
+            .await
     }
 
     pub async fn volume_inspect(&self, name: &str) -> docker::Result<InspectResult> {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
+        if let Backend::Apple(cli) = _backend {
             return apple::volumes::inspect(&cli, name).await;
         }
-        volumes::inspect(&self.client, name).await
-    }
-
-    pub async fn volume_create(&self, name: &str) -> docker::Result<Volume> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::volumes::create(&cli, name).await;
-        }
-        volumes::create(&self.client, name, None, &Default::default()).await
-    }
-
-    pub async fn volume_remove(&self, name: &str, force: bool) -> docker::Result<()> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::volumes::remove(&cli, name).await;
-        }
-        volumes::remove(&self.client, name, force).await
-    }
-
-    pub async fn volumes_prune(&self) -> docker::Result<PruneReport> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::volumes::prune(&cli).await;
-        }
-        volumes::prune(&self.client).await
+        volumes::inspect(&client, name).await
     }
 
     pub async fn networks(&self) -> docker::Result<Vec<Network>> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::networks::list(&cli).await;
-        }
-        networks::list(&self.client).await
+        let (_backend, client, key) = self.inventory_session().await;
+        self.inventory
+            .networks
+            .get(key, async {
+                #[cfg(target_os = "macos")]
+                if let Backend::Apple(cli) = _backend {
+                    return apple::networks::list(&cli).await;
+                }
+                networks::list(&client).await
+            })
+            .await
     }
 
     pub async fn network_inspect(&self, id: &str) -> docker::Result<InspectResult> {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
+        if let Backend::Apple(cli) = _backend {
             return apple::networks::inspect(&cli, id).await;
         }
-        networks::inspect(&self.client, id).await
-    }
-
-    pub async fn network_create(&self, input: &NetworkCreateInput) -> docker::Result<String> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::networks::create(&cli, input).await;
-        }
-        networks::create(&self.client, input).await
-    }
-
-    /// Remove a network, refusing Docker's built-ins with a clear reason.
-    pub async fn network_remove(&self, id: &str) -> docker::Result<()> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::networks::remove(&cli, id).await;
-        }
-        if let Ok(list) = networks::list(&self.client).await {
-            if let Some(net) = list.iter().find(|n| n.id == id || n.name == id) {
-                networks::ensure_removable(net)?;
-            }
-        }
-        networks::remove(&self.client, id).await
-    }
-
-    pub async fn network_connect(&self, id: &str, container: &str) -> docker::Result<()> {
-        // Apple attaches a container to its networks when it is created.
-        #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
-            return refuse("attach a running container to a network");
-        }
-        networks::connect(&self.client, id, container).await
-    }
-
-    pub async fn network_disconnect(
-        &self,
-        id: &str,
-        container: &str,
-        force: bool,
-    ) -> docker::Result<()> {
-        #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
-            return refuse("detach a running container from a network");
-        }
-        networks::disconnect(&self.client, id, container, force).await
-    }
-
-    pub async fn networks_prune(&self) -> docker::Result<PruneReport> {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            return apple::networks::prune(&cli).await;
-        }
-        networks::prune(&self.client).await
+        networks::inspect(&client, id).await
     }
 
     // streaming
@@ -787,8 +931,9 @@ impl Host {
     where
         F: FnMut(LogLine) -> bool,
     {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
+        if let Backend::Apple(cli) = _backend {
             return apple::containers::stream_logs(
                 &cli,
                 request_id,
@@ -799,73 +944,62 @@ impl Host {
             )
             .await;
         }
-        logs::stream(&self.client, request_id, id, opts, on_line).await
+        logs::stream(&client, request_id, id, opts, on_line).await
     }
 
     pub async fn stream_stats<F>(&self, id: &str, on_sample: F) -> docker::Result<()>
     where
         F: FnMut(ContainerStats) -> bool,
     {
+        let (_backend, client) = self.session().await;
         #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
+        if matches!(_backend, Backend::Apple(_)) {
             return refuse("stream live resource stats");
         }
-        stats::stream(&self.client, id, on_sample).await
+        stats::stream(&client, id, on_sample).await
     }
 
     pub async fn stream_events<F>(&self, on_event: F) -> docker::Result<()>
     where
         F: FnMut(DockerEvent) -> bool,
     {
+        self.stream_events_since(None, on_event).await
+    }
+
+    pub async fn stream_events_since<F>(
+        &self,
+        since: Option<i64>,
+        mut on_event: F,
+    ) -> docker::Result<()>
+    where
+        F: FnMut(DockerEvent) -> bool,
+    {
+        let mut paused = self.idle.events.subscribe();
+        while *paused.borrow_and_update() {
+            if paused.changed().await.is_err() {
+                return Ok(());
+            }
+        }
+        let _event = self.idle.event();
+        let mut changes = self.selection_changes();
+        let (_backend, client) = tokio::select! {
+            session = self.session() => session,
+            _ = paused.changed() => return Ok(()),
+        };
         // Apple publishes no event stream; the UI polls instead. Refusing
         // keeps this from tailing a *different* daemon's events.
         #[cfg(target_os = "macos")]
-        if matches!(self.backend(), Backend::Apple(_)) {
+        if matches!(_backend, Backend::Apple(_)) {
             return refuse("follow the engine's event stream");
         }
-        system::stream_events(&self.client, on_event).await
-    }
-
-    pub async fn pull<F>(
-        &self,
-        request_id: &str,
-        reference: &str,
-        on: F,
-    ) -> docker::Result<images::Transfer>
-    where
-        F: FnMut(PullProgress),
-    {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            // Apple's CLI reports progress only as terminal control codes, so
-            // the transfer is reported as one step rather than faked.
-            apple::images::pull(&cli, reference).await?;
-            return Ok(images::Transfer {
-                ok: true,
-                error: None,
-            });
+        tokio::select! {
+            result = system::stream_events_since(&client, since, |event| {
+                self.inventory.invalidate();
+                on_event(event)
+            }) => { self.inventory.invalidate(); result },
+            _ = changes.changed() => Ok(()),
+            _ = paused.changed() => Ok(()),
         }
-        images::pull(&self.client, request_id, reference, on).await
-    }
-
-    pub async fn push<F>(
-        &self,
-        request_id: &str,
-        reference: &str,
-        on: F,
-    ) -> docker::Result<images::Transfer>
-    where
-        F: FnMut(PushProgress),
-    {
-        #[cfg(target_os = "macos")]
-        if let Backend::Apple(cli) = self.backend() {
-            apple::images::push(&cli, reference).await?;
-            return Ok(images::Transfer {
-                ok: true,
-                error: None,
-            });
-        }
-        images::push(&self.client, request_id, reference, on).await
     }
 
     // compose
@@ -924,18 +1058,73 @@ impl Host {
 
     // settings / workspaces
 
+    pub fn reload_preferences(&self) {
+        let _persistence = self.persistence.lock().unwrap();
+        let mut settings: Settings =
+            store::json::read_or_default(&self.directory.join("settings.json"));
+        settings.resources = settings.resources.bounded_to(self.engine_capacity());
+        *self.settings.write().unwrap() = settings;
+        *self.workspaces.write().unwrap() =
+            store::json::read_or_default(&self.directory.join("workspaces.json"));
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(crate) fn state_directory(&self) -> &std::path::Path {
+        &self.directory
+    }
+
     pub fn settings(&self) -> Settings {
         self.settings.read().unwrap().clone()
+    }
+
+    fn merge_settings(&self, base: &Settings, next: &Settings) -> std::io::Result<Settings> {
+        std::fs::create_dir_all(&self.directory)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&self.directory, std::fs::Permissions::from_mode(0o700))?;
+        }
+        store::transaction::update(&self.directory.join("settings.json"), |current| {
+            let mut merged: Settings = store::transaction::merge(base, next, current)?;
+            merged.resources = merged.resources.bounded_to(self.engine_capacity());
+            let expanded = merged
+                .shares
+                .iter()
+                .any(|grant| !base.shares.contains(grant))
+                || merged
+                    .shared_paths
+                    .iter()
+                    .any(|path| !base.shared_paths.contains(path));
+            if expanded {
+                ::engine::vm::config::shares(&merged).map_err(std::io::Error::other)?;
+            }
+            ::engine::vm::daemon::document(&merged.daemon).map_err(std::io::Error::other)?;
+            Ok(merged)
+        })
     }
 
     pub fn save_settings(&self, next: Settings) -> std::io::Result<()> {
         // Keep the persistence boundary safe as well as startup and engine
         // launch. A future settings editor, imported document, or MCP caller
         // must not be able to write an unexpectedly large managed VM.
+        let _persistence = self.persistence.lock().unwrap();
+        let base = self.settings();
         let mut next = next;
-        next.resources = next.resources.bounded();
-        store::save_settings(&next)?;
-        *self.settings.write().unwrap() = next;
+        next.resources = next.resources.bounded_to(self.engine_capacity());
+        // Existing missing folders must not prevent revoking grants or
+        // changing unrelated preferences. New or expanded grants still need
+        // full validation; startup always validates every remaining grant.
+        let expanded = next.shares.iter().any(|grant| !base.shares.contains(grant))
+            || next
+                .shared_paths
+                .iter()
+                .any(|path| !base.shared_paths.contains(path));
+        if expanded {
+            ::engine::vm::config::shares(&next).map_err(std::io::Error::other)?;
+        }
+        ::engine::vm::daemon::document(&next.daemon).map_err(std::io::Error::other)?;
+        let merged = self.merge_settings(&base, &next)?;
+        *self.settings.write().unwrap() = merged;
         Ok(())
     }
 
@@ -956,32 +1145,55 @@ impl Host {
     pub fn set_active_workspace(&self, id: Option<String>) -> std::io::Result<()> {
         let mut settings = self.settings();
         settings.active_workspace = id;
-        store::save_settings(&settings)?;
-        *self.settings.write().unwrap() = settings;
-        Ok(())
+        self.save_settings(settings)
     }
 
     pub fn save_workspace(&self, ws: Workspace) -> std::io::Result<()> {
-        let all = self.workspaces();
-        let next = store::upsert_workspace(all, ws);
-        store::save_workspaces(&next)?;
+        let _persistence = self.persistence.lock().unwrap();
+        let base = self.workspaces();
+        let next = store::transaction::update(
+            &self.directory.join("workspaces.json"),
+            |all: Vec<Workspace>| {
+                let expected = base.iter().find(|item| item.id == ws.id);
+                let current = all.iter().find(|item| item.id == ws.id);
+                if current != expected && current != Some(&ws) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        "This workspace changed in another process. Reload before saving.",
+                    ));
+                }
+                Ok(store::upsert_workspace(all, ws))
+            },
+        )?;
         *self.workspaces.write().unwrap() = next;
         Ok(())
     }
 
     pub fn delete_workspace(&self, id: &str) -> std::io::Result<()> {
-        let all = self.workspaces();
-        let next = store::remove_workspace(all, id);
-        // Clear the selection first. If the workspace write later fails, the
-        // workspace still exists but the settings never point at a record that
-        // was successfully removed.
-        if self.settings.read().unwrap().active_workspace.as_deref() == Some(id) {
-            let mut settings = self.settings();
-            settings.active_workspace = None;
-            store::save_settings(&settings)?;
-            *self.settings.write().unwrap() = settings;
+        let _persistence = self.persistence.lock().unwrap();
+        // Clear selection before removing a record. A failure then leaves a
+        // valid unselected workspace, never a dangling reference.
+        let base = self.settings();
+        if base.active_workspace.as_deref() == Some(id) {
+            let mut next = base.clone();
+            next.active_workspace = None;
+            *self.settings.write().unwrap() = self.merge_settings(&base, &next)?;
         }
-        store::save_workspaces(&next)?;
+        let expected = self.workspaces();
+        let next = store::transaction::update(
+            &self.directory.join("workspaces.json"),
+            |all: Vec<Workspace>| {
+                if all.iter().find(|item| item.id == id)
+                    != expected.iter().find(|item| item.id == id)
+                {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        "This workspace changed in another process. Reload before removing it.",
+                    ));
+                }
+                Ok(store::remove_workspace(all, id))
+            },
+        )?;
         *self.workspaces.write().unwrap() = next;
         Ok(())
     }
@@ -1003,9 +1215,201 @@ mod tests {
     use super::*;
 
     fn host() -> Arc<Host> {
-        Host::new(Client::new(docker::Endpoint::Unix {
+        Host::with_directory(
+            Client::new(docker::Endpoint::Unix {
+                path: "/nonexistent.sock".into(),
+            }),
+            tempfile::tempdir().unwrap().keep(),
+        )
+    }
+
+    #[tokio::test]
+    #[ignore = "requires HOPPER_TEST_LIFECYCLE=1 and an isolated Hopper VM"]
+    async fn startup_admission_allows_stop_to_cancel_its_owner() -> anyhow::Result<()> {
+        anyhow::ensure!(
+            std::env::var("HOPPER_TEST_LIFECYCLE").as_deref() == Ok("1"),
+            "set HOPPER_TEST_LIFECYCLE=1 for an isolated test VM"
+        );
+        anyhow::ensure!(
+            std::env::var("HOPPER_DIR").is_ok_and(|root| !root.trim().is_empty()),
+            "set HOPPER_DIR to an isolated state directory"
+        );
+        let host = Host::from_env();
+        let status = host.select_engine().await;
+        anyhow::ensure!(
+            status.provider == "vm",
+            "test must select Hopper's isolated VM"
+        );
+        if status.connected {
+            anyhow::ensure!(
+                host.containers(true).await?.is_empty(),
+                "test VM must be empty"
+            );
+        }
+        host.stop_engine().await?;
+        let starter = Arc::clone(&host);
+        let starting = tokio::spawn(async move { starter.start_engine().await });
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !host.engines.starting() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        let conflict = host.container_start("hopper-admission-check-missing").await;
+        anyhow::ensure!(
+            conflict.is_err_and(|error| error.is_conflict()),
+            "boot admission must exclude resource mutations"
+        );
+        tokio::time::timeout(Duration::from_secs(15), host.stop_engine()).await??;
+        anyhow::ensure!(
+            starting.await?.is_err(),
+            "cancelled startup must not report success"
+        );
+        anyhow::ensure!(!host.engines.starting(), "startup flag must clear");
+        host.stop_engine().await?;
+        let records = host.recent_operations().await?;
+        anyhow::ensure!(records.iter().any(
+            |record| record.action == "engine_start" && record.state == OperationState::Failed
+        ));
+        anyhow::ensure!(records
+            .last()
+            .is_some_and(|record| record.action == "engine_stop"
+                && record.state == OperationState::Succeeded));
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires HOPPER_DIR pointing at an isolated, running, empty Hopper VM"]
+    async fn idle_suspension_drains_own_events_and_respects_external_clients() -> anyhow::Result<()>
+    {
+        anyhow::ensure!(
+            std::env::var("HOPPER_TEST_IDLE").as_deref() == Ok("1"),
+            "set HOPPER_TEST_IDLE=1 for an isolated test VM"
+        );
+        anyhow::ensure!(
+            std::env::var("HOPPER_DIR").is_ok_and(|root| !root.trim().is_empty()),
+            "set HOPPER_DIR to an isolated state directory"
+        );
+        let host = Host::from_env();
+        let status = host.select_engine().await;
+        anyhow::ensure!(
+            status.provider == "vm" && status.connected,
+            "test VM must already be running"
+        );
+        anyhow::ensure!(
+            host.containers(true).await?.is_empty(),
+            "test VM must be empty"
+        );
+        let mut settings = host.settings();
+        settings.idle_suspend_minutes = Some(1);
+        host.save_settings(settings)?;
+        let external = host
+            .client()
+            .send(docker::client::Req::get("/events").no_timeout())
+            .await?;
+        host.idle.expire();
+        anyhow::ensure!(
+            !host.suspend_empty_vm().await,
+            "external clients must prevent suspension"
+        );
+        drop(external);
+        let watcher = Arc::clone(&host);
+        let events = tokio::spawn(async move { watcher.stream_events(|_| true).await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while host.idle.active_events.load(Ordering::Acquire) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await?;
+        host.idle.expire();
+        let stopped = host.suspend_empty_vm().await;
+        events.abort();
+        let _ = events.await;
+        anyhow::ensure!(
+            stopped,
+            "empty VM should stop after draining Hopper's own event connection"
+        );
+        anyhow::ensure!(
+            !host.engine_status().await.connected,
+            "VM must actually be stopped"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn separate_hosts_merge_disjoint_preferences_and_reject_conflicting_edits() {
+        let directory = tempfile::tempdir().unwrap();
+        let client = Client::new(docker::Endpoint::Unix {
             path: "/nonexistent.sock".into(),
-        }))
+        });
+        let first = Host::with_directory(client.clone(), directory.path().into());
+        let second = Host::with_directory(client, directory.path().into());
+        let mut settings = first.settings();
+        settings.theme = ThemeMode::Dark;
+        first.save_settings(settings).unwrap();
+        let mut settings = second.settings();
+        settings.autostart_engine = false;
+        second.save_settings(settings).unwrap();
+        assert_eq!(second.settings().theme, ThemeMode::Dark);
+        assert!(!second.settings().autostart_engine);
+        let mut settings = second.settings();
+        settings.theme = ThemeMode::Light;
+        second.save_settings(settings).unwrap();
+        let mut settings = first.settings();
+        settings.theme = ThemeMode::System;
+        assert_eq!(
+            first.save_settings(settings).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        first.reload_preferences();
+        assert_eq!(first.settings(), second.settings());
+        first
+            .save_workspace(Workspace {
+                id: "shared".into(),
+                name: "first".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        second.reload_preferences();
+        first
+            .save_workspace(Workspace {
+                id: "shared".into(),
+                name: "changed".into(),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(second
+            .save_workspace(Workspace {
+                id: "shared".into(),
+                name: "stale".into(),
+                ..Default::default()
+            })
+            .is_err());
+        assert!(second.delete_workspace("shared").is_err());
+    }
+
+    #[test]
+    fn merged_legacy_and_explicit_grants_are_validated_together() {
+        let directory = tempfile::tempdir().unwrap();
+        let grant = tempfile::tempdir().unwrap();
+        let client = Client::new(docker::Endpoint::Unix {
+            path: "/nonexistent.sock".into(),
+        });
+        let first = Host::with_directory(client.clone(), directory.path().into());
+        let second = Host::with_directory(client, directory.path().into());
+        let path = grant.path().to_string_lossy().to_string();
+        let mut settings = first.settings();
+        settings.shared_paths.push(path.clone());
+        first.save_settings(settings).unwrap();
+        let mut settings = second.settings();
+        settings.shares.push(SharedPath {
+            path,
+            writable: true,
+        });
+        assert!(second.save_settings(settings).is_err());
+        second.reload_preferences();
+        assert_eq!(second.settings().shared_paths.len(), 1);
+        assert!(second.settings().shares.is_empty());
     }
 
     #[test]
@@ -1055,11 +1459,14 @@ mod tests {
         h.save_settings(settings).unwrap();
         assert_eq!(
             h.settings().resources,
-            EngineResources::bounded(EngineResources {
-                cpus: u32::MAX,
-                memory_gib: u32::MAX,
-                disk_gib: u32::MAX,
-            })
+            EngineResources::bounded_to(
+                EngineResources {
+                    cpus: u32::MAX,
+                    memory_gib: u32::MAX,
+                    disk_gib: u32::MAX,
+                },
+                h.engine_capacity()
+            )
         );
     }
 

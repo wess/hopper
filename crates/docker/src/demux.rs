@@ -14,7 +14,7 @@
 //!
 //! Both are pure state machines, so they test without a daemon.
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes, BytesMut};
 use model::StreamKind;
 
 /// Longest UTF-8 sequence; a carry can never exceed this.
@@ -25,7 +25,7 @@ const MAX_FRAME_PAYLOAD: usize = 64 * 1024 * 1024;
 /// Splits a byte stream into `(stream, payload)` frames.
 #[derive(Debug, Default)]
 pub struct Frames {
-    buf: Vec<u8>,
+    buf: BytesMut,
     /// `None` until the first 8 bytes let us decide. Once set it never flips —
     /// deciding per frame would misread raw TTY output that happens to begin
     /// with a byte sequence shaped like a header.
@@ -44,7 +44,7 @@ impl Frames {
     /// bytes.
     pub fn with_tty(tty: bool) -> Self {
         Self {
-            buf: Vec::new(),
+            buf: BytesMut::new(),
             framed: Some(!tty),
             dropped: false,
         }
@@ -80,7 +80,7 @@ impl Frames {
                 if self.buf.is_empty() {
                     break;
                 }
-                let payload = Bytes::from(std::mem::take(&mut self.buf));
+                let payload = std::mem::take(&mut self.buf).freeze();
                 out.push((StreamKind::Stdout, payload));
                 break;
             }
@@ -103,8 +103,10 @@ impl Frames {
             } else {
                 StreamKind::Stdout
             };
-            let payload = Bytes::copy_from_slice(&self.buf[8..8 + size]);
-            self.buf.drain(..8 + size);
+            // Advancing a byte buffer avoids moving the remaining packet for
+            // every small frame in a busy log stream.
+            self.buf.advance(8);
+            let payload = self.buf.split_to(size).freeze();
             // A zero-length frame is legal and carries nothing; don't emit it.
             if !payload.is_empty() {
                 out.push((stream, payload));
@@ -126,10 +128,7 @@ impl Frames {
             self.buf.clear();
             return None;
         }
-        Some((
-            StreamKind::Stdout,
-            Bytes::from(std::mem::take(&mut self.buf)),
-        ))
+        Some((StreamKind::Stdout, std::mem::take(&mut self.buf).freeze()))
     }
 }
 

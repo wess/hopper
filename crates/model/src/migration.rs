@@ -145,6 +145,19 @@ pub struct MigrationProgress {
     pub finished: bool,
 }
 
+/// Read-only checks shown before an import and repeated before the first write.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationReview {
+    pub notices: Vec<MigrationProgress>,
+}
+
+impl MigrationReview {
+    pub fn blocked(&self) -> bool {
+        self.notices.iter().any(|notice| notice.error.is_some())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

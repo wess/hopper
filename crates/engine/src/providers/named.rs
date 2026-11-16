@@ -80,6 +80,13 @@ impl Provider for Named {
         self.socket().is_some()
     }
 
+    async fn installed(&self) -> bool {
+        self.available().await
+            || crate::installations::current()
+                .iter()
+                .any(|installation| installation.provider == self.daemon.id)
+    }
+
     async fn endpoint(&self) -> Option<Endpoint> {
         if self.explicit_host.is_some() {
             return None;
@@ -121,10 +128,19 @@ impl Provider for Named {
             );
         }
         let Some(path) = self.socket() else {
+            let installed = self.installed().await;
             return EngineStatus::new(
-                EngineState::NotInstalled,
+                if installed {
+                    EngineState::Stopped
+                } else {
+                    EngineState::NotInstalled
+                },
                 self.daemon.id,
-                format!("{label} is not running, or is not installed on this machine."),
+                if installed {
+                    format!("{label} is installed and stopped. Start it in its own app, or use Hopper Engine.")
+                } else {
+                    format!("{label} was not detected.")
+                },
             );
         };
 
@@ -225,7 +241,11 @@ mod tests {
     async fn an_engine_that_is_not_installed_says_so_by_name() {
         // Colima's socket lives under a home directory this test does not have,
         // so this exercises the real "no socket" path.
-        let s = provider("colima", None).status().await;
+        let mut missing = provider("colima", None);
+        // A real Colima installation on the test host must not change this
+        // fixture's installation evidence.
+        missing.daemon.id = "hopper-test-not-installed";
+        let s = missing.status().await;
         assert_eq!(s.state, EngineState::NotInstalled);
         assert!(s.message.contains("Colima"), "{}", s.message);
         assert!(!s.message.is_empty());

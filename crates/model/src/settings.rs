@@ -70,6 +70,15 @@ impl DaemonConfig {
     }
 }
 
+/// An explicit host-directory grant. New grants are read-only by default.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedPath {
+    pub path: String,
+    #[serde(default)]
+    pub writable: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -89,12 +98,18 @@ pub struct Settings {
     /// `-v /opt/data:/data` behave the way every tutorial assumes.
     #[serde(default)]
     pub shared_paths: Vec<String>,
+    #[serde(default)]
+    pub shares: Vec<SharedPath>,
     /// Start the engine as soon as the app launches.
     #[serde(default = "default_true")]
     pub autostart_engine: bool,
     /// Keep the engine running after the window closes.
     #[serde(default = "default_true")]
     pub keep_engine_on_quit: bool,
+    /// Opt-in: stop only an entirely empty managed VM. There is no automatic
+    /// wake for external CLI clients. Disabled by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_suspend_minutes: Option<u32>,
     /// Reserved compatibility setting for a future opt-in socket bridge.
     /// The current app does not modify `/var/run/docker.sock`.
     #[serde(default)]
@@ -116,8 +131,10 @@ impl Default for Settings {
             resources: EngineResources::default(),
             daemon: DaemonConfig::default(),
             shared_paths: Vec::new(),
+            shares: Vec::new(),
             autostart_engine: true,
             keep_engine_on_quit: true,
+            idle_suspend_minutes: None,
             socket_compat: false,
             active_workspace: None,
         }

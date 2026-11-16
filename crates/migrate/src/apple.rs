@@ -190,7 +190,6 @@ pub async fn import_networks(
         };
         match apple::networks::create(cli, &input).await {
             Ok(_) => created += 1,
-            Err(e) if e.is_conflict() => created += 1,
             Err(e) => {
                 let mut p = step(MigrationPhase::Networks, &network.name, i, total, "Failed");
                 p.error = Some(e.message);
@@ -300,9 +299,8 @@ pub async fn import_containers(
             report(p);
         }
 
-        match apple::containers::run(cli, &input).await {
+        match apple::containers::create(cli, &input).await {
             Ok(_) => created += 1,
-            Err(e) if e.is_conflict() => created += 1,
             Err(e) => report(failed(
                 MigrationPhase::Containers,
                 &c.name,

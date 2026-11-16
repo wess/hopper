@@ -108,7 +108,21 @@ fn main() {
         cx.on_action::<ShowAll>(|_, cx| cx.unhide_other_apps());
         cx.on_action::<ShowDocs>(|_, cx| cx.open_url("https://github.com/wess/hopper"));
 
-        let bounds = Bounds::centered(None, size(px(1380.0), px(880.0)), cx);
+        // Reproducible native layout checks without changing release defaults.
+        let dimensions = cfg!(debug_assertions)
+            .then(|| std::env::var("HOPPER_WINDOW_SIZE").ok())
+            .flatten()
+            .and_then(|value| {
+                let (width, height) = value.split_once('x')?;
+                Some((width.parse::<u32>().ok()?, height.parse::<u32>().ok()?))
+            })
+            .filter(|(width, height)| (920..=3840).contains(width) && (560..=2160).contains(height))
+            .unwrap_or((1380, 880));
+        let bounds = Bounds::centered(
+            None,
+            size(px(dimensions.0 as f32), px(dimensions.1 as f32)),
+            cx,
+        );
         if let Err(error) = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(bounds)),

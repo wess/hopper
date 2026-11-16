@@ -7,12 +7,17 @@
 
 #[cfg(target_os = "macos")]
 pub mod appleinstall;
-pub mod engine;
 #[cfg(target_os = "macos")]
 pub mod dockercli;
+pub mod engine;
 pub mod facade;
+mod idle;
 pub mod import;
+mod inventory;
+mod mutations;
+mod operations;
 pub mod registry;
+pub mod replacement;
 pub mod runtime;
 pub mod stacks;
 pub mod status;

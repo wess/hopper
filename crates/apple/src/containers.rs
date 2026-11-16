@@ -93,6 +93,34 @@ pub async fn run(cli: &Cli, input: &RunInput) -> Result<String> {
         .ok_or_else(|| DockerError::decode("`container run` reported no id"))
 }
 
+/// Create a stopped container. Used by migration so no process can touch
+/// missing or incomplete data before the user reviews the import.
+pub async fn create(cli: &Cli, input: &RunInput) -> Result<String> {
+    let argv = create_args(input);
+    let borrowed: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let out = cli.run(&borrowed).await?;
+    input
+        .name
+        .clone()
+        .or_else(|| {
+            out.trim()
+                .lines()
+                .last()
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        })
+        .ok_or_else(|| DockerError::decode("`container create` reported no id"))
+}
+
+pub fn create_args(input: &RunInput) -> Vec<String> {
+    let mut args = run_args(input);
+    args[0] = "create".into();
+    // Remove only the leading flag, never an argument whose value happens to
+    // be --detach (for example the image's command).
+    args.remove(1);
+    args
+}
+
 /// Build the argument vector for `container run`.
 ///
 /// Kept pure and separately tested: this is the translation layer where a
@@ -318,6 +346,20 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_does_not_run_and_preserves_command_arguments() {
+        let input = RunInput {
+            name: Some("db".into()),
+            image: "busybox".into(),
+            command: Some("echo --detach".into()),
+            ..Default::default()
+        };
+        let args = create_args(&input);
+        assert_eq!(args[0], "create");
+        assert_eq!(&args[args.len() - 2..], &["echo", "--detach"]);
+        assert!(!args[1..args.len() - 2].iter().any(|a| a == "--detach"));
+    }
     use model::{PortMapping, ResourceLimits, VolumeMapping};
 
     fn input() -> RunInput {

@@ -7,7 +7,7 @@
 
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -60,6 +60,21 @@ fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Bound file reads before allocation, including hand-edited local state.
+pub fn read_bytes(path: &Path, limit: usize) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take((limit as u64).saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Document exceeds its size limit.",
+        ));
+    }
+    Ok(bytes)
+}
+
 /// Read and decode a document, falling back to the default when it is missing
 /// or unreadable.
 ///
@@ -67,10 +82,15 @@ fn replace_file(from: &Path, to: &Path) -> std::io::Result<()> {
 /// of something the user typed, and silently discarding it is worse than an
 /// unexplained extra file.
 pub fn read_or_default<T: DeserializeOwned + Default>(path: &Path) -> T {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return T::default();
+    let bytes = match read_bytes(path, 8 * 1024 * 1024) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return T::default(),
+        Err(error) => {
+            tracing::warn!("Could not read {}: {error}", path.display());
+            return T::default();
+        }
     };
-    match serde_json::from_str(&text) {
+    match serde_json::from_slice(&bytes) {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!("{} is not valid JSON ({e}); backing it up", path.display());
@@ -93,11 +113,16 @@ pub fn read_or_default<T: DeserializeOwned + Default>(path: &Path) -> T {
 
 /// Write a document atomically.
 pub fn write<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
+    let text = serde_json::to_string_pretty(value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    write_bytes(path, text.as_bytes())
+}
+
+/// Private, durable atomic writes for engine profiles as well as JSON.
+pub fn write_bytes(path: &Path, content: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let text = serde_json::to_string_pretty(value)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
     // A fixed sibling temp name lets concurrent settings/workspace writes
     // steal one another's file. Give each writer its own name; the final
@@ -109,11 +134,15 @@ pub fn write<T: Serialize>(path: &Path, value: &T) -> std::io::Result<()> {
         NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
     ));
     let write_result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        file.write_all(text.as_bytes())?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        file.write_all(content)?;
         file.sync_all()
     })();
     if let Err(error) = write_result {

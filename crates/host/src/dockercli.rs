@@ -23,8 +23,43 @@ fn owned_sidecar(path: &Path) -> bool {
     let Ok(target) = std::fs::read_link(path) else {
         return false;
     };
-    let text = target.to_string_lossy();
-    text.contains("Hopper.app/Contents/MacOS/sidecars/")
+    if target
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return false;
+    }
+    let components: Vec<_> = target.components().map(|part| part.as_os_str()).collect();
+    components.windows(4).any(|parts| {
+        parts == ["Hopper.app", "Contents", "MacOS", "sidecars"].map(std::ffi::OsStr::new)
+    })
+}
+
+fn removed_vendor_sidecar(target: &Path, home: Option<&Path>) -> bool {
+    if target.exists() {
+        return false;
+    }
+    let Ok(link) = std::fs::read_link(target) else {
+        return false;
+    };
+    if link
+        .components()
+        .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return false;
+    }
+    let applications = [
+        "Docker.app",
+        "OrbStack.app",
+        "Rancher Desktop.app",
+        "Podman Desktop.app",
+    ];
+    applications.iter().any(|app| {
+        link.starts_with(Path::new("/Applications").join(app).join("Contents"))
+            || home.is_some_and(|home| {
+                link.starts_with(home.join("Applications").join(app).join("Contents"))
+            })
+    })
 }
 
 #[cfg(unix)]
@@ -33,13 +68,31 @@ fn install_link(source: &Path, target: &Path) -> Result<(), String> {
         if std::fs::read_link(target).ok().as_deref() == Some(source) {
             return Ok(());
         }
-        if !owned_sidecar(target) {
+        let ours = owned_sidecar(target);
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        if !ours && !removed_vendor_sidecar(target, home.as_deref()) {
             return Err(format!(
                 "{} is already a symlink not owned by Hopper; it was left unchanged.",
                 target.display()
             ));
         }
-        std::fs::remove_file(target).map_err(|error| error.to_string())?;
+        let backup = target
+            .parent()
+            .ok_or("Missing CLI directory")?
+            .join(format!(
+                "hopperbackup{}",
+                model::new_uuid().replace('-', "")
+            ));
+        std::fs::rename(target, &backup).map_err(|error| error.to_string())?;
+        if let Err(error) = std::os::unix::fs::symlink(source, target) {
+            let _ = std::fs::rename(&backup, target);
+            return Err(error.to_string());
+        }
+        if ours {
+            let _ = std::fs::remove_file(&backup);
+        }
+        // Preserve dangling links from removed vendors for manual recovery.
+        return Ok(());
     } else if target.exists() {
         return Err(format!(
             "{} already exists and was left unchanged.",
@@ -233,6 +286,27 @@ mod tests {
         std::os::unix::fs::symlink("/opt/homebrew/bin/docker", &foreign).unwrap();
         assert!(owned_sidecar(&ours));
         assert!(!owned_sidecar(&foreign));
+    }
+
+    #[test]
+    fn cli_handoff_preserves_unrelated_links_and_recognizes_only_removed_vendor_tools() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = directory.path();
+        let vendor = home.join("Applications/Docker.app/Contents/Resources/bin/docker");
+        let dead = home.join("dead");
+        std::os::unix::fs::symlink(&vendor, &dead).unwrap();
+        assert!(removed_vendor_sidecar(&dead, Some(home)));
+        std::fs::create_dir_all(vendor.parent().unwrap()).unwrap();
+        std::fs::write(&vendor, "live").unwrap();
+        assert!(
+            !removed_vendor_sidecar(&dead, Some(home)),
+            "a live competitor's CLI must remain intact"
+        );
+        let unrelated = home.join("unrelated");
+        std::os::unix::fs::symlink(home.join("custom/docker"), &unrelated).unwrap();
+        assert!(!removed_vendor_sidecar(&unrelated, Some(home)));
+        assert!(install_link(&vendor, &unrelated).is_err());
+        assert!(unrelated.is_symlink());
     }
 
     #[test]

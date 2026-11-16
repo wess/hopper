@@ -29,11 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-/// The API version Hopper is written against. Newer daemons keep serving it;
-/// [`Client::negotiate`] steps *down* when a daemon is older.
-pub const TARGET_API: &str = "1.43";
-/// The oldest version whose responses still decode into our shapes.
-pub const MIN_API: &str = "1.24";
+pub use crate::api::{MIN_API, TARGET_API};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_JSON_BODY: usize = 64 * 1024 * 1024;
@@ -74,33 +70,21 @@ fn full_body(bytes: Bytes) -> RequestBody {
     Full::new(bytes).map_err(|never| match never {}).boxed()
 }
 
-/// Compare two dotted API versions ("1.43" < "1.9" is false — these are
-/// numeric per component, not lexical).
-fn version_le(a: &str, b: &str) -> bool {
-    let parse = |v: &str| -> (u32, u32) {
-        let mut it = v.trim_start_matches('v').split('.');
-        (
-            it.next().and_then(|s| s.parse().ok()).unwrap_or(0),
-            it.next().and_then(|s| s.parse().ok()).unwrap_or(0),
-        )
-    };
-    parse(a) <= parse(b)
+#[derive(Clone)]
+struct Target {
+    endpoint: Endpoint,
+    api: String,
+    generation: u64,
+    tls: Option<Result<Arc<rustls::ClientConfig>>>,
 }
 
-/// Pick the version to speak: ours, unless the daemon is older.
-pub fn negotiated_version(daemon_max: &str) -> String {
-    if daemon_max.is_empty() || version_le(TARGET_API, daemon_max) {
-        TARGET_API.to_string()
-    } else if version_le(daemon_max, MIN_API) {
-        MIN_API.to_string()
-    } else {
-        daemon_max.trim_start_matches('v').to_string()
-    }
+fn capture_tls(endpoint: &Endpoint) -> Option<Result<Arc<rustls::ClientConfig>>> {
+    matches!(endpoint, Endpoint::Tcp { tls: true, .. })
+        .then(|| transport::tls_config().map(Arc::new))
 }
 
 struct Inner {
-    endpoint: RwLock<Endpoint>,
-    api: RwLock<String>,
+    target: RwLock<Target>,
     timeout: RwLock<Duration>,
 }
 
@@ -113,8 +97,12 @@ impl Client {
     pub fn new(ep: Endpoint) -> Self {
         Self {
             inner: Arc::new(Inner {
-                endpoint: RwLock::new(ep),
-                api: RwLock::new(TARGET_API.to_string()),
+                target: RwLock::new(Target {
+                    tls: capture_tls(&ep),
+                    endpoint: ep,
+                    api: TARGET_API.to_string(),
+                    generation: 0,
+                }),
                 timeout: RwLock::new(DEFAULT_TIMEOUT),
             }),
         }
@@ -126,7 +114,7 @@ impl Client {
     }
 
     pub fn endpoint(&self) -> Endpoint {
-        self.inner.endpoint.read().unwrap().clone()
+        self.inner.target.read().unwrap().endpoint.clone()
     }
 
     /// Point the client at a different daemon. Takes effect on the next
@@ -134,12 +122,27 @@ impl Client {
     /// daemon, so changing endpoints must also discard the prior daemon's
     /// negotiated version.
     pub fn set_endpoint(&self, ep: Endpoint) {
-        *self.inner.endpoint.write().unwrap() = ep;
-        *self.inner.api.write().unwrap() = TARGET_API.to_string();
+        let tls = capture_tls(&ep);
+        let mut target = self.inner.target.write().unwrap();
+        target.endpoint = ep;
+        target.tls = tls;
+        target.api = TARGET_API.to_string();
+        target.generation = target.generation.wrapping_add(1);
     }
 
     pub fn api_version(&self) -> String {
-        self.inner.api.read().unwrap().clone()
+        self.inner.target.read().unwrap().api.clone()
+    }
+
+    /// An independent client for one operation. Cloning this snapshot shares
+    /// its session, while switching the application client cannot retarget it.
+    pub fn snapshot(&self) -> Self {
+        Self {
+            inner: Arc::new(Inner {
+                target: RwLock::new(self.inner.target.read().unwrap().clone()),
+                timeout: RwLock::new(self.timeout()),
+            }),
+        }
     }
 
     pub fn set_timeout(&self, d: Duration) {
@@ -151,12 +154,14 @@ impl Client {
     }
 
     /// Ask the daemon what it speaks and step down if it is older than our
-    /// target. The Bun build pinned v1.43 unconditionally, which failed
+    /// target. The Bun build pinned v1.44 unconditionally, which failed
     /// outright against engines predating it.
     pub async fn negotiate(&self) -> Result<String> {
         // `/version` is served unversioned, so this works before we know what
         // version to prefix with.
-        let res: serde_json::Value = self
+        let session = self.snapshot();
+        let generation = session.inner.target.read().unwrap().generation;
+        let res: serde_json::Value = session
             .json(
                 Req::get("/version")
                     .unversioned()
@@ -167,8 +172,18 @@ impl Client {
             .get("ApiVersion")
             .and_then(|v| v.as_str())
             .unwrap_or_default();
-        let chosen = negotiated_version(daemon);
-        *self.inner.api.write().unwrap() = chosen.clone();
+        let minimum = res
+            .get("MinAPIVersion")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        let chosen = crate::api::negotiate(daemon, minimum)?;
+        let mut target = self.inner.target.write().unwrap();
+        if target.generation != generation {
+            return Err(DockerError::transport(
+                "The engine changed during API negotiation; retry the operation.",
+            ));
+        }
+        target.api = chosen.clone();
         Ok(chosen)
     }
 
@@ -212,6 +227,11 @@ impl Client {
                 builder = builder.header(hyper::header::CONTENT_TYPE, content_type.as_str());
                 full_body(bytes.clone())
             }
+            Some(ReqBody::Stream { .. }) => {
+                return Err(DockerError::decode(
+                    "Streaming bodies must be sent asynchronously.",
+                ))
+            }
             None => {
                 // Docker requires a content-type on bodyless POSTs to some
                 // endpoints; an explicit empty JSON body keeps them happy.
@@ -230,9 +250,22 @@ impl Client {
     /// [`DockerError`] carrying the daemon's own message.
     async fn send_body(&self, req: Req, http: Request<RequestBody>) -> Result<Response<Incoming>> {
         let ep = self.endpoint();
-        let deadline = req.timeout.unwrap_or_else(|| self.timeout());
+        let tls = self.inner.target.read().unwrap().tls.clone().transpose()?;
+        // A streaming GET has an unbounded body, not an unbounded wait for
+        // response headers. A black-holed event endpoint must reconnect.
+        let deadline = if req.streaming && matches!(req.method, Method::GET | Method::HEAD) {
+            self.timeout()
+        } else {
+            req.timeout.unwrap_or_else(|| self.timeout())
+        };
         let fut = async {
-            let io = TokioIo::new(transport::connect(&ep).await?);
+            let connection =
+                tokio::time::timeout(self.timeout(), transport::connect_with_tls(&ep, tls))
+                    .await
+                    .map_err(|_| {
+                        DockerError::timeout("The Docker transport connection timed out.")
+                    })??;
+            let io = TokioIo::new(connection);
             let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
                 .await
                 .map_err(DockerError::from)?;
@@ -266,8 +299,37 @@ impl Client {
     }
 
     pub async fn send(&self, req: Req) -> Result<Response<Incoming>> {
-        let http = self.build(&req)?;
-        self.send_body(req, http).await
+        let session = self.snapshot();
+        let mut req = req;
+        if matches!(req.body, Some(ReqBody::Stream { .. })) {
+            let Some(ReqBody::Stream {
+                receiver,
+                content_type,
+            }) = req.body.take()
+            else {
+                unreachable!()
+            };
+            let stream = futures::stream::unfold(receiver, |mut receiver| async move {
+                receiver
+                    .recv()
+                    .await
+                    .map(|chunk| (chunk.map(Frame::data), receiver))
+            });
+            let body = BodyExt::map_err(StreamBody::new(stream), |error| -> BoxError {
+                Box::new(error)
+            })
+            .boxed();
+            let mut http = session.build(&req)?.map(|_| body);
+            http.headers_mut().insert(
+                hyper::header::CONTENT_TYPE,
+                content_type
+                    .parse()
+                    .map_err(|_| DockerError::decode("Invalid streaming content type."))?,
+            );
+            return session.send_body(req, http).await;
+        }
+        let http = session.build(&req)?;
+        session.send_body(req, http).await
     }
 
     /// Turn a failed response into an error carrying the daemon's message.
@@ -444,8 +506,9 @@ impl Client {
         content_type: &str,
     ) -> Result<()> {
         use tokio_util::io::ReaderStream;
+        let session = self.snapshot();
 
-        let timeout = req.timeout.unwrap_or_else(|| self.timeout());
+        let timeout = req.timeout.unwrap_or_else(|| session.timeout());
         let file = tokio::fs::File::open(path).await.map_err(|e| {
             DockerError::transport(format!("Could not open {}: {e}", path.display()))
         })?;
@@ -453,10 +516,10 @@ impl Client {
         let body =
             BodyExt::map_err(StreamBody::new(stream), |e| -> BoxError { Box::new(e) }).boxed();
         let req = req.header("Content-Type", content_type);
-        let ep = self.endpoint();
+        let ep = session.endpoint();
         let mut builder = Request::builder()
             .method(req.method.clone())
-            .uri(self.url_for(&req))
+            .uri(session.url_for(&req))
             .header(hyper::header::HOST, ep.host_header());
         for (key, value) in &req.headers {
             builder = builder.header(key.as_str(), value.as_str());
@@ -464,7 +527,7 @@ impl Client {
         let http = builder
             .body(body)
             .map_err(|e| DockerError::transport(format!("Malformed request: {e}")))?;
-        let res = self.send_body(req, http).await?;
+        let res = session.send_body(req, http).await?;
         tokio::time::timeout(
             timeout,
             Self::collect_body_limited(res.into_body(), MAX_ACTION_BODY),
@@ -568,11 +631,26 @@ impl Client {
     /// duplex stream. This is how interactive exec hijacks the socket for a
     /// real TTY.
     pub async fn upgrade(&self, req: Req) -> Result<TokioIo<hyper::upgrade::Upgraded>> {
-        let ep = self.endpoint();
-        let timeout = req.timeout.unwrap_or_else(|| self.timeout());
-        let http = self.build(&req)?;
+        let session = self.snapshot();
+        let ep = session.endpoint();
+        let tls = session
+            .inner
+            .target
+            .read()
+            .unwrap()
+            .tls
+            .clone()
+            .transpose()?;
+        // Only the upgraded session is long-lived; its HTTP handshake must
+        // finish within the normal connection deadline.
+        let timeout = if req.streaming {
+            session.timeout()
+        } else {
+            req.timeout.unwrap_or_else(|| session.timeout())
+        };
+        let http = session.build(&req)?;
         let result = tokio::time::timeout(timeout, async {
-            let io = TokioIo::new(transport::connect(&ep).await?);
+            let io = TokioIo::new(transport::connect_with_tls(&ep, tls).await?);
             let (mut sender, conn) = hyper::client::conn::http1::handshake(io)
                 .await
                 .map_err(DockerError::from)?;
@@ -606,7 +684,7 @@ impl Client {
         self.action(
             Req::get("/_ping")
                 .unversioned()
-                .timeout(Duration::from_secs(5)),
+                .timeout(self.timeout().min(Duration::from_secs(5))),
         )
         .await
     }
@@ -622,7 +700,14 @@ pub(crate) fn render_for_test(client: &Client, req: &Req) -> String {
 /// A request body.
 enum ReqBody {
     Json(serde_json::Value),
-    Raw { bytes: Bytes, content_type: String },
+    Raw {
+        bytes: Bytes,
+        content_type: String,
+    },
+    Stream {
+        receiver: tokio::sync::mpsc::Receiver<std::io::Result<Bytes>>,
+        content_type: String,
+    },
 }
 
 /// A request under construction.
@@ -634,6 +719,7 @@ pub struct Req {
     body: Option<ReqBody>,
     versioned: bool,
     timeout: Option<Duration>,
+    streaming: bool,
 }
 
 impl Req {
@@ -646,6 +732,7 @@ impl Req {
             body: None,
             versioned: true,
             timeout: None,
+            streaming: false,
         }
     }
 
@@ -713,7 +800,19 @@ impl Req {
         self
     }
 
-    /// Send without the `/v1.43` prefix (`/_ping`, `/version`).
+    pub fn stream_body(
+        mut self,
+        receiver: tokio::sync::mpsc::Receiver<std::io::Result<Bytes>>,
+        content_type: &str,
+    ) -> Self {
+        self.body = Some(ReqBody::Stream {
+            receiver,
+            content_type: content_type.into(),
+        });
+        self
+    }
+
+    /// Send without the `/v1.44` prefix (`/_ping`, `/version`).
     pub fn unversioned(mut self) -> Self {
         self.versioned = false;
         self
@@ -721,12 +820,14 @@ impl Req {
 
     pub fn timeout(mut self, d: Duration) -> Self {
         self.timeout = Some(d);
+        self.streaming = false;
         self
     }
 
     /// Streaming endpoints have no meaningful deadline — the whole point is to
     /// stay open — so they opt out of the request timeout.
     pub fn no_timeout(mut self) -> Self {
+        self.streaming = true;
         self.timeout = Some(Duration::from_secs(60 * 60 * 24));
         self
     }
@@ -738,32 +839,64 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
-    fn version_comparison_is_numeric_not_lexical() {
-        assert!(version_le("1.9", "1.43"));
-        assert!(!version_le("1.43", "1.9"));
-        assert!(version_le("1.43", "1.43"));
+    fn a_snapshot_keeps_its_endpoint_and_negotiated_version() {
+        let client = Client::new(Endpoint::Unix {
+            path: "/a.sock".into(),
+        });
+        client.inner.target.write().unwrap().api = "1.40".into();
+        let session = client.snapshot();
+        client.set_endpoint(Endpoint::Unix {
+            path: "/b.sock".into(),
+        });
+        assert_eq!(session.endpoint().path(), Some("/a.sock"));
+        assert_eq!(session.api_version(), "1.40");
+        assert_eq!(client.api_version(), TARGET_API);
     }
 
-    #[test]
-    fn negotiation_keeps_our_target_against_a_newer_daemon() {
-        assert_eq!(negotiated_version("1.51"), TARGET_API);
-        assert_eq!(negotiated_version("1.43"), TARGET_API);
-    }
-
-    #[test]
-    fn negotiation_steps_down_for_an_older_daemon() {
-        assert_eq!(negotiated_version("1.41"), "1.41");
-        assert_eq!(negotiated_version("v1.40"), "1.40");
-    }
-
-    #[test]
-    fn negotiation_floors_at_the_oldest_version_we_can_decode() {
-        assert_eq!(negotiated_version("1.20"), MIN_API);
-    }
-
-    #[test]
-    fn negotiation_falls_back_when_the_daemon_reports_nothing() {
-        assert_eq!(negotiated_version(""), TARGET_API);
+    #[tokio::test]
+    async fn a_late_negotiation_cannot_publish_an_old_daemons_version() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = Client::new(Endpoint::Tcp {
+            host: address.ip().to_string(),
+            port: address.port(),
+            tls: false,
+        });
+        let (ready_tx, ready) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = [0; 4096];
+            let _ = socket.read(&mut request).await.unwrap();
+            ready_tx.send(()).unwrap();
+            resume.await.unwrap();
+            let body = r#"{"ApiVersion":"1.40","MinAPIVersion":"1.24"}"#;
+            socket
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .await
+                .unwrap();
+        });
+        let negotiating = client.clone();
+        let negotiation = tokio::spawn(async move { negotiating.negotiate().await });
+        ready.await.unwrap();
+        client.set_endpoint(Endpoint::Unix {
+            path: "/new.sock".into(),
+        });
+        resume_tx.send(()).unwrap();
+        assert!(negotiation
+            .await
+            .unwrap()
+            .unwrap_err()
+            .message
+            .contains("engine changed"));
+        assert_eq!(client.api_version(), TARGET_API);
+        server.await.unwrap();
     }
 
     #[test]
@@ -773,7 +906,7 @@ mod tests {
         });
         assert_eq!(
             c.url_for(&Req::get("/containers/json")),
-            "/v1.43/containers/json"
+            "/v1.44/containers/json"
         );
         assert_eq!(c.url_for(&Req::get("/_ping").unversioned()), "/_ping");
     }
@@ -792,7 +925,7 @@ mod tests {
     #[test]
     fn false_flags_are_omitted_entirely() {
         let c = Client::new(Endpoint::default());
-        assert_eq!(c.url_for(&Req::get("/x").flag("all", false)), "/v1.43/x");
+        assert_eq!(c.url_for(&Req::get("/x").flag("all", false)), "/v1.44/x");
     }
 
     #[test]
@@ -801,11 +934,11 @@ mod tests {
         let none: Option<String> = None;
         assert_eq!(
             c.url_for(&Req::get("/x").query_opt("tag", none)),
-            "/v1.43/x"
+            "/v1.44/x"
         );
         assert_eq!(
             c.url_for(&Req::get("/x").query_opt("tag", Some("v1"))),
-            "/v1.43/x?tag=v1"
+            "/v1.44/x?tag=v1"
         );
     }
 
@@ -825,7 +958,7 @@ mod tests {
         let c = Client::new(Endpoint::Unix {
             path: "/a.sock".into(),
         });
-        *c.inner.api.write().unwrap() = "1.24".into();
+        c.inner.target.write().unwrap().api = "1.24".into();
         c.set_endpoint(Endpoint::Unix {
             path: "/b.sock".into(),
         });
@@ -975,7 +1108,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_timed_out_request_closes_its_connection_task() {
+    async fn streaming_headers_have_a_deadline_and_close_the_connection() {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .unwrap();
@@ -998,12 +1131,9 @@ mod tests {
             port: address.port(),
             tls: false,
         });
+        client.set_timeout(Duration::from_millis(25));
         let result = client
-            .action(
-                Req::get("/")
-                    .unversioned()
-                    .timeout(Duration::from_millis(25)),
-            )
+            .action(Req::get("/events").unversioned().no_timeout())
             .await;
         assert!(matches!(result, Err(error) if error.kind == crate::error::ErrorKind::Timeout));
         server.await.unwrap();

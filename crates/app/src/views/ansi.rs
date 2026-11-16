@@ -9,119 +9,138 @@
 //! Pure and deterministic, so the parser is tested directly rather than by
 //! eyeballing a live shell.
 
-/// A terminal screen: a list of lines plus a cursor.
+const MAX_COLUMNS: usize = 1024;
+const MAX_CELLS: usize = 256 * 1024;
+const MAX_ESCAPE_BYTES: usize = 4096;
+
+/// Bounded scrollback and an incremental parser: neither a long line, cursor
+/// escape, nor an unfinished title sequence can allocate an unbounded buffer.
 #[derive(Debug, Default)]
 pub struct Screen {
-    lines: Vec<Vec<char>>,
-    row: usize,
+    lines: std::collections::VecDeque<Vec<char>>,
     col: usize,
-    /// Bytes carried when an escape sequence spans two writes.
     pending: Vec<u8>,
-    /// Cap on retained lines, so a `yes` loop cannot grow without bound.
+    utf8: Vec<u8>,
+    cells: usize,
     max_lines: usize,
 }
 
 impl Screen {
     pub fn new(max_lines: usize) -> Self {
         Self {
-            lines: vec![Vec::new()],
-            row: 0,
-            col: 0,
-            pending: Vec::new(),
-            max_lines: max_lines.max(1),
+            lines: [Vec::new()].into(),
+            max_lines: max_lines.clamp(1, 3000),
+            ..Self::default()
         }
-    }
-
-    fn line_mut(&mut self) -> &mut Vec<char> {
-        while self.lines.len() <= self.row {
-            self.lines.push(Vec::new());
-        }
-        &mut self.lines[self.row]
     }
 
     fn put(&mut self, ch: char) {
-        let col = self.col;
-        let line = self.line_mut();
-        if col < line.len() {
-            line[col] = ch; // overwrite, as a terminal does
+        if self.col >= MAX_COLUMNS {
+            return;
+        }
+        let line = self.lines.back_mut().expect("screen has a line");
+        if self.col < line.len() {
+            line[self.col] = ch;
         } else {
-            while line.len() < col {
-                line.push(' ');
-            }
+            self.cells += self.col + 1 - line.len();
+            line.resize(self.col, ' ');
             line.push(ch);
         }
         self.col += 1;
+        self.trim();
+    }
+
+    fn trim(&mut self) {
+        while self.lines.len() > self.max_lines || self.cells > MAX_CELLS {
+            if self.lines.len() <= 1 {
+                break;
+            }
+            self.cells -= self.lines.pop_front().unwrap().len();
+        }
     }
 
     fn newline(&mut self) {
-        self.row += 1;
+        self.lines.push_back(Vec::new());
         self.col = 0;
-        while self.lines.len() <= self.row {
-            self.lines.push(Vec::new());
-        }
-        // Trim from the top once the scrollback cap is hit.
-        if self.lines.len() > self.max_lines {
-            let excess = self.lines.len() - self.max_lines;
-            self.lines.drain(..excess);
-            self.row = self.row.saturating_sub(excess);
-        }
+        self.trim();
     }
 
     fn erase_to_line_end(&mut self) {
-        let col = self.col;
-        let line = self.line_mut();
-        line.truncate(col);
+        let line = self.lines.back_mut().expect("screen has a line");
+        self.cells -= line.len().saturating_sub(self.col);
+        line.truncate(self.col);
     }
 
     fn clear_screen(&mut self) {
-        self.lines = vec![Vec::new()];
-        self.row = 0;
+        self.lines = [Vec::new()].into();
         self.col = 0;
+        self.cells = 0;
     }
 
-    /// Feed bytes, updating the screen.
     pub fn feed(&mut self, bytes: &[u8]) {
-        let mut input = std::mem::take(&mut self.pending);
-        input.extend_from_slice(bytes);
-
-        let text = String::from_utf8_lossy(&input);
-        let mut chars = text.chars().peekable();
-
-        while let Some(ch) = chars.next() {
-            match ch {
-                '\r' => self.col = 0,
-                '\n' => self.newline(),
-                '\t' => {
-                    // Advance to the next 8-column tab stop.
-                    let next = (self.col / 8 + 1) * 8;
-                    while self.col < next {
-                        self.put(' ');
-                    }
-                }
-                '\x08' => self.col = self.col.saturating_sub(1), // backspace
-                '\x07' => {}                                     // bell — ignore
-                '\x1b' => {
-                    // An escape sequence. If the rest has not arrived yet,
-                    // stash it and resume on the next feed.
-                    let rest: String = chars.clone().collect();
-                    match consume_escape(&rest) {
-                        EscapeResult::Consumed { action, len } => {
-                            for _ in 0..len {
-                                chars.next();
-                            }
-                            self.apply(action);
-                        }
-                        EscapeResult::Incomplete => {
-                            let mut carry = vec![0x1b];
-                            carry.extend_from_slice(rest.as_bytes());
-                            self.pending = carry;
-                            return;
-                        }
-                    }
-                }
-                c if (c as u32) < 0x20 => {} // other control bytes: drop
-                c => self.put(c),
+        for &byte in bytes {
+            if !self.pending.is_empty() || byte == 0x1b {
+                self.escape(byte);
+                continue;
             }
+            if byte.is_ascii() {
+                if !self.utf8.is_empty() {
+                    self.utf8.clear();
+                    self.put('\u{fffd}');
+                }
+                match byte {
+                    b'\r' => self.col = 0,
+                    b'\n' => self.newline(),
+                    b'\t' => {
+                        let next = ((self.col / 8 + 1) * 8).min(MAX_COLUMNS);
+                        while self.col < next {
+                            self.put(' ');
+                        }
+                    }
+                    8 => self.col = self.col.saturating_sub(1),
+                    0..=31 | 127 => {}
+                    _ => self.put(byte as char),
+                }
+            } else {
+                self.utf8.push(byte);
+                match std::str::from_utf8(&self.utf8) {
+                    Ok(s) => {
+                        let ch = s.chars().next().unwrap();
+                        self.utf8.clear();
+                        self.put(ch);
+                    }
+                    Err(error) if error.error_len().is_some() || self.utf8.len() >= 4 => {
+                        self.utf8.clear();
+                        self.put('\u{fffd}');
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    }
+
+    fn escape(&mut self, byte: u8) {
+        self.pending.push(byte);
+        let n = self.pending.len();
+        if n > MAX_ESCAPE_BYTES {
+            self.pending.clear();
+            return;
+        }
+        if n < 2 {
+            return;
+        }
+        match self.pending[1] {
+            b'[' if n >= 3 && (0x40..=0x7e).contains(&byte) => {
+                let params = String::from_utf8_lossy(&self.pending[2..n - 1]);
+                let action = csi_action(&params, byte as char);
+                self.pending.clear();
+                self.apply(action);
+            }
+            b']' if byte == 7 || (n >= 4 && self.pending[n - 2] == 0x1b && byte == b'\\') => {
+                self.pending.clear();
+            }
+            b'[' | b']' => {}
+            _ => self.pending.clear(),
         }
     }
 
@@ -129,12 +148,11 @@ impl Screen {
         match action {
             Action::EraseToLineEnd => self.erase_to_line_end(),
             Action::ClearScreen => self.clear_screen(),
-            Action::CursorCol(n) => self.col = n,
+            Action::CursorCol(n) => self.col = n.min(MAX_COLUMNS - 1),
             Action::None => {}
         }
     }
 
-    /// The visible text.
     pub fn render(&self) -> String {
         self.lines
             .iter()
@@ -149,55 +167,6 @@ enum Action {
     ClearScreen,
     CursorCol(usize),
     None,
-}
-
-enum EscapeResult {
-    /// `len` chars after the ESC were consumed.
-    Consumed {
-        action: Action,
-        len: usize,
-    },
-    Incomplete,
-}
-
-/// Parse the sequence following an ESC. `rest` is everything after `\x1b`.
-fn consume_escape(rest: &str) -> EscapeResult {
-    let mut chars = rest.chars();
-    match chars.next() {
-        None => EscapeResult::Incomplete,
-        // CSI: ESC [ ... final-byte.
-        Some('[') => {
-            let mut params = String::new();
-            for (i, c) in chars.enumerate() {
-                if c.is_ascii_alphabetic() || c == '~' {
-                    // '[' plus the chars through this one.
-                    return EscapeResult::Consumed {
-                        action: csi_action(&params, c),
-                        len: i + 2,
-                    };
-                }
-                params.push(c);
-            }
-            EscapeResult::Incomplete
-        }
-        // OSC: ESC ] ... BEL (or ST). Title-setting and the like — drop it.
-        Some(']') => {
-            for (i, c) in chars.enumerate() {
-                if c == '\x07' {
-                    return EscapeResult::Consumed {
-                        action: Action::None,
-                        len: i + 2,
-                    };
-                }
-            }
-            EscapeResult::Incomplete
-        }
-        // A two-char escape (ESC =, ESC >, charset selection, …): drop it.
-        Some(_) => EscapeResult::Consumed {
-            action: Action::None,
-            len: 1,
-        },
-    }
 }
 
 fn csi_action(params: &str, final_byte: char) -> Action {
@@ -219,6 +188,35 @@ fn csi_action(params: &str, final_byte: char) -> Action {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hostile_output_cannot_grow_the_screen_or_parser_without_bound() {
+        let mut screen = Screen::new(3000);
+        screen.feed(&vec![b'x'; 2 * 1024 * 1024]);
+        assert_eq!(screen.render().len(), MAX_COLUMNS);
+        screen.feed(b"\x1b[18446744073709551615GX");
+        assert!(screen.render().len() <= MAX_COLUMNS);
+        for _ in 0..400 {
+            screen.feed(b"\n");
+            screen.feed(&vec![b'x'; MAX_COLUMNS]);
+        }
+        assert!(screen.cells <= MAX_CELLS);
+        screen.feed(b"\x1b]0;");
+        screen.feed(&vec![b'x'; 64 * 1024]);
+        assert!(screen.pending.len() <= MAX_ESCAPE_BYTES);
+        assert!(screen.cells <= MAX_CELLS);
+    }
+
+    #[test]
+    fn utf8_and_title_terminators_can_cross_chunk_boundaries() {
+        let mut screen = Screen::new(3);
+        for byte in "héllo →".as_bytes() {
+            screen.feed(&[*byte]);
+        }
+        screen.feed(b"\x1b]title\x1b");
+        screen.feed(b"\\ok");
+        assert_eq!(screen.render(), "héllo →ok");
+    }
 
     fn rendered(input: &[u8]) -> String {
         let mut s = Screen::new(100);

@@ -249,6 +249,8 @@ struct RawEvent {
     #[serde(rename = "Actor")]
     actor: Option<RawActor>,
     time: Option<i64>,
+    #[serde(rename = "timeNano")]
+    time_nano: Option<i64>,
     status: Option<String>,
     id: Option<String>,
 }
@@ -275,19 +277,37 @@ fn format_event(e: RawEvent) -> DockerEvent {
         action,
         actor: short,
         time: e.time.unwrap_or_default(),
+        time_nano: e
+            .time_nano
+            .unwrap_or_else(|| e.time.unwrap_or_default().saturating_mul(1_000_000_000)),
     }
 }
 
 /// Stream daemon events, invoking `on_event` per event. Returning `false` from
 /// the callback closes the stream; dropping the future does the same.
-pub async fn stream_events<F>(client: &Client, mut on_event: F) -> Result<()>
+pub async fn stream_events<F>(client: &Client, on_event: F) -> Result<()>
 where
     F: FnMut(DockerEvent) -> bool,
 {
+    stream_events_since(client, None, on_event).await
+}
+
+pub async fn stream_events_since<F>(
+    client: &Client,
+    since: Option<i64>,
+    mut on_event: F,
+) -> Result<()>
+where
+    F: FnMut(DockerEvent) -> bool,
+{
+    let since = since
+        .filter(|t| *t > 0)
+        .map(|t| format!("{}.{:09}", t / 1_000_000_000, t % 1_000_000_000));
     client
-        .ndjson::<RawEvent, _>(Req::get("/events").no_timeout(), move |raw| {
-            on_event(format_event(raw))
-        })
+        .ndjson::<RawEvent, _>(
+            Req::get("/events").query_opt("since", since).no_timeout(),
+            move |raw| on_event(format_event(raw)),
+        )
         .await
 }
 

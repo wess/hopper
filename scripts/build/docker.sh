@@ -2,8 +2,8 @@
 # The standalone host CLI for Docker contexts and Compose compatibility.
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-version="29.9.2"
-sha256="ea8a2ce5ac31f9f5f3fb711a7a485e1e46cc7a69798a629a70306f6e6af25b7a"
+version="29.9.3"
+sha256="79145e169bca0b9571d02de8e1cd311a36e0e8fdb4599b6661a87b1bb3afbe13"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 curl -fsSL "https://download.docker.com/mac/static/stable/aarch64/docker-${version}.tgz" -o "$stage/docker.tgz"

@@ -138,6 +138,9 @@ pub struct EngineChoice {
     /// socket exists or its named pipe can be opened). This does not imply
     /// that the daemon has completed a health probe.
     pub available: bool,
+    /// Installation evidence, independent of whether its engine is running.
+    #[serde(default)]
+    pub installed: bool,
     /// The provider answered its health probe.
     #[serde(default)]
     pub connected: bool,
@@ -175,14 +178,22 @@ pub struct EngineResources {
 impl Default for EngineResources {
     fn default() -> Self {
         Self {
-            cpus: 4,
-            memory_gib: 4,
+            cpus: 2,
+            memory_gib: 2,
             disk_gib: 60,
         }
     }
 }
 
 impl EngineResources {
+    pub fn bounded_to(self, capacity: EngineCapacity) -> Self {
+        let bounded = self.bounded();
+        Self {
+            cpus: bounded.cpus.min(capacity.max_cpus.max(1)),
+            memory_gib: bounded.memory_gib.min(capacity.max_memory_gib.max(1)),
+            ..bounded
+        }
+    }
     /// Keep persisted settings from creating an unusable or unexpectedly
     /// expensive managed VM. These are deliberately conservative hard bounds;
     /// a provider can impose a tighter hardware-specific limit when it starts.
@@ -191,6 +202,27 @@ impl EngineResources {
             cpus: self.cpus.clamp(1, 64),
             memory_gib: self.memory_gib.clamp(1, 256),
             disk_gib: self.disk_gib.clamp(10, 2_048),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineCapacity {
+    pub max_cpus: u32,
+    pub max_memory_gib: u32,
+}
+
+impl EngineCapacity {
+    pub fn from_hardware(cpus: u32, memory_bytes: Option<u64>) -> Self {
+        let gib = memory_bytes.map(|bytes| bytes / (1024 * 1024 * 1024));
+        Self {
+            max_cpus: cpus.saturating_sub(1).clamp(1, 64),
+            // Leave at least 2 GiB and one quarter of RAM for the host. If
+            // detection fails, use a conservative 2 GiB ceiling.
+            max_memory_gib: gib
+                .map(|gib| gib.saturating_sub(2).min(gib * 3 / 4).clamp(1, 256) as u32)
+                .unwrap_or(2),
         }
     }
 }
@@ -417,6 +449,36 @@ mod resource_tests {
     use super::*;
 
     #[test]
+    fn vm_limits_leave_host_headroom_and_handle_failed_detection() {
+        let capacity = EngineCapacity::from_hardware(8, Some(8 * 1024 * 1024 * 1024));
+        assert_eq!(
+            capacity,
+            EngineCapacity {
+                max_cpus: 7,
+                max_memory_gib: 6
+            }
+        );
+        let resources = EngineResources {
+            cpus: 64,
+            memory_gib: 256,
+            disk_gib: 60,
+        }
+        .bounded_to(capacity);
+        assert_eq!((resources.cpus, resources.memory_gib), (7, 6));
+        assert_eq!(
+            EngineCapacity::from_hardware(1, None),
+            EngineCapacity {
+                max_cpus: 1,
+                max_memory_gib: 2
+            }
+        );
+        assert_eq!(
+            EngineCapacity::from_hardware(2, Some(2 * 1024 * 1024 * 1024)).max_memory_gib,
+            1
+        );
+    }
+
+    #[test]
     fn resource_settings_are_bounded_before_a_vm_can_use_them() {
         assert_eq!(
             (EngineResources {
@@ -472,6 +534,7 @@ mod choice_tests {
             id: "docker".into(),
             label: "Docker".into(),
             available: true,
+            installed: true,
             connected: false,
             state: EngineState::Unreachable,
             managed: false,

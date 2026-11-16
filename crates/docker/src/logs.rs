@@ -43,6 +43,14 @@ fn build_request(id: &str, opts: &LogOptions) -> Req {
     }
 }
 
+fn bounded(text: &str) -> &str {
+    let mut end = text.len().min(MAX_LOG_LINE_BYTES);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
 /// Reassembles whole lines from frames that are not line-aligned.
 ///
 /// A frame can end mid-line, and stdout and stderr interleave, so each stream
@@ -62,46 +70,27 @@ impl Lines {
     pub fn push(&mut self, stream: StreamKind, text: &str) -> Vec<(StreamKind, String)> {
         let carried = match self.partial.iter().position(|(s, _)| *s == stream) {
             Some(i) => {
-                let (_, prev) = self.partial.remove(i);
-                format!("{prev}{text}")
+                let (_, mut previous) = self.partial.remove(i);
+                previous.push_str(text);
+                std::borrow::Cow::Owned(previous)
             }
-            None => text.to_string(),
+            None => std::borrow::Cow::Borrowed(text),
         };
-
-        let mut parts: Vec<&str> = carried.split('\n').collect();
-        // `split` always yields a trailing element: empty when the text ended
-        // on a newline, otherwise the incomplete tail.
-        let tail = parts.pop().unwrap_or_default().to_string();
-        let out = parts
-            .into_iter()
-            .map(|l| {
-                let line = l.trim_end_matches('\r');
-                let bounded = &line[..line
-                    .char_indices()
-                    .take_while(|(i, _)| *i < MAX_LOG_LINE_BYTES)
-                    .last()
-                    .map(|(i, c)| i + c.len_utf8())
-                    .unwrap_or(0)
-                    .min(line.len())];
-                (stream, bounded.to_string())
-            })
-            .collect();
-        if !tail.is_empty() {
-            if tail.len() <= MAX_LOG_LINE_BYTES {
-                self.partial.push((stream, tail));
-            } else {
-                self.partial.push((
-                    stream,
-                    tail[..tail
-                        .char_indices()
-                        .take_while(|(i, _)| *i < MAX_LOG_LINE_BYTES)
-                        .last()
-                        .map(|(i, c)| i + c.len_utf8())
-                        .unwrap_or(0)]
-                        .to_string(),
-                ));
+        let Some(last_newline) = carried.rfind('\n') else {
+            if !carried.is_empty() {
+                self.partial.push((stream, bounded(&carried).to_string()));
             }
+            return Vec::new();
+        };
+        let out = carried[..=last_newline]
+            .split_terminator('\n')
+            .map(|line| (stream, bounded(line.trim_end_matches('\r')).to_string()))
+            .collect();
+        let tail = &carried[last_newline + 1..];
+        if !tail.is_empty() {
+            self.partial.push((stream, bounded(tail).to_string()));
         }
+
         out
     }
 

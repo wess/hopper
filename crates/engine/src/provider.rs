@@ -39,6 +39,10 @@ pub trait Provider: Send + Sync {
     /// Whether this provider can run on this machine at all.
     async fn available(&self) -> bool;
 
+    async fn installed(&self) -> bool {
+        self.available().await
+    }
+
     /// Where the daemon listens, once the provider knows.
     async fn endpoint(&self) -> Option<Endpoint>;
 
@@ -50,8 +54,18 @@ pub trait Provider: Send + Sync {
         anyhow::bail!("This engine is not managed by Hopper, so it cannot be started here.")
     }
 
+    async fn start_configured(&self, settings: &model::Settings) -> anyhow::Result<()> {
+        self.start(settings.resources).await
+    }
+
     async fn stop(&self) -> anyhow::Result<()> {
         anyhow::bail!("This engine is not managed by Hopper, so it cannot be stopped here.")
+    }
+
+    /// Conservative final idle check. Providers must fail closed when they
+    /// cannot establish that no external API client is connected.
+    async fn idle(&self) -> bool {
+        false
     }
 
     /// Return unused disk to the host. Only a VM-backed engine can.
@@ -143,7 +157,7 @@ mod tests {
     fn a_mac_is_offered_the_engines_that_run_there_led_by_hoppers_vm() {
         assert_eq!(
             candidates_for("macos"),
-            vec!["vm", "apple", "docker", "podman", "colima", "rancher", "existing"]
+            vec!["vm", "apple", "docker", "podman", "colima", "orbstack", "rancher", "existing"]
         );
     }
 

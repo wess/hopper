@@ -20,7 +20,7 @@ jobs:
       changed: ${{ steps.diff.outputs.changed }}
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Read workspace version
         id: version
@@ -48,15 +48,21 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.99.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@92e73e19cbfb3981e63ef478a16f95f415e634d3 # 1.99.0
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Test
         run: cargo test --workspace --locked
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Install pinned advisory scanner
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Audit dependencies
+        run: cargo audit --deny unsound --deny yanked
+      - name: Check licenses and generate SBOM
+        run: python3 scripts/check/sbom.py dist
       - name: Release build
         run: cargo build --workspace --release --locked
 
@@ -65,13 +71,13 @@ jobs:
     needs: [check-version, verify]
     if: needs.check-version.outputs.changed == 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Tag
         run: |
           git tag "v${{ needs.check-version.outputs.version }}"
           git push origin "v${{ needs.check-version.outputs.version }}"
       - name: GitHub Release (draft)
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: "v${{ needs.check-version.outputs.version }}"
           generate_release_notes: true
@@ -92,11 +98,11 @@ jobs:
       APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
       KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: "v${{ needs.check-version.outputs.version }}"
-      - uses: dtolnay/rust-toolchain@1.99.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@92e73e19cbfb3981e63ef478a16f95f415e634d3 # 1.99.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Require Apple signing and notarization credentials
         run: |
           set -euo pipefail
@@ -183,8 +189,12 @@ jobs:
           fi
           python3 scripts/check/bundle.py dist/Hopper.app
 
-      - name: Upload DMG
-        run: gh release upload "v${{ needs.check-version.outputs.version }}" dist/Hopper.dmg --clobber
+      - name: Release dependency inventory and checksums
+        run: |
+          python3 scripts/check/sbom.py dist
+          (cd dist && shasum -a 256 Hopper.dmg hopper.cdx.json dependencies.txt > SHA256SUMS)
+      - name: Upload release artifacts
+        run: gh release upload "v${{ needs.check-version.outputs.version }}" dist/Hopper.dmg dist/hopper.cdx.json dist/dependencies.txt dist/SHA256SUMS --clobber
         env:
           GH_TOKEN: ${{ github.token }}
 
@@ -193,7 +203,7 @@ jobs:
     needs: [check-version, build]
     if: needs.check-version.outputs.changed == 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       # Flip the draft live only once the DMG is attached.
       - name: Publish the release
         run: gh release edit "v${{ needs.check-version.outputs.version }}" --draft=false
@@ -228,7 +238,7 @@ jobs:
           echo "sha_darwin_arm64=$(sha256sum /tmp/Hopper.dmg | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew tap
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           repository: wess/homebrew-packages
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}

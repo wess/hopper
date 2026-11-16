@@ -50,6 +50,11 @@ pub fn log_file() -> PathBuf {
 pub fn ensure_root() -> std::io::Result<PathBuf> {
     let dir = root();
     std::fs::create_dir_all(&dir)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+    }
     Ok(dir)
 }
 

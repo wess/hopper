@@ -13,8 +13,10 @@ pub mod compose;
 pub mod container;
 pub mod engine;
 pub mod image;
+pub mod installation;
 pub mod migration;
 pub mod network;
+pub mod operation;
 pub mod registry;
 pub mod settings;
 pub mod stream;
@@ -26,8 +28,10 @@ pub use compose::*;
 pub use container::*;
 pub use engine::*;
 pub use image::*;
+pub use installation::*;
 pub use migration::*;
 pub use network::*;
+pub use operation::*;
 pub use registry::*;
 pub use settings::*;
 pub use stream::*;
@@ -42,5 +46,5 @@ pub type InspectResult = serde_json::Value;
 
 /// A fresh identifier for request/session correlation and stored records.
 pub fn new_uuid() -> String {
-  uuid::Uuid::new_v4().to_string()
+    uuid::Uuid::new_v4().to_string()
 }
