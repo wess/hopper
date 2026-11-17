@@ -367,6 +367,7 @@ h2 em { font-style: normal; color: var(--muted); }
   border-color: color-mix(in oklch, var(--blue) 45%, var(--edge));
   transform: translateY(-2px);
 }
+.card h2,
 .card h3 {
   margin: 0 0 0.35rem;
   font-size: var(--step-0);

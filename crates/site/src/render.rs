@@ -142,6 +142,7 @@ pub fn shell(page: &Page, pages: &[Page], groups: &[&str]) -> String {
 pub fn index(pages: &[Page], groups: &[&str], slug: &str, title: &str, lede: &str) -> String {
     // A single group whose name is the page title would just repeat the <h1>.
     let repeats_title = groups.len() == 1 && groups[0].eq_ignore_ascii_case(title);
+    let card_heading = if repeats_title { "h2" } else { "h3" };
 
     let mut body = String::new();
     for group in groups {
@@ -155,7 +156,7 @@ pub fn index(pages: &[Page], groups: &[&str], slug: &str, title: &str, lede: &st
         body.push_str("<div class=\"cards\">\n");
         for p in in_group {
             body.push_str(&format!(
-                "  <a class=\"card\" href=\"{}.html\"><h3>{}</h3><p>{}</p></a>\n",
+                "  <a class=\"card\" href=\"{}.html\"><{card_heading}>{}</{card_heading}><p>{}</p></a>\n",
                 p.slug,
                 escape(&p.title),
                 escape(&p.summary)
@@ -285,6 +286,8 @@ mod tests {
         );
         assert!(html.contains("<h1>Tutorials</h1>"));
         assert!(!html.contains("<h2>Tutorials</h2>"));
+        assert!(html.contains("<h2>FIRST</h2>"));
+        assert!(!html.contains("<h3>FIRST</h3>"));
         assert!(html.contains(r#"href="first.html""#));
     }
 
@@ -300,6 +303,7 @@ mod tests {
         );
         assert!(html.contains("<h2>Start</h2>"));
         assert!(html.contains("<h2>Use</h2>"));
+        assert!(html.contains("<h3>INSTALL</h3>"));
     }
 
     #[test]

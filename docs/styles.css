@@ -468,7 +468,7 @@ a {
 .migration-route li { display: grid; grid-template-columns: 84px 1fr auto; gap: 28px; align-items: start; padding: 28px 0; border-bottom: 1px solid rgba(8,40,82,.5); }
 .migration-route b { color: var(--vermilion-action); font-size: 54px; line-height: .8; }
 .migration-route strong { display: block; font-size: 32px; line-height: 1; text-transform: uppercase; }
-.migration-route p { max-width: 66ch; margin: 8px 0 0; font-size: 19px; }
+.migration-route p { max-width: 66ch; margin: 8px 0 0; font-size: 19px; line-height: 1.5; }
 .migration-route li > span { padding: 6px 10px; border: 1px solid var(--navy); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
 .inline-cta { display: inline-flex; gap: 42px; margin-top: 42px; padding-bottom: 8px; border-bottom: 2px solid var(--navy); font-size: 23px; font-weight: 700; text-transform: uppercase; }
 
@@ -482,7 +482,7 @@ a {
 
 .dispatch-section { display: grid; grid-template-columns: 1.25fr .75fr; gap: 7vw; align-items: end; background: var(--vermilion-action); }
 .dispatch-copy h2 { max-width: 10ch; }
-.dispatch-copy > p:last-child { max-width: 52ch; font-size: 21px; }
+.dispatch-copy > p:last-child { max-width: 52ch; font-size: 21px; line-height: 1.5; }
 .dispatch-section .eyebrow { color: #fff; }
 .dispatch-actions { display: grid; border-top: 1px solid #fff; }
 .dispatch-actions a { display: flex; justify-content: space-between; padding: 20px 0; border-bottom: 1px solid rgba(255,255,255,.65); font-size: 22px; font-weight: 700; text-transform: uppercase; }
