@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Move off Docker Desktop — Hopper</title>
+  <meta name="description" content="Import into Hopper Engine, verify the replacement, then remove Docker Desktop safely.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="docs.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html" class="active">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Move off Docker Desktop</h1>
+      <p class="lede-sm">Import into Hopper Engine, verify the replacement, then remove Docker Desktop safely.</p>
+<p>Hopper Engine is a private Docker environment owned by Hopper. You can run it
+beside Docker Desktop while you move, so the source stays intact until the new
+workloads have been verified.</p>
+<h2>1. Take stock and back up data</h2>
+<p>Keep Docker Desktop running. In <strong>Settings → Coexist or replace</strong>, Hopper lists
+the local runtimes it finds and explains the cost of running both.</p>
+<p>Review <code>docker ps -a</code>, <code>docker images</code>, <code>docker volume ls</code>, and any databases or
+named volumes you care about. Back those volumes up independently. Hopper's
+import deliberately does not copy volume contents.</p>
+<h2>2. Start Hopper Engine</h2>
+<p>Choose Hopper Engine and start it. First startup downloads the pinned Linux base,
+creates the private VM, starts Docker, and waits for the daemon to answer.</p>
+<p>Starting Hopper Engine does not stop, change, or remove Docker Desktop. Both can
+run at once, though they use extra memory and published ports may conflict.</p>
+<h2>3. Import</h2>
+<p>Open <strong>Import</strong>, select Docker Desktop as the source, and choose the images,
+containers, networks, and volume definitions you need. Images stream directly
+between the two Engine API endpoints. Containers are recreated from their
+configuration; their writable layers are scratch and do not move.</p>
+<p>The source is pinned for the duration of the run and nothing is deleted there.
+One failed item is reported without abandoning everything else.</p>
+<h2>4. Restore volume data</h2>
+<p>Create each destination volume and restore its independent backup before
+starting the container that owns it. One portable pattern is:</p>
+<pre><code class="language-sh"># Save from Docker Desktop.
+docker --context desktop-linux run --rm \
+  -v pgdata:/data -v "$PWD":/backup alpine \
+  tar czf /backup/pgdata.tgz -C /data .
+
+# Restore through Hopper Engine after installing its Docker CLI context.
+docker --context hopper volume create pgdata
+docker --context hopper run --rm \
+  -v pgdata:/data -v "$PWD":/backup alpine \
+  tar xzf /backup/pgdata.tgz -C /data
+</code></pre>
+<p>Use the real source context and volume names from your machine. Database-native
+backup and restore tools are safer than filesystem copies for a live database.</p>
+<h2>5. Verify the replacement</h2>
+<p>Start the imported workloads on Hopper Engine. Verify ports, logs, healthchecks,
+bind-mount paths, data, and any tools that mount the Docker socket. The Hopper
+Docker context points normal <code>docker</code>, Compose, and Engine API tools at the
+private socket.</p>
+<h2>6. Review removal</h2>
+<p>Only after independent backups and replacement verification, return to
+<strong>Settings → Coexist or replace</strong>. Hopper shows the exact vendor uninstaller,
+its destructive effects, and requires the application name as confirmation. It
+opens the review in Terminal; it never removes another runtime merely because
+you switched engines or completed an import.</p>
+<p>After Docker Desktop is gone, use <strong>Settings → Docker CLI → Install Docker CLI
+tools</strong> to repair command links and select the Hopper context if necessary.</p>
+<h2>Limits to check before removing anything</h2>
+<ul>
+<li>Volume contents do not move automatically.</li>
+<li>A service with only <code>build:</code> cannot be built by Hopper; provide an <code>image:</code> or
+build it elsewhere first.</li>
+<li>Bind mounts must refer to paths shared with Hopper Engine.</li>
+<li>Containers that depend on a specific desktop runtime or privileged host
+integration need workload-specific testing.</li>
+<li>Running both engines can conflict on published host ports.</li>
+</ul>
+<p>The safe order is backup, import, restore, verify, and only then removal.</p>
+      <nav class="pager">
+        <a class="prev" href="firstcontainer.html"><span>Previous</span>Run your first container</a>
+        <a class="next" href="composestack.html"><span>Next</span>Run a Compose stack</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

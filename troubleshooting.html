@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Troubleshooting — Hopper</title>
+  <meta name="description" content="Diagnose Hopper Engine startup, socket selection, mounts, and optional backends.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="docs.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html" class="active">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Troubleshooting</h1>
+      <p class="lede-sm">Diagnose Hopper Engine startup, socket selection, mounts, and optional backends.</p>
+<h2>Hopper Engine does not become connected</h2>
+<p>The VM being up is only half the check: Docker inside it must answer Hopper's
+private socket. Open <strong>Settings → Engine</strong> for the current phase and error, then
+stop and start Hopper Engine once. First startup can take longer while the Linux
+base is downloaded and provisioned.</p>
+<p>If you changed CPU, memory, file shares, or Docker daemon JSON, restart the
+engine to apply it. Invalid daemon JSON is rejected before it replaces the last
+working configuration.</p>
+<p>Hopper Engine data lives under <code>~/.hopper/engine/lima</code>. Do not delete that
+directory as a troubleshooting step: it contains the VM disk and container data.</p>
+<h2>A bind mount is empty or missing</h2>
+<p>Add its host path under <strong>Settings → Hopper Engine → File sharing</strong>, save, then
+restart Hopper Engine. The private VM cannot expose paths outside its configured
+shares.</p>
+<h2>A published port is already in use</h2>
+<p>Another container or a second local runtime may own the host port. Stop the
+conflicting workload or publish a different port. Docker Desktop and Hopper
+Engine can coexist, so check both while migrating.</p>
+<h2>Hopper connects to the wrong daemon</h2>
+<p>An explicit <code>HOPPER_ENGINE</code> overrides the saved choice, and <code>DOCKER_HOST</code> can
+select an existing endpoint. Remove the override or pin the provider under
+<strong>Settings → Which engine</strong>:</p>
+<pre><code class="language-sh">HOPPER_ENGINE=vm /Applications/Hopper.app/Contents/MacOS/hopper
+</code></pre>
+<p>Hopper keeps an unavailable explicit selection instead of falling through to an
+unrelated daemon.</p>
+<h2>Docker commands still target Docker Desktop</h2>
+<p>Use <strong>Settings → Docker CLI → Install Docker CLI tools</strong>. It repairs Hopper's
+bundled command links and creates or updates the <code>hopper</code> context. Confirm it:</p>
+<pre><code class="language-sh">docker context use hopper
+docker info
+</code></pre>
+<h2>Apple Containers cannot run on this Mac</h2>
+<p>The optional Apple backend needs Apple silicon and macOS 26. Use Hopper Engine
+or another Docker-compatible endpoint instead.</p>
+<p>If Apple's services are installed but stopped:</p>
+<pre><code class="language-sh">container system status
+container system start --enable-kernel-install
+</code></pre>
+<p>Hopper passes <code>--enable-kernel-install</code> because the plain command can prompt on
+stdin and the app has no terminal to answer.</p>
+<h2>PostgreSQL exits on Apple Containers</h2>
+<p>Apple named volumes may contain <code>lost+found</code>. Point PostgreSQL at a subdirectory:</p>
+<pre><code class="language-yaml">environment:
+  PGDATA: /var/lib/postgresql/data/pgdata
+</code></pre>
+<h2>Permission denied on a Linux socket</h2>
+<p>For Docker, add the user to the appropriate group and start a new login session:</p>
+<pre><code class="language-sh">sudo usermod -aG docker "$USER"
+</code></pre>
+<p>For rootless Podman, start its user socket:</p>
+<pre><code class="language-sh">systemctl --user start podman.socket
+</code></pre>
+<h2>Verify notarization</h2>
+<pre><code class="language-sh">spctl -a -t exec -vv /Applications/Hopper.app
+</code></pre>
+<p>Check the app, not the DMG. The signature lives on <code>Hopper.app</code>; the notarization
+ticket is stapled to the disk image.</p>
+      <nav class="pager">
+        <a class="prev" href="architecture.html"><span>Previous</span>Architecture</a>
+        <a class="next" href="contributing.html"><span>Next</span>From source</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

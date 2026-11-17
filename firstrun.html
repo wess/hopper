@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>First run — Hopper</title>
+  <meta name="description" content="What Hopper selects, how Hopper Engine starts, and what each engine state means.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="docs.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html" class="active">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>First run</h1>
+      <p class="lede-sm">What Hopper selects, how Hopper Engine starts, and what each engine state means.</p>
+<p>On launch Hopper selects an engine, resolves its endpoint, and starts polling.
+The sidebar footer names the provider and its current state.</p>
+<h2>On a clean Mac</h2>
+<p>Hopper offers its managed engine instead of reporting that Docker is missing.
+Choose <strong>Start Hopper Engine</strong>. The first start:</p>
+<ol>
+<li>verifies the bundled Lima helper and templates;</li>
+<li>downloads the pinned Linux base when it is not cached;</li>
+<li>creates Hopper's private VM disk under <code>~/.hopper/engine/lima</code>;</li>
+<li>applies CPU, memory, file-share, and Docker daemon settings;</li>
+<li>starts the VM and waits for Docker to answer its private socket.</li>
+</ol>
+<p>The footer moves through preparation, VM startup, and Docker readiness. A booted
+VM with an unhealthy daemon is not shown as connected.</p>
+<h2>If another engine is already running</h2>
+<p>Automatic selection can attach to Docker Desktop, Colima, Rancher Desktop,
+Podman, or an explicit <code>DOCKER_HOST</code>. Open <strong>Settings → Coexist or replace</strong> to
+keep using it, switch to Hopper Engine, import its workloads, or review removal
+after independent backups and replacement verification.</p>
+<p>Hopper never removes another runtime merely because you switched engines or
+finished an import.</p>
+<h2>The states</h2>
+<table><thead><tr><th>State</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><strong>connected</strong></td><td>The selected engine answered and is ready.</td></tr>
+<tr><td><strong>starting</strong></td><td>Provisioning, boot, or a Docker readiness check is in flight.</td></tr>
+<tr><td><strong>stopped</strong></td><td>The engine exists but is not running. Managed engines offer Start.</td></tr>
+<tr><td><strong>not installed</strong></td><td>The selected external runtime is absent, or an optional backend can be installed.</td></tr>
+<tr><td><strong>needs permission</strong></td><td>The endpoint exists but Hopper cannot open it.</td></tr>
+<tr><td><strong>unreachable</strong></td><td>The endpoint exists but the engine did not answer correctly.</td></tr>
+<tr><td><strong>unsupported</strong></td><td>This provider cannot run on the current hardware or build.</td></tr>
+</tbody></table>
+<p>Only states Hopper can act on get a lifecycle button. Hopper can start and stop
+Hopper Engine; it does not launch or kill somebody else's desktop runtime.</p>
+<h2>Autostart</h2>
+<p>Autostart is enabled by default for Hopper Engine. Turn it off under
+<strong>Settings → Engine</strong> if you want the VM to remain stopped until requested.</p>
+      <nav class="pager">
+        <a class="prev" href="engines.html"><span>Previous</span>Engines</a>
+        <a class="next" href="containers.html"><span>Next</span>Containers</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

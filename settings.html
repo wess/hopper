@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings — Hopper</title>
+  <meta name="description" content="Engine choice, Hopper Engine resources, Docker configuration, CLI tools, and replacement safety.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="docs.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html" class="active">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Settings</h1>
+      <p class="lede-sm">Engine choice, Hopper Engine resources, Docker configuration, CLI tools, and replacement safety.</p>
+<h2>Engine</h2>
+<p>The status panel names the selected provider and, for an engine Hopper manages,
+offers its supported lifecycle actions. Hopper Engine can be started and stopped
+here. External desktop runtimes remain under their own application's control.</p>
+<h2>Which engine</h2>
+<p><strong>Automatic</strong> prefers Hopper Engine on a supported Mac, the available Docker or
+Podman socket on Linux and Windows, and an existing compatible endpoint when one
+is already selected. Pinning a provider keeps that choice even while it is
+stopped, so an outage cannot silently redirect requests to another daemon.</p>
+<p><code>HOPPER_ENGINE</code> overrides the saved choice for testing and automation.</p>
+<h2>Hopper Engine resources</h2>
+<p>Set the private VM's CPU count, memory, and disk budget. File shares decide which
+host paths containers can bind-mount. Docker settings accept daemon JSON for
+advanced configuration. Stop and start Hopper Engine after changing VM, share,
+or daemon settings.</p>
+<p>The disk panel reports usage and can reclaim unused VM space. Idle suspend can
+stop an empty Hopper Engine after the configured delay; autostart controls
+whether Hopper starts it on launch.</p>
+<p>These controls appear only for Hopper Engine. Docker Desktop, Podman, Colima,
+and remote daemons own their resources elsewhere.</p>
+<h2>Coexist or replace</h2>
+<p>This section discovers other local container applications and keeps replacement
+explicit. You can continue using one, run it beside Hopper Engine, import its
+workloads, or review removal after backups and verification. Hopper shows
+destructive consequences and requires typed confirmation before opening the
+vendor removal command in Terminal.</p>
+<p>Switching engines and importing never uninstall anything.</p>
+<h2>Docker CLI</h2>
+<p><strong>Install Docker CLI tools</strong> configures Hopper's bundled Docker, Compose,
+Buildx, and credential helper for the current user, then creates or updates the
+<code>hopper</code> Docker context for Hopper Engine's private socket. It can also repair
+links left behind when Docker Desktop was removed.</p>
+<p>Apple Containers publishes no Docker socket, so Docker CLI tools cannot target
+that optional backend.</p>
+<h2>Appearance</h2>
+<p>Choose light, dark, or follow the system.</p>
+<h2>Where settings live</h2>
+<p>JSON lives under <code>~/.hopper/</code> and is written atomically. A corrupt document is
+backed up instead of silently discarded. Credentials live in the OS keychain as
+single-line JSON values. <code>HOPPER_DIR</code> overrides the root for isolated testing.</p>
+      <nav class="pager">
+        <a class="prev" href="cli.html"><span>Previous</span>Docker CLI</a>
+        <a class="next" href="firstcontainer.html"><span>Next</span>Run your first container</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

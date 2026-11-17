@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Run your first container — Hopper</title>
+  <meta name="description" content="Start Hopper Engine and serve nginx on localhost.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="docs.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html" class="active">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Run your first container</h1>
+      <p class="lede-sm">Start Hopper Engine and serve nginx on localhost.</p>
+<p>This walkthrough starts on an Apple silicon Mac with no container runtime.</p>
+<h2>1. Install Hopper</h2>
+<pre><code class="language-sh">brew install --cask wess/packages/hopper
+</code></pre>
+<p>Open the app. Hopper selects its managed engine and shows its current state in
+the sidebar.</p>
+<h2>2. Start Hopper Engine</h2>
+<p>Click <strong>Start Hopper Engine</strong>. On the first run Hopper downloads the pinned Linux
+base, creates its private VM disk, starts Docker, and waits for the daemon. Keep
+the app open until the footer says <strong>Connected</strong>.</p>
+<p>Already running Docker Desktop, Colima, Rancher Desktop, or Podman? Hopper can
+attach to it instead. Select the engine under Settings.</p>
+<h2>3. Find an image</h2>
+<p>Open <strong>Registry</strong> and search for <code>nginx</code>. Registry search talks to the registry
+over HTTP, so it does not depend on daemon-side search.</p>
+<p>Choose the official nginx image and click <strong>Run</strong>.</p>
+<h2>4. Configure the run</h2>
+<ul>
+<li><strong>Name</strong> — <code>web</code></li>
+<li><strong>Publish ports</strong> — <code>8080:80</code></li>
+</ul>
+<p>Leave the other fields at their defaults and click <strong>Run</strong>.</p>
+<h2>5. Verify it</h2>
+<p>The Containers view shows <code>web</code> as running with <code>8080→80</code>.</p>
+<pre><code class="language-sh">curl http://localhost:8080
+</code></pre>
+<p>The nginx welcome page confirms port forwarding. Open the container detail pane
+to see the request in Logs, inspect live stats, browse files, or open a shell.</p>
+<h2>6. Clean up</h2>
+<p>Stop the container, then remove it. The image remains available for another run.</p>
+<p><strong>Next:</strong> <a href="offdockerdesktop.html">Move off Docker Desktop</a> if you have an
+existing local environment to bring across.</p>
+      <nav class="pager">
+        <a class="prev" href="settings.html"><span>Previous</span>Settings</a>
+        <a class="next" href="offdockerdesktop.html"><span>Next</span>Move off Docker Desktop</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>

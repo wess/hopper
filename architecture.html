@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Architecture — Hopper</title>
+  <meta name="description" content="A bottom-up Rust workspace with a gpui-free core and one Tokio-to-gpui seam.">
+  <meta name="theme-color" content="#0c1018">
+  <link rel="stylesheet" href="docs.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="aurora" aria-hidden="true"></div>
+
+  <header class="nav">
+    <a class="brand" href="index.html">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="21" height="21" rx="6" stroke="currentColor" stroke-width="1.4" opacity="0.5"/><rect x="7" y="7" width="10" height="10" rx="3" fill="var(--blue)"/></svg>
+      Hopper
+    </a>
+    <nav>
+      <a href="index.html#workflow">Workflow</a>
+      <a href="index.html#engine">Engine</a>
+      <a href="docs.html">Docs</a>
+      <a href="tutorials.html">Tutorials</a>
+    </nav>
+    <a class="ghjump" href="https://github.com/wess/hopper">GitHub ↗</a>
+  </header>
+
+  <div class="wrap docs-layout">
+    <aside class="docs-nav" aria-label="Documentation">
+      <h5>Start</h5>
+      <a href="install.html">Install</a>
+      <a href="engines.html">Engines</a>
+      <a href="firstrun.html">First run</a>
+      <h5>Use</h5>
+      <a href="containers.html">Containers</a>
+      <a href="images.html">Images</a>
+      <a href="volumes.html">Volumes and networks</a>
+      <a href="stacks.html">Compose stacks</a>
+      <a href="import.html">Import from Docker</a>
+      <a href="cli.html">Docker CLI</a>
+      <a href="settings.html">Settings</a>
+      <h5>Tutorials</h5>
+      <a href="firstcontainer.html">Run your first container</a>
+      <a href="offdockerdesktop.html">Move off Docker Desktop</a>
+      <a href="composestack.html">Run a Compose stack</a>
+      <h5>Reference</h5>
+      <a href="mcp.html">MCP server</a>
+      <a href="architecture.html" class="active">Architecture</a>
+      <a href="troubleshooting.html">Troubleshooting</a>
+      <a href="contributing.html">From source</a>
+    </aside>
+
+    <article class="docs-body">
+      <h1>Architecture</h1>
+      <p class="lede-sm">A bottom-up Rust workspace with a gpui-free core and one Tokio-to-gpui seam.</p>
+<pre><code>crates/
+  model     shared domain types and wire contracts
+  store     ~/.hopper JSON persistence + OS keychain
+  docker    Engine API client, transports, streaming, exec, archives
+  apple     optional Apple Containers CLI adapter
+  engine    provider registry + Hopper's private Lima VM
+  compose   Compose parsing, interpolation, planning and naming
+  migrate   source discovery and Docker-to-Hopper import
+  host      async service facade and backend dispatch
+  mcp       stdio MCP server
+  app       gpui + guise desktop application
+  site      documentation generator
+</code></pre>
+<p>Each crate depends only on layers below it. The core stays free of gpui; the UI
+boundary is <code>app</code>.</p>
+<h2>Providers and backends</h2>
+<p>On macOS, Hopper Engine provisions a private Lima VM under
+<code>~/.hopper/engine/lima</code>, starts rootful Docker inside it, publishes a private
+host socket, and waits for Docker readiness. The bundled helper owns Apple's
+Virtualization framework integration, file sharing, and port forwarding.</p>
+<p>Docker, Podman, Hopper Engine, and remote daemons all converge on <code>crates/docker</code>.
+Endpoints are resolved per request and API versions negotiate down for older
+daemons. Unix sockets, TCP/TLS, and Windows named pipes use the same client.</p>
+<p>Apple Containers is the second backend. <code>host::runtime::Backend</code> is an enum,
+not a trait, because streaming operations accept <code>FnMut</code> callbacks that are not
+object-safe. <code>EngineCapabilities</code> tells the UI which controls each backend can
+actually support.</p>
+<h2>Why Apple uses a CLI adapter</h2>
+<p>Apple's <code>container</code> talks to its apiserver over XPC and does not publish a
+Docker Engine API. <code>crates/apple</code> therefore drives the binary and maps its JSON
+onto Hopper's shared model. The decoder is deliberately liberal because Apple
+only promises output stability within a patch version.</p>
+<h2>The async seam</h2>
+<p>Docker work runs on Tokio while gpui owns the application thread. <code>app::bridge</code>
+is the single handoff: it runs a future on Tokio and delivers its result to gpui
+through a runtime-agnostic channel. Streaming views cancel by dropping their
+receivers, so logs, stats, and events do not need a separate abort registry.</p>
+<p>This layering follows the <a href="https://github.com/wess/tables">tables</a> architecture.</p>
+      <nav class="pager">
+        <a class="prev" href="mcp.html"><span>Previous</span>MCP server</a>
+        <a class="next" href="troubleshooting.html"><span>Next</span>Troubleshooting</a>
+      </nav>
+    </article>
+  </div>
+
+  <footer class="sitefooter">
+    <div class="wrap">
+      <span>Hopper — a native container workbench with its own engine on macOS.</span>
+      <a href="https://github.com/wess/hopper">github.com/wess/hopper</a>
+    </div>
+  </footer>
+</body>
+</html>
