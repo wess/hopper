@@ -25,6 +25,15 @@ spctl -a -t exec -vv /Applications/Hopper.app
 # source=Notarized Developer ID
 ```
 
+## Updates
+
+Hopper checks for a newer release when it opens and once an hour while it is
+running. Choose **Hopper → Check for Updates…** for an immediate check.
+
+Before an accepted update is installed in place, Hopper verifies the downloaded
+DMG against the release's published SHA-256 and requires the replacement app to
+carry Hopper's Developer ID signature. It then relaunches into the new version.
+
 ## What Hopper needs
 
 | | |

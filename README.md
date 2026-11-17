@@ -42,11 +42,16 @@ Compose, Buildx and the Keychain credential helper.
   Podman, Colima, Rancher Desktop, or an existing endpoint; control lifecycle,
   appearance, VM CPU/memory/disk resources, file sharing, Docker daemon JSON,
   idle suspension, and Docker CLI integration.
+- **Automatic updates** — check on launch and hourly, with a manual **Check for
+  Updates…** command. Accepted releases are checked against their published
+  SHA-256 and Hopper's Developer ID signature before an in-place relaunch.
 - **Coexist or replace** — discover other local runtimes, start Hopper Engine
   beside them, import first, and open an explicit removal review only after
   independent backups and typed confirmation.
-- **Migration** — scan a source engine (Docker Desktop / Colima / Rancher) and
-  copy images, networks, and container configuration into Hopper's engine;
+- **Migration** — discover every running Docker-compatible source, choose one
+  (Docker Desktop, Podman, Colima, Rancher Desktop, OrbStack, or a custom
+  socket/TCP/TLS endpoint), and copy images, networks, and container
+  configuration into Hopper's engine;
   named volumes referenced by recreated containers are created as needed,
   while selected volume contents are called out for manual transfer rather
   than being silently lost.
@@ -78,10 +83,11 @@ Anything that needs them can switch engines in Settings.
 
 ### Import from Docker
 
-Copies images, networks and containers out of Docker Desktop, Colima or Rancher
-Desktop and into whichever engine Hopper is running. Containers are recreated
-rather than moved — the image, ports, mounts and labels travel; a writable layer
-is by definition scratch. Nothing is removed from the source.
+Discovers all running Docker-compatible engines and lets you choose the exact
+source. Docker Desktop, Podman, Colima, Rancher Desktop, OrbStack, local sockets,
+named pipes, and TCP/TLS endpoints use the same import path. Containers are
+recreated rather than moved — the image, ports, mounts and labels travel; a
+writable layer is by definition scratch. Nothing is removed from the source.
 
 ## Architecture
 
@@ -96,7 +102,7 @@ crates/
   apple     Apple Containers, driven through the `container` CLI
   compose   Compose files resolved into run plans, no compose CLI needed
   engine    engine providers: Hopper's managed Linux VM, Apple, Docker, Podman
-  migrate   Docker Desktop → Hopper migration
+  migrate   Docker-compatible engine → Hopper migration
   host      the async service facade the UI calls
   mcp       the stdio MCP server (hoppermcp)
   app       the gpui + guise application (hopperdev / hopper)

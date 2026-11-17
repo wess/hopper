@@ -78,7 +78,8 @@ the gpui-free core never imports gpui.
   `providers/apple.rs` is the macOS engine, `providers/linux.rs` finds Docker or
   Podman (rootless sockets first), `providers/existing.rs` is the
   always-available fallback.
-- **`migrate`** — Docker Desktop → Hopper migration (scan + copy).
+- **`migrate`** — Docker-compatible engine → Hopper migration (discover,
+  select, scan, and copy).
 - **`host`** — the async service facade (`Host`) the UI calls. Owns the Docker
   client, the engine registry, settings, and workspace scoping. gpui-free.
 - **`mcp`** — the stdio MCP server; protocol framing plus the Docker tool set.

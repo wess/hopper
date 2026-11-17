@@ -9,7 +9,8 @@
 
 use docker::Endpoint;
 use model::{
-    MigrationPhase, MigrationPlan, MigrationProgress, MigrationReview, MigrationScan, RuntimeKind,
+    MigrationEndpoint, MigrationPhase, MigrationPlan, MigrationProgress, MigrationReview,
+    MigrationScan, MigrationSource, RuntimeKind,
 };
 use std::time::Duration;
 
@@ -33,6 +34,48 @@ fn destination_endpoint(host: &Host) -> Endpoint {
 }
 
 impl Host {
+    /// Every reachable Docker-compatible engine other than the destination.
+    ///
+    /// Discovery is provider-neutral: named desktop apps, Podman, Hopper's
+    /// managed engine, and an explicit `DOCKER_HOST` all enter through the
+    /// same endpoint contract. Duplicate aliases for one socket are collapsed.
+    pub async fn import_sources(&self) -> Vec<MigrationSource> {
+        let destination = destination_endpoint(self);
+        let registry = self.engines().registry();
+        let providers = registry
+            .ids()
+            .into_iter()
+            .filter_map(|id| registry.get(id))
+            .filter(|provider| provider.runtime() == RuntimeKind::EngineApi);
+        let candidates = futures::future::join_all(providers.map(|provider| async move {
+            let endpoint = provider.endpoint().await?;
+            let client = docker::Client::new(endpoint.clone());
+            client.set_timeout(Duration::from_secs(3));
+            client.ping().await.ok()?;
+            Some((provider, endpoint))
+        }))
+        .await;
+
+        let mut sources: Vec<MigrationSource> = Vec::new();
+        for (provider, endpoint) in candidates.into_iter().flatten() {
+            if migrate::scan::is_same_engine(&endpoint, &destination)
+                || sources.iter().any(|source| {
+                    let known: Endpoint = source.endpoint.clone().into();
+                    migrate::scan::is_same_engine(&known, &endpoint)
+                })
+            {
+                continue;
+            }
+            sources.push(MigrationSource {
+                id: provider.id().into(),
+                label: provider.label().into(),
+                detail: endpoint.describe(),
+                endpoint: endpoint.into(),
+            });
+        }
+        sources
+    }
+
     /// Read-only preflight for the import review screen.
     pub async fn import_review(&self, plan: &MigrationPlan) -> MigrationReview {
         let _selection = self.lock_selection().await;
@@ -128,6 +171,27 @@ impl Host {
             Some(source) => migrate::scan::scan_source(&destination, source).await,
             None => MigrationScan { available: false, message: Some("The selected source has no Docker-compatible endpoint. Start it and review your DOCKER_HOST override before scanning again.".into()), ..Default::default() },
         }
+    }
+
+    /// Scan an exact source selected from discovery.
+    pub async fn import_scan_source(&self, source: MigrationEndpoint) -> MigrationScan {
+        migrate::scan::scan_source(&destination_endpoint(self), source.into()).await
+    }
+
+    /// Scan a user-supplied Docker endpoint (`unix://`, `tcp://`, `https://`,
+    /// a named pipe, or an absolute socket path).
+    pub async fn import_scan_endpoint(&self, value: &str) -> MigrationScan {
+        let Some(source) = docker::endpoint::parse_docker_host(value.trim(), false) else {
+            return MigrationScan {
+                available: false,
+                message: Some(
+                    "Enter a Docker endpoint such as unix:///path/docker.sock, tcp://host:2375, or https://host:2376."
+                        .into(),
+                ),
+                ..Default::default()
+            };
+        };
+        migrate::scan::scan_source(&destination_endpoint(self), source).await
     }
 
     /// Copy the selection across, reporting as it goes.

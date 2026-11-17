@@ -1,4 +1,4 @@
-//! Docker Desktop → Hopper migration.
+//! Import from Docker-compatible engines into Hopper.
 
 #[cfg(target_os = "macos")]
 pub mod apple;

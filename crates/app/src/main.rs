@@ -14,6 +14,7 @@ mod root;
 mod sidebar;
 mod state;
 mod theme;
+mod update;
 mod views;
 
 use gpui::prelude::*;
@@ -45,6 +46,7 @@ actions!(
     Refresh,
     OpenSettings,
     ShowDocs,
+    CheckUpdates,
 );
 
 fn menu(name: &'static str, items: Vec<MenuItem>) -> Menu {
@@ -60,6 +62,7 @@ fn menus() -> Vec<Menu> {
             "Hopper",
             vec![
                 MenuItem::action("Settings…", OpenSettings),
+                MenuItem::action("Check for Updates…", CheckUpdates),
                 MenuItem::separator(),
                 MenuItem::action("Hide Hopper", Hide),
                 MenuItem::action("Hide Others", HideOthers),
@@ -107,6 +110,7 @@ fn main() {
         cx.on_action::<HideOthers>(|_, cx| cx.hide_other_apps());
         cx.on_action::<ShowAll>(|_, cx| cx.unhide_other_apps());
         cx.on_action::<ShowDocs>(|_, cx| cx.open_url("https://github.com/wess/hopper"));
+        cx.on_action::<CheckUpdates>(|_, cx| update::check_now(cx));
 
         // Reproducible native layout checks without changing release defaults.
         let dimensions = cfg!(debug_assertions)
@@ -139,6 +143,7 @@ fn main() {
             cx.quit();
             return;
         }
+        update::start(cx);
         cx.activate(true);
     });
 }

@@ -11,10 +11,11 @@ use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
 use gpui::prelude::*;
-use gpui::{div, px, Context, Window};
+use gpui::{div, px, Context, Entity, SharedString, Window};
 use guise::prelude::*;
 use model::{
-    MigrationItem, MigrationKind, MigrationPlan, MigrationProgress, MigrationReview, MigrationScan,
+    MigrationEndpoint, MigrationItem, MigrationKind, MigrationPlan, MigrationProgress,
+    MigrationReview, MigrationScan, MigrationSource,
 };
 
 use crate::bridge;
@@ -26,6 +27,8 @@ use crate::theme;
 pub enum Stage {
     /// Nothing asked for yet.
     Idle,
+    Discovering,
+    Sources(Vec<MigrationSource>),
     Scanning,
     /// A scan came back. May still hold nothing.
     Chosen(Box<MigrationScan>),
@@ -163,6 +166,7 @@ pub struct Import {
     review: Option<(MigrationReview, u64)>,
     reviewing: bool,
     requested_source: Option<String>,
+    endpoint: Entity<TextInput>,
 }
 
 impl Import {
@@ -170,6 +174,17 @@ impl Import {
         let state = AppState::get(cx);
         watch(cx, &state.engine);
         watch(cx, &state.import_provider);
+        let endpoint = cx.new(|cx| {
+            TextInput::new(cx)
+                .label("Docker endpoint")
+                .placeholder("unix:///path/docker.sock or tcp://host:2375")
+        });
+        cx.subscribe(&endpoint, |this, _input, event: &TextInputEvent, cx| {
+            if matches!(event, TextInputEvent::Submit(_)) {
+                this.scan_custom(cx);
+            }
+        })
+        .detach();
         Self {
             state,
             stage: Stage::Idle,
@@ -180,12 +195,61 @@ impl Import {
             review: None,
             reviewing: false,
             requested_source: None,
+            endpoint,
         }
     }
 
     fn scan(&mut self, cx: &mut Context<Self>) {
         let host = Arc::clone(&self.state.host);
         let source = self.state.import_provider.get(cx);
+        let Some(source) = source else {
+            self.discover(cx);
+            return;
+        };
+        self.run_scan(async move { host.import_scan_provider(&source).await }, cx);
+    }
+
+    fn discover(&mut self, cx: &mut Context<Self>) {
+        let host = Arc::clone(&self.state.host);
+        let this = cx.entity().downgrade();
+        self.stage = Stage::Discovering;
+        self.notes.clear();
+        self.review = None;
+        cx.notify();
+        bridge::run(
+            cx,
+            async move { host.import_sources().await },
+            move |sources, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.stage = Stage::Sources(sources);
+                    cx.notify();
+                });
+            },
+        );
+    }
+
+    fn scan_source(&mut self, source: MigrationEndpoint, cx: &mut Context<Self>) {
+        let host = Arc::clone(&self.state.host);
+        self.run_scan(async move { host.import_scan_source(source).await }, cx);
+    }
+
+    fn scan_custom(&mut self, cx: &mut Context<Self>) {
+        let endpoint = self.endpoint.read(cx).text().trim().to_string();
+        if endpoint.is_empty() {
+            return;
+        }
+        let host = Arc::clone(&self.state.host);
+        self.run_scan(
+            async move { host.import_scan_endpoint(&endpoint).await },
+            cx,
+        );
+    }
+
+    fn run_scan<F>(&mut self, request: F, cx: &mut Context<Self>)
+    where
+        F: std::future::Future<Output = MigrationScan> + Send + 'static,
+    {
+        let host = Arc::clone(&self.state.host);
         let check_host = Arc::clone(&host);
         let request_generation = host.selection_generation();
         let this = cx.entity().downgrade();
@@ -193,32 +257,23 @@ impl Import {
         self.notes.clear();
         self.review = None;
         cx.notify();
-        bridge::run(
-            cx,
-            async move {
-                match source {
-                    Some(provider) => host.import_scan_provider(&provider).await,
-                    None => host.import_scan().await,
-                }
-            },
-            move |scan, cx| {
-                if let Some(this) = this.upgrade() {
-                    this.update(cx, |this, cx| {
-                        if check_host.selection_generation() != request_generation {
-                            // The result describes a different destination.
-                            // Return to an actionable state rather than
-                            // presenting a stale plan that could be imported.
-                            this.stage = Stage::Idle;
-                            cx.notify();
-                            return;
-                        }
-                        this.selected = select_all(&scan);
-                        this.stage = Stage::Chosen(Box::new(scan));
+        bridge::run(cx, request, move |scan, cx| {
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |this, cx| {
+                    if check_host.selection_generation() != request_generation {
+                        // The result describes a different destination.
+                        // Return to an actionable state rather than
+                        // presenting a stale plan that could be imported.
+                        this.stage = Stage::Idle;
                         cx.notify();
-                    });
-                }
-            },
-        );
+                        return;
+                    }
+                    this.selected = select_all(&scan);
+                    this.stage = Stage::Chosen(Box::new(scan));
+                    cx.notify();
+                });
+            }
+        });
     }
 
     fn review(&mut self, cx: &mut Context<Self>) {
@@ -427,13 +482,88 @@ impl Render for Import {
             Stage::Idle => {
                 body = body.child(
                     Group::new().child(
-                        Button::new("import-scan", "Look for Docker")
-                            .size(Size::Sm)
-                            .variant(Variant::Filled)
-                            .color(ColorName::Blue)
-                            .on_click(cx.listener(|this, _, _, cx| this.scan(cx))),
+                        Button::new(
+                            "import-scan",
+                            if self.requested_source.is_some() {
+                                "Scan selected source"
+                            } else {
+                                "Find source engines"
+                            },
+                        )
+                        .size(Size::Sm)
+                        .variant(Variant::Filled)
+                        .color(ColorName::Blue)
+                        .on_click(cx.listener(|this, _, _, cx| this.scan(cx))),
                     ),
                 );
+            }
+            Stage::Discovering => {
+                body = body.child(
+                    Group::new()
+                        .gap(Size::Sm)
+                        .align(Align::Center)
+                        .child(Loader::new().size(Size::Sm).color(ColorName::Blue))
+                        .child(Text::new("Finding Docker-compatible engines…").size(Size::Sm)),
+                );
+            }
+            Stage::Sources(sources) => {
+                let mut choices = Stack::new()
+                    .gap(Size::Sm)
+                    .child(Text::new("Choose a source engine").size(Size::Sm).medium());
+                if sources.is_empty() {
+                    choices = choices.child(
+                        Text::new(
+                            "No other running engine was detected. Start the source application, or connect to its endpoint below."
+                                .to_string(),
+                        )
+                        .size(Size::Sm)
+                        .dimmed(),
+                    );
+                }
+                for source in sources {
+                    let endpoint = source.endpoint.clone();
+                    choices = choices.child(
+                        Stack::new()
+                            .gap(Size::Xs)
+                            .child(
+                                Button::new(
+                                    SharedString::from(format!("import-source-{}", source.id)),
+                                    source.label.clone(),
+                                )
+                                .size(Size::Sm)
+                                .variant(Variant::Light)
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| this.scan_source(endpoint.clone(), cx),
+                                )),
+                            )
+                            .child(Text::new(source.detail.clone()).size(Size::Xs).dimmed()),
+                    );
+                }
+                choices = choices
+                    .child(
+                        Text::new("Connect to another engine")
+                            .size(Size::Sm)
+                            .medium(),
+                    )
+                    .child(self.endpoint.clone())
+                    .child(
+                        Group::new()
+                            .gap(Size::Sm)
+                            .child(
+                                Button::new("import-custom-source", "Connect and scan")
+                                    .size(Size::Sm)
+                                    .variant(Variant::Filled)
+                                    .color(ColorName::Blue)
+                                    .on_click(cx.listener(|this, _, _, cx| this.scan_custom(cx))),
+                            )
+                            .child(
+                                Button::new("import-rediscover", "Refresh")
+                                    .size(Size::Sm)
+                                    .variant(Variant::Subtle)
+                                    .on_click(cx.listener(|this, _, _, cx| this.discover(cx))),
+                            ),
+                    );
+                body = body.child(choices);
             }
             Stage::Scanning => {
                 body = body.child(
@@ -593,7 +723,7 @@ impl Render for Import {
                             Button::new("import-again", "Import something else")
                                 .size(Size::Sm)
                                 .variant(Variant::Light)
-                                .on_click(cx.listener(|this, _, _, cx| this.scan(cx))),
+                                .on_click(cx.listener(|this, _, _, cx| this.discover(cx))),
                         ),
                     );
             }

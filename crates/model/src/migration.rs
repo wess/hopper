@@ -1,4 +1,4 @@
-//! Docker Desktop → Hopper migration.
+//! Importing from Docker-compatible engines into Hopper.
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,21 @@ pub enum MigrationEndpoint {
     Npipe { path: String },
     #[serde(rename = "tcp")]
     Tcp { host: String, port: u16, tls: bool },
+}
+
+/// A reachable Docker-compatible engine that can be used as an import source.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MigrationSource {
+    /// Stable provider id when Hopper knows the application, or `existing`
+    /// for an endpoint supplied through the environment.
+    pub id: String,
+    /// Human name shown in the source picker.
+    pub label: String,
+    /// Exact endpoint pinned into the scan and eventual import plan.
+    pub endpoint: MigrationEndpoint,
+    /// Transport detail that distinguishes two installations with similar names.
+    pub detail: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -183,6 +198,21 @@ mod tests {
         let raw = serde_json::to_string(&ep).unwrap();
         let back: MigrationEndpoint = serde_json::from_str(&raw).unwrap();
         assert_eq!(back, ep);
+    }
+
+    #[test]
+    fn discovered_source_round_trips_with_its_exact_endpoint() {
+        let source = MigrationSource {
+            id: "colima".into(),
+            label: "Colima".into(),
+            endpoint: MigrationEndpoint::Unix {
+                path: "/Users/dev/.colima/default/docker.sock".into(),
+            },
+            detail: "unix:/Users/dev/.colima/default/docker.sock".into(),
+        };
+        let raw = serde_json::to_string(&source).unwrap();
+        let back: MigrationSource = serde_json::from_str(&raw).unwrap();
+        assert_eq!(back, source);
     }
 
     #[test]

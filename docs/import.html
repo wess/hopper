@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Import from Docker — Hopper</title>
-  <meta name="description" content="Copy images, networks and containers out of Docker Desktop into whichever engine Hopper runs.">
+  <meta name="description" content="Import images, networks and containers from any Docker-compatible engine into Hopper.">
   <meta name="theme-color" content="#0c1018">
   <link rel="stylesheet" href="docs.css">
   <script src="app.js" defer></script>
@@ -53,25 +53,31 @@
 
     <article class="docs-body">
       <h1>Import from Docker</h1>
-      <p class="lede-sm">Copy images, networks and containers out of Docker Desktop into whichever engine Hopper runs.</p>
+      <p class="lede-sm">Import images, networks and containers from any Docker-compatible engine into Hopper.</p>
 <p>Hopper Engine can replace Docker Desktop without making migration destructive.
 Run both temporarily, copy the workloads you need, restore data independently,
 and remove the old runtime only after the replacement has been verified.</p>
-<p><strong>Import</strong> scans for another engine, lists what it holds, and copies your
-selection across. <strong>Nothing is removed from the source.</strong> If the import goes
-wrong, Docker is exactly where it was.</p>
+<p><strong>Import</strong> finds every running Docker-compatible engine, lets you choose the
+source, lists what it holds, and copies your selection across. <strong>Nothing is
+removed from the source.</strong> If the import goes wrong, the original engine is
+exactly where it was.</p>
 <h2>What it finds</h2>
-<p>Docker Desktop, Colima and Rancher Desktop, in that order, plus the classic
-system socket:</p>
+<p>Hopper names and discovers the common local runtimes:</p>
 <ul>
 <li><code>~/.docker/run/docker.sock</code></li>
+<li>Podman's current machine or rootless socket</li>
 <li><code>~/.colima/default/docker.sock</code></li>
+<li><code>~/.orbstack/run/docker.sock</code></li>
 <li><code>~/.rd/docker.sock</code></li>
 <li><code>/var/run/docker.sock</code></li>
 </ul>
-<p>The replacement flow can pin a specific installed application as the source.
-Whichever engine Hopper is currently running is excluded, so it never offers to
-copy an engine onto itself.</p>
+<p>The picker shows every source that answers, rather than silently choosing the
+first one. For another app, remote host, or nonstandard installation, enter its
+Docker endpoint directly: a Unix socket, Windows named pipe, TCP address, or TLS
+address. Anything that implements the Docker Engine API uses the same path.</p>
+<p>Whichever engine Hopper is currently running is excluded, duplicate socket
+aliases are collapsed, and the selected endpoint is pinned through review and
+import so Hopper never copies an engine onto itself or changes sources midway.</p>
 <h2>How it copies</h2>
 <p><strong>Images.</strong> Into an Engine API engine, a tar streams straight from <code>/images/get</code>
 to <code>/images/load</code>. Into Apple's runtime there is no socket to load into, so the

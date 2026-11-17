@@ -1,6 +1,6 @@
 //! Discovering what a source engine holds.
 //!
-//! Docker Desktop → Hopper migration starts here: find the other engine, list
+//! Docker-compatible migration starts here: find another engine, list
 //! what it has, and hand the user a selection. The source endpoint is pinned
 //! into the plan so a daemon coming up or down between scan and run cannot
 //! silently redirect the migration somewhere else.
@@ -144,8 +144,8 @@ pub async fn scan(destination: &Endpoint, home: &str) -> MigrationScan {
         return MigrationScan {
             available: false,
             message: Some(
-                "No other Docker engine was found to migrate from. Start Docker Desktop \
-                 (or Colima, or Rancher Desktop) and scan again."
+                "No other Docker-compatible engine was found. Start Docker Desktop, \
+                 Podman, Colima, Rancher Desktop, OrbStack, or another Engine API daemon and scan again."
                     .into(),
             ),
             ..Default::default()
@@ -398,7 +398,10 @@ mod tests {
         };
         let scan = scan(&destination, "/nonexistent-hopper-home").await;
         assert!(!scan.available);
-        assert!(scan.message.unwrap().contains("No other Docker engine"));
+        assert!(scan
+            .message
+            .unwrap()
+            .contains("No other Docker-compatible engine"));
     }
 
     #[test]
