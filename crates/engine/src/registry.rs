@@ -114,7 +114,12 @@ impl Registry {
         .await;
 
         rows.into_iter()
-            .map(|(p, available, installed, status, endpoint)| {
+            .map(|(p, probed_available, installed, status, endpoint)| {
+                // Availability and health are separate probes. On Windows a
+                // busy named pipe can reject the first open and answer the
+                // immediately following health request; a connected engine is
+                // authoritative evidence that it is available.
+                let available = probed_available || status.connected;
                 let reason = (!status.connected).then_some(status.message);
                 EngineChoice {
                     id: p.id().to_string(),
